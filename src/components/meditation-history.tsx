@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { signInWithGoogle } from "@/app/actions";
 import { HistoryCalendar } from "@/components/history-calendar";
+import { useI18n } from "@/components/i18n-provider";
 import type { SessionUserSummary } from "@/lib/auth";
 import { saveMeditationSession } from "@/lib/history/client";
 import {
@@ -43,11 +44,7 @@ import {
 import { clampDurationMinutes } from "@/lib/timer/engine";
 import { MAX_DURATION_MINUTES, MIN_DURATION_MINUTES } from "@/lib/timer/types";
 
-const PERIOD_OPTIONS: ReadonlyArray<{ id: HistoryPeriod; label: string }> = [
-  { id: "7d", label: "7d" },
-  { id: "30d", label: "30d" },
-  { id: "all", label: "All" },
-] as const;
+const PERIOD_IDS: readonly HistoryPeriod[] = ["7d", "30d", "all"] as const;
 
 interface MeditationHistoryProps {
   user: SessionUserSummary | null;
@@ -59,10 +56,10 @@ interface MeditationHistoryProps {
   onSessionDeleted: (id: string) => void;
 }
 
-function formatSessionTimestamp(iso: string): string {
+function formatSessionTimestamp(iso: string, intlTag: string): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return "";
-  return new Intl.DateTimeFormat("en-US", {
+  return new Intl.DateTimeFormat(intlTag, {
     month: "short",
     day: "numeric",
     hour: "numeric",
@@ -79,6 +76,7 @@ export function MeditationHistory({
   onSessionUpdated,
   onSessionDeleted,
 }: MeditationHistoryProps) {
+  const { intlTag, m } = useI18n();
   const [period, setPeriod] = useState<HistoryPeriod>("all");
   const [selectedDateKey, setSelectedDateKey] = useState<string | null>(null);
 
@@ -152,12 +150,12 @@ export function MeditationHistory({
       if (!manualDate || manualDate === todayKey) {
         endedAt = new Date();
       } else {
-        const [y, m, d] = manualDate.split("-").map(Number);
-        endedAt = new Date(y, m - 1, d, 12, 0, 0);
+        const [y, mo, d] = manualDate.split("-").map(Number);
+        endedAt = new Date(y, mo - 1, d, 12, 0, 0);
       }
 
       if (Number.isNaN(endedAt.getTime())) {
-        setErrorMessage("Please choose a valid date.");
+        setErrorMessage(m.history.errInvalidDate);
         return;
       }
 
@@ -180,7 +178,7 @@ export function MeditationHistory({
         );
 
         if (!saved) {
-          setErrorMessage("Failed to save manual session.");
+          setErrorMessage(m.history.errSaveManual);
           return;
         }
 
@@ -188,12 +186,20 @@ export function MeditationHistory({
         setManualNote("");
         setIsLoggingManual(false);
       } catch {
-        setErrorMessage("Failed to save manual session.");
+        setErrorMessage(m.history.errSaveManual);
       } finally {
         setIsSavingManual(false);
       }
     },
-    [manualDate, manualMinutes, manualNote, onSessionSaved, userId]
+    [
+      m.history.errInvalidDate,
+      m.history.errSaveManual,
+      manualDate,
+      manualMinutes,
+      manualNote,
+      onSessionSaved,
+      userId,
+    ]
   );
 
   const handleExportCsv = useCallback(() => {
@@ -251,7 +257,7 @@ export function MeditationHistory({
         };
 
         if (!response.ok || !data.session) {
-          setErrorMessage(data.error ?? "Failed to update note.");
+          setErrorMessage(data.error ?? m.history.errUpdateNote);
           return;
         }
 
@@ -259,12 +265,12 @@ export function MeditationHistory({
         setEditingId(null);
         setNoteDraft("");
       } catch {
-        setErrorMessage("Failed to update note.");
+        setErrorMessage(m.history.errUpdateNote);
       } finally {
         setSavingId(null);
       }
     },
-    [noteDraft, onSessionUpdated, userId]
+    [m.history.errUpdateNote, noteDraft, onSessionUpdated, userId]
   );
 
   const handleDeleteSession = useCallback(
@@ -288,18 +294,18 @@ export function MeditationHistory({
 
         if (!response.ok) {
           const data = (await response.json()) as { error?: string };
-          setErrorMessage(data.error ?? "Failed to delete session.");
+          setErrorMessage(data.error ?? m.history.errDeleteSession);
           return;
         }
 
         onSessionDeleted(id);
       } catch {
-        setErrorMessage("Failed to delete session.");
+        setErrorMessage(m.history.errDeleteSession);
       } finally {
         setDeletingId(null);
       }
     },
-    [onSessionDeleted, userId]
+    [m.history.errDeleteSession, onSessionDeleted, userId]
   );
 
   if (!user) {
@@ -311,11 +317,10 @@ export function MeditationHistory({
           </div>
 
           <h2 className="mt-4 text-lg font-semibold tracking-tight text-[var(--foreground)]">
-            Meditation History
+            {m.history.signedOutTitle}
           </h2>
           <p className="mt-2 text-sm leading-relaxed text-[var(--foreground-muted)]">
-            Sign in with Google to automatically log your timer and guided
-            sessions, track your daily streak, and keep short reflections.
+            {m.history.signedOutBody}
           </p>
 
           {authConfigured ? (
@@ -327,14 +332,13 @@ export function MeditationHistory({
               >
                 <LogIn className="h-4 w-4" />
                 {isOnline
-                  ? "Continue with Google"
-                  : "Sign in available when online"}
+                  ? m.common.continueWithGoogle
+                  : m.common.signInWhenOnline}
               </button>
             </form>
           ) : (
             <p className="mt-4 rounded-xl bg-[var(--surface-muted)] px-3.5 py-2.5 text-xs text-[var(--foreground-muted)]">
-              Configure Google OAuth and Neon Postgres environment variables to
-              enable meditation history.
+              {m.history.authNotConfigured}
             </p>
           )}
         </div>
@@ -347,15 +351,16 @@ export function MeditationHistory({
       {/* Single-row Period Filter & Manual Log / Export Actions */}
       <div className="flex items-center justify-between gap-2">
         <div className="grid grid-cols-3 gap-0.5 rounded-xl bg-[var(--surface-muted)] p-0.5">
-          {PERIOD_OPTIONS.map((opt) => {
-            const isActive = period === opt.id && !selectedDateKey;
+          {PERIOD_IDS.map((periodId) => {
+            const isActive = period === periodId && !selectedDateKey;
+            const label = periodId === "all" ? m.common.all : periodId;
             return (
               <button
-                key={opt.id}
+                key={periodId}
                 type="button"
                 onClick={() => {
                   setSelectedDateKey(null);
-                  setPeriod(opt.id);
+                  setPeriod(periodId);
                 }}
                 className={`rounded-lg px-2.5 py-1 text-xs font-medium whitespace-nowrap transition-colors ${
                   isActive
@@ -363,7 +368,7 @@ export function MeditationHistory({
                     : "text-[var(--foreground-muted)] hover:text-[var(--foreground)]"
                 }`}
               >
-                {opt.label}
+                {label}
               </button>
             );
           })}
@@ -381,12 +386,12 @@ export function MeditationHistory({
             {isLoggingManual ? (
               <>
                 <X className="h-3.5 w-3.5" />
-                Cancel
+                {m.common.cancel}
               </>
             ) : (
               <>
                 <Plus className="h-3.5 w-3.5" />
-                Log
+                {m.history.log}
               </>
             )}
           </button>
@@ -398,7 +403,7 @@ export function MeditationHistory({
                 setIsLoggingManual(false);
                 setShowExportMenu((prev) => !prev);
               }}
-              aria-label="Export history"
+              aria-label={m.history.exportAria}
               className="flex h-8 w-8 items-center justify-center rounded-full border border-black/6 bg-[var(--surface)] text-[var(--foreground-muted)] transition-colors hover:text-[var(--foreground)] dark:border-white/10"
             >
               <Download className="h-3.5 w-3.5" />
@@ -411,8 +416,7 @@ export function MeditationHistory({
       {showExportMenu && (
         <div className="flex items-center justify-between gap-2 rounded-2xl border border-black/6 bg-[var(--surface)] px-3.5 py-2.5 text-xs dark:border-white/10">
           <span className="font-medium text-[var(--foreground-muted)]">
-            Export {displayedSessions.length}{" "}
-            {displayedSessions.length === 1 ? "session" : "sessions"}
+            {m.history.exportCount(displayedSessions.length)}
           </span>
           <div className="flex items-center gap-1.5">
             <button
@@ -440,12 +444,12 @@ export function MeditationHistory({
           className="flex flex-col gap-3 rounded-2xl border border-black/6 bg-[var(--surface)] p-4 shadow-xs dark:border-white/10"
         >
           <p className="text-xs font-semibold text-[var(--foreground)]">
-            Log offline or manual practice
+            {m.history.manualTitle}
           </p>
 
           <div className="grid grid-cols-2 gap-2.5">
             <label className="flex flex-col gap-1 text-[11px] font-medium text-[var(--foreground-muted)]">
-              Date
+              {m.history.date}
               <input
                 type="date"
                 required
@@ -457,7 +461,7 @@ export function MeditationHistory({
             </label>
 
             <label className="flex flex-col gap-1 text-[11px] font-medium text-[var(--foreground-muted)]">
-              Minutes
+              {m.history.minutes}
               <input
                 type="number"
                 required
@@ -473,7 +477,7 @@ export function MeditationHistory({
           <textarea
             rows={2}
             maxLength={500}
-            placeholder="Optional reflection note..."
+            placeholder={m.timer.optionalNotePlaceholder}
             value={manualNote}
             onChange={(event) => setManualNote(event.target.value)}
             className="w-full resize-none rounded-xl border border-black/10 bg-[var(--background)] px-3 py-2 text-xs text-[var(--foreground)] outline-none placeholder:text-[var(--foreground-muted)]/70 focus:border-[var(--accent)] dark:border-white/12"
@@ -489,7 +493,7 @@ export function MeditationHistory({
             ) : (
               <Check className="h-3.5 w-3.5" />
             )}
-            Save Session
+            {m.history.saveSession}
           </button>
         </form>
       )}
@@ -499,7 +503,7 @@ export function MeditationHistory({
         <div className="rounded-2xl border border-black/6 bg-[var(--surface)] px-3 py-3 text-center shadow-xs dark:border-white/10">
           <div className="flex items-center justify-center gap-1 text-[11px] font-medium text-[var(--foreground-muted)]">
             <Clock className="h-3 w-3 text-[var(--accent)]" />
-            <span>Total</span>
+            <span>{m.history.total}</span>
           </div>
           <p className="mt-1 text-base font-semibold tracking-tight text-[var(--foreground)] tabular-nums">
             {formatTotalTime(periodStats.totalSeconds)}
@@ -509,17 +513,19 @@ export function MeditationHistory({
         <div className="rounded-2xl border border-black/6 bg-[var(--surface)] px-3 py-3 text-center shadow-xs dark:border-white/10">
           <div className="flex items-center justify-center gap-1 text-[11px] font-medium text-[var(--foreground-muted)]">
             <Flame className="h-3 w-3 text-[var(--warm-amber)]" />
-            <span>Streak</span>
+            <span>{m.history.streak}</span>
           </div>
           <p className="mt-1 text-base font-semibold tracking-tight text-[var(--foreground)] tabular-nums">
             {allTimeStats.currentStreakDays}{" "}
             <span className="text-xs font-medium text-[var(--foreground-muted)]">
-              {allTimeStats.currentStreakDays === 1 ? "day" : "days"}
+              {allTimeStats.currentStreakDays === 1
+                ? m.history.day
+                : m.history.days}
             </span>
           </p>
           {allTimeStats.longestStreakDays > 0 && (
             <p className="mt-0.5 text-[10px] text-[var(--foreground-muted)] tabular-nums">
-              Best {allTimeStats.longestStreakDays}d
+              {m.history.bestStreak(allTimeStats.longestStreakDays)}
             </p>
           )}
         </div>
@@ -527,7 +533,7 @@ export function MeditationHistory({
         <div className="rounded-2xl border border-black/6 bg-[var(--surface)] px-3 py-3 text-center shadow-xs dark:border-white/10">
           <div className="flex items-center justify-center gap-1 text-[11px] font-medium text-[var(--foreground-muted)]">
             <CalendarDays className="h-3 w-3 text-[var(--accent)]" />
-            <span>Sessions</span>
+            <span>{m.history.sessions}</span>
           </div>
           <p className="mt-1 text-base font-semibold tracking-tight text-[var(--foreground)] tabular-nums">
             {periodStats.totalSessions}
@@ -554,13 +560,13 @@ export function MeditationHistory({
           <Clock className="h-7 w-7 text-[var(--foreground-muted)]" />
           <p className="mt-3 text-sm font-medium text-[var(--foreground)]">
             {sessions.length === 0
-              ? "No sessions recorded yet"
-              : "No sessions in this range"}
+              ? m.history.noSessionsTitle
+              : m.history.noRangeTitle}
           </p>
           <p className="mt-1 max-w-xs text-xs text-[var(--foreground-muted)]">
             {sessions.length === 0
-              ? "Complete a Timer or Guided meditation, or tap Log to record offline practice."
-              : "Switch the period filter above or select another day on the calendar."}
+              ? m.history.noSessionsBody
+              : m.history.noRangeBody}
           </p>
         </div>
       ) : (
@@ -573,8 +579,8 @@ export function MeditationHistory({
             const canMutate = isOnline || isPending;
             const title =
               session.mode === "TRACK"
-                ? (session.trackTitle ?? "Guided Meditation")
-                : "Silent Timer";
+                ? (session.trackTitle ?? m.history.guidedFallback)
+                : m.history.silentTimer;
 
             return (
               <li
@@ -600,16 +606,18 @@ export function MeditationHistory({
                           {formatSessionDuration(session.actualDurationSec)}
                         </span>
                         <span>·</span>
-                        <span>{formatSessionTimestamp(session.endedAt)}</span>
+                        <span>
+                          {formatSessionTimestamp(session.endedAt, intlTag)}
+                        </span>
                         {!session.completed && (
                           <span className="rounded-md bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-[var(--warm-amber)]">
-                            Partial
+                            {m.history.partial}
                           </span>
                         )}
                         {isPending && (
                           <span className="inline-flex items-center gap-1 rounded-md bg-[var(--surface-muted)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--foreground-muted)]">
                             <CloudOff className="h-2.5 w-2.5" />
-                            Pending sync
+                            {m.history.pendingSync}
                           </span>
                         )}
                       </div>
@@ -623,13 +631,11 @@ export function MeditationHistory({
                         isEditing ? cancelEditing() : startEditingNote(session)
                       }
                       disabled={!canMutate}
-                      title={
-                        canMutate
-                          ? undefined
-                          : "Reconnect to edit synced sessions"
-                      }
+                      title={canMutate ? undefined : m.history.reconnectToEdit}
                       aria-label={
-                        session.note ? "Edit session note" : "Add session note"
+                        session.note
+                          ? m.history.editNoteAria
+                          : m.history.addNoteAria
                       }
                       className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--foreground-muted)] transition-colors hover:bg-[var(--surface-muted)] hover:text-[var(--foreground)] disabled:opacity-35"
                     >
@@ -645,11 +651,9 @@ export function MeditationHistory({
                       onClick={() => void handleDeleteSession(session.id)}
                       disabled={deletingId === session.id || !canMutate}
                       title={
-                        canMutate
-                          ? undefined
-                          : "Reconnect to delete synced sessions"
+                        canMutate ? undefined : m.history.reconnectToDelete
                       }
-                      aria-label="Delete session"
+                      aria-label={m.history.deleteSessionAria}
                       className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--foreground-muted)] transition-colors hover:bg-red-500/10 hover:text-red-600 disabled:opacity-35 dark:hover:text-red-400"
                     >
                       {deletingId === session.id ? (
@@ -674,7 +678,7 @@ export function MeditationHistory({
                     <textarea
                       rows={2}
                       maxLength={500}
-                      placeholder="Add a short reflection..."
+                      placeholder={m.history.reflectionPlaceholder}
                       value={noteDraft}
                       onChange={(event) => setNoteDraft(event.target.value)}
                       className="w-full resize-none rounded-xl border border-black/10 bg-[var(--background)] px-3 py-2 text-xs text-[var(--foreground)] outline-none placeholder:text-[var(--foreground-muted)]/70 focus:border-[var(--accent)] dark:border-white/12"
@@ -685,7 +689,7 @@ export function MeditationHistory({
                         onClick={cancelEditing}
                         className="rounded-lg px-2.5 py-1 text-xs font-medium text-[var(--foreground-muted)] hover:text-[var(--foreground)]"
                       >
-                        Cancel
+                        {m.common.cancel}
                       </button>
                       <button
                         type="button"
@@ -698,7 +702,7 @@ export function MeditationHistory({
                         ) : (
                           <Check className="h-3 w-3" />
                         )}
-                        Save
+                        {m.common.save}
                       </button>
                     </div>
                   </div>

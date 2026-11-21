@@ -19,12 +19,9 @@ import {
   RotateCcw,
 } from "lucide-react";
 import { BodhiLogo } from "@/components/bodhi-logo";
+import { useI18n } from "@/components/i18n-provider";
 import { MeditationAudioEngine } from "@/lib/audio/engine";
-import {
-  DEFAULT_END_BELL_ID,
-  getBellSoundOption,
-  type BellSoundId,
-} from "@/lib/audio/sounds";
+import { DEFAULT_END_BELL_ID, type BellSoundId } from "@/lib/audio/sounds";
 import {
   saveMeditationSession,
   updateMeditationSessionNote,
@@ -39,10 +36,7 @@ import {
   getTimerPreferencesSnapshot,
   subscribeTimerPreferences,
 } from "@/lib/timer/preferences";
-import {
-  TRACK_PROVIDER_LABELS,
-  buildSoundCloudEmbedUrl,
-} from "@/lib/tracks/providers";
+import { buildSoundCloudEmbedUrl } from "@/lib/tracks/providers";
 import type { FavoriteTrackItem } from "@/lib/tracks/types";
 import { useWakeLock } from "@/lib/wake-lock";
 
@@ -184,6 +178,7 @@ export function GuidedSessionPlayer({
   onSessionSaved,
   onSessionUpdated,
 }: GuidedSessionPlayerProps) {
+  const { m } = useI18n();
   const timerPrefs = useSyncExternalStore(
     subscribeTimerPreferences,
     getTimerPreferencesSnapshot,
@@ -193,12 +188,14 @@ export function GuidedSessionPlayer({
   // Sync the closing bell sound with the user's configured Timer end bell
   const closingBellSoundId: BellSoundId =
     timerPrefs.endBell === "none" ? DEFAULT_END_BELL_ID : timerPrefs.endBell;
-  const closingBellMeta = getBellSoundOption(closingBellSoundId);
+  const closingBellName = m.sounds.bells[closingBellSoundId];
 
   const [playbackState, setPlaybackState] = useState<PlaybackState>(
     track.provider === "DIRECT_AUDIO" ? "ready" : "loading"
   );
-  const [playerError, setPlayerError] = useState<string | null>(null);
+  const [playerErrorKey, setPlayerErrorKey] = useState<
+    "youtube" | "soundcloud" | "direct_audio" | null
+  >(null);
   const [isDimmed, setIsDimmed] = useState<boolean>(false);
 
   // History logging state
@@ -447,9 +444,7 @@ export function GuidedSessionPlayer({
       })
       .catch(() => {
         if (!cancelled) {
-          setPlayerError(
-            "Unable to load the YouTube player. Check your connection or open the track directly."
-          );
+          setPlayerErrorKey("youtube");
         }
       });
 
@@ -513,9 +508,7 @@ export function GuidedSessionPlayer({
       })
       .catch(() => {
         if (!cancelled) {
-          setPlayerError(
-            "Unable to load the SoundCloud player. Check your connection or open the track directly."
-          );
+          setPlayerErrorKey("soundcloud");
         }
       });
 
@@ -645,14 +638,23 @@ export function GuidedSessionPlayer({
 
   const statusLabel =
     playbackState === "playing"
-      ? "Listening"
+      ? m.guided.player.listening
       : playbackState === "paused"
-        ? "Paused"
+        ? m.guided.player.paused
         : playbackState === "completed"
-          ? "Completed"
+          ? m.guided.player.completed
           : playbackState === "loading"
-            ? "Loading player..."
-            : "Ready";
+            ? m.guided.player.loading
+            : m.guided.player.ready;
+
+  const playerError =
+    playerErrorKey === "youtube"
+      ? m.guided.player.ytLoadError
+      : playerErrorKey === "soundcloud"
+        ? m.guided.player.scLoadError
+        : playerErrorKey === "direct_audio"
+          ? m.guided.player.directAudioError
+          : null;
 
   return (
     <div className="flex flex-1 flex-col justify-between gap-5 py-2">
@@ -664,7 +666,7 @@ export function GuidedSessionPlayer({
           className="inline-flex items-center gap-1.5 rounded-full border border-black/8 bg-[var(--surface)] px-3 py-1.5 text-xs font-medium text-[var(--foreground-muted)] transition-colors hover:text-[var(--foreground)] dark:border-white/10"
         >
           <ArrowLeft className="h-3.5 w-3.5" />
-          Favorites
+          {m.guided.player.favorites}
         </button>
 
         <div className="flex items-center gap-2">
@@ -687,7 +689,7 @@ export function GuidedSessionPlayer({
           </div>
           <div>
             <h2 className="text-2xl font-semibold tracking-tight text-[var(--foreground)]">
-              Session Complete
+              {m.guided.player.sessionComplete}
             </h2>
             <p className="mt-1.5 max-w-xs text-sm text-[var(--foreground-muted)]">
               {track.title}
@@ -698,7 +700,7 @@ export function GuidedSessionPlayer({
             {savedSessionId && (
               <p className="mt-1.5 inline-flex items-center gap-1 rounded-full bg-[var(--accent-soft)] px-2.5 py-0.5 text-[11px] font-medium text-[var(--accent)]">
                 <Check className="h-3 w-3" />
-                Saved to history
+                {m.guided.player.savedToHistory}
               </p>
             )}
           </div>
@@ -708,7 +710,7 @@ export function GuidedSessionPlayer({
               <textarea
                 rows={2}
                 maxLength={500}
-                placeholder="Add an optional reflection note..."
+                placeholder={m.timer.addReflectionPlaceholder}
                 value={noteInput}
                 onChange={(event) => {
                   setNoteInput(event.target.value);
@@ -718,7 +720,7 @@ export function GuidedSessionPlayer({
               />
               <div className="mt-2 flex items-center justify-between">
                 <span className="text-[11px] text-[var(--foreground-muted)]">
-                  {noteSaved ? "Note saved" : "Optional note"}
+                  {noteSaved ? m.timer.noteSaved : m.timer.optionalNote}
                 </span>
                 <button
                   type="button"
@@ -731,7 +733,7 @@ export function GuidedSessionPlayer({
                   ) : (
                     <Check className="h-3 w-3" />
                   )}
-                  Save note
+                  {m.timer.saveNote}
                 </button>
               </div>
             </div>
@@ -743,7 +745,7 @@ export function GuidedSessionPlayer({
               onClick={onExit}
               className="flex h-12 items-center justify-center gap-2 rounded-2xl border border-black/8 bg-[var(--surface)] text-sm font-medium text-[var(--foreground)] transition-colors hover:bg-[var(--surface-muted)] dark:border-white/10"
             >
-              Back to list
+              {m.guided.player.backToList}
             </button>
             <button
               type="button"
@@ -751,7 +753,7 @@ export function GuidedSessionPlayer({
               className="flex h-12 items-center justify-center gap-2 rounded-2xl bg-[var(--accent)] text-sm font-semibold text-[#fcfaf6] transition-colors hover:bg-[var(--accent-strong)] dark:text-[#151917]"
             >
               <RotateCcw className="h-4 w-4" />
-              Replay
+              {m.guided.player.replay}
             </button>
           </div>
         </div>
@@ -760,7 +762,7 @@ export function GuidedSessionPlayer({
           {/* Track Heading */}
           <div className="text-center">
             <span className="inline-block rounded-full bg-[var(--surface-muted)] px-2.5 py-0.5 text-[11px] font-medium text-[var(--foreground-muted)]">
-              {TRACK_PROVIDER_LABELS[track.provider]}
+              {m.guided.providers[track.provider]}
             </span>
             <h2 className="mt-2 line-clamp-2 text-lg font-semibold tracking-tight text-[var(--foreground)]">
               {track.title}
@@ -785,7 +787,7 @@ export function GuidedSessionPlayer({
                   rel="noopener noreferrer"
                   className="inline-flex items-center gap-1.5 rounded-xl bg-[var(--accent)] px-4 py-2 text-xs font-semibold text-[#fcfaf6] dark:text-[#151917]"
                 >
-                  Open original track
+                  {m.guided.player.openOriginal}
                   <ExternalLink className="h-3.5 w-3.5" />
                 </a>
               </div>
@@ -824,11 +826,7 @@ export function GuidedSessionPlayer({
                     );
                   }}
                   onEnded={() => handleTrackCompleted()}
-                  onError={() =>
-                    setPlayerError(
-                      "Unable to stream this audio file. Verify the direct link is publicly accessible."
-                    )
-                  }
+                  onError={() => setPlayerErrorKey("direct_audio")}
                   className="w-full"
                 />
               </div>
@@ -839,15 +837,17 @@ export function GuidedSessionPlayer({
           {earlyStopElapsedSec !== null ? (
             <div className="w-full rounded-2xl border border-black/8 bg-[var(--surface)] p-4 text-left shadow-xs dark:border-white/10">
               <p className="text-sm font-semibold text-[var(--foreground)]">
-                Save partial session?
+                {m.timer.savePartialTitle}
               </p>
               <p className="mt-0.5 text-xs text-[var(--foreground-muted)]">
-                You listened for {formatSessionDuration(earlyStopElapsedSec)}.
+                {m.guided.player.listenedFor(
+                  formatSessionDuration(earlyStopElapsedSec)
+                )}
               </p>
               <textarea
                 rows={2}
                 maxLength={500}
-                placeholder="Optional reflection note..."
+                placeholder={m.timer.optionalNotePlaceholder}
                 value={noteInput}
                 onChange={(event) => setNoteInput(event.target.value)}
                 className="mt-2.5 w-full resize-none rounded-xl border border-black/10 bg-[var(--background)] px-3 py-2 text-xs text-[var(--foreground)] outline-none placeholder:text-[var(--foreground-muted)]/70 focus:border-[var(--accent)] dark:border-white/12"
@@ -859,7 +859,7 @@ export function GuidedSessionPlayer({
                   disabled={isSavingEarlyStop}
                   className="flex h-10 items-center justify-center rounded-xl border border-black/8 bg-[var(--background)] text-xs font-medium text-[var(--foreground)] transition-colors hover:bg-[var(--surface-muted)] dark:border-white/10"
                 >
-                  Discard
+                  {m.timer.discard}
                 </button>
                 <button
                   type="button"
@@ -872,17 +872,17 @@ export function GuidedSessionPlayer({
                   ) : (
                     <Check className="h-3.5 w-3.5" />
                   )}
-                  Save Session
+                  {m.timer.saveSession}
                 </button>
               </div>
             </div>
           ) : (
             <p className="text-center text-xs text-[var(--foreground-muted)]">
               {track.provider === "DIRECT_AUDIO"
-                ? "Supports lock-screen playback and media controls."
+                ? m.guided.player.lockScreenHint
                 : isWakeLockActive
-                  ? "Screen awake — plays full track from start to finish."
-                  : "Press play in the player above to begin your full-track session."}
+                  ? m.guided.player.wakeLockHint
+                  : m.guided.player.pressPlayHint}
             </p>
           )}
         </div>
@@ -893,14 +893,14 @@ export function GuidedSessionPlayer({
         <button
           type="button"
           onClick={() => setIsDimmed(false)}
-          aria-label="Wake dimmed screen"
+          aria-label={m.timer.wakeDimmedAria}
           className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-3 bg-[#050605] px-8 text-center focus:outline-none"
         >
           <span className="line-clamp-2 max-w-xs text-sm font-medium text-white/25">
             {track.title}
           </span>
           <span className="text-[11px] tracking-wide text-white/15">
-            Tap anywhere to wake
+            {m.timer.tapToWake}
           </span>
         </button>
       )}
@@ -922,7 +922,8 @@ export function GuidedSessionPlayer({
               <BellOff className="h-4 w-4 shrink-0 text-[var(--foreground-muted)]" />
             )}
             <span className="truncate">
-              Bell: {closingBellEnabled ? closingBellMeta.name : "Off"}
+              {m.guided.player.bellLabel}:{" "}
+              {closingBellEnabled ? closingBellName : m.common.off}
             </span>
           </button>
 
@@ -933,7 +934,7 @@ export function GuidedSessionPlayer({
               className="inline-flex items-center gap-1 text-xs font-medium text-[var(--foreground-muted)] transition-colors hover:text-[var(--foreground)]"
             >
               <EyeOff className="h-3.5 w-3.5" />
-              Dim
+              {m.guided.player.dim}
             </button>
 
             <a
@@ -942,7 +943,7 @@ export function GuidedSessionPlayer({
               rel="noopener noreferrer"
               className="inline-flex items-center gap-1 text-xs font-medium text-[var(--foreground-muted)] transition-colors hover:text-[var(--foreground)]"
             >
-              Source
+              {m.guided.player.source}
               <ExternalLink className="h-3 w-3" />
             </a>
           </div>

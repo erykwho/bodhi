@@ -2,14 +2,13 @@
 
 import { useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, X } from "lucide-react";
+import { useI18n } from "@/components/i18n-provider";
 import {
   buildMonthlyCalendar,
   formatTotalTime,
   type CalendarDayCell,
 } from "@/lib/history/stats";
 import type { MeditationSessionItem } from "@/lib/history/types";
-
-const WEEKDAY_LABELS = ["S", "M", "T", "W", "T", "F", "S"] as const;
 
 interface HistoryCalendarProps {
   sessions: ReadonlyArray<MeditationSessionItem>;
@@ -51,6 +50,7 @@ export function HistoryCalendar({
   selectedDateKey,
   onSelectDateKey,
 }: HistoryCalendarProps) {
+  const { intlTag, m } = useI18n();
   const now = new Date();
   const currentYear = now.getFullYear();
   const currentMonth = now.getMonth();
@@ -66,14 +66,13 @@ export function HistoryCalendar({
   const isCurrentMonth =
     viewYear === currentYear && viewMonth === currentMonth;
 
-  const monthLabel = useMemo(
-    () =>
-      new Intl.DateTimeFormat("en-US", {
-        month: "long",
-        year: "numeric",
-      }).format(new Date(viewYear, viewMonth, 1)),
-    [viewMonth, viewYear]
-  );
+  const monthLabel = useMemo(() => {
+    const raw = new Intl.DateTimeFormat(intlTag, {
+      month: "long",
+      year: "numeric",
+    }).format(new Date(viewYear, viewMonth, 1));
+    return raw.charAt(0).toUpperCase() + raw.slice(1);
+  }, [intlTag, viewMonth, viewYear]);
 
   const handlePrevMonth = () => {
     if (viewMonth === 0) {
@@ -106,7 +105,7 @@ export function HistoryCalendar({
           <button
             type="button"
             onClick={handlePrevMonth}
-            aria-label="Previous month"
+            aria-label={m.history.calendar.prevMonthAria}
             className="flex h-7 w-7 items-center justify-center rounded-lg text-[var(--foreground-muted)] transition-colors hover:bg-[var(--surface-muted)] hover:text-[var(--foreground)]"
           >
             <ChevronLeft className="h-4 w-4" />
@@ -118,7 +117,7 @@ export function HistoryCalendar({
             type="button"
             onClick={handleNextMonth}
             disabled={isCurrentMonth}
-            aria-label="Next month"
+            aria-label={m.history.calendar.nextMonthAria}
             className="flex h-7 w-7 items-center justify-center rounded-lg text-[var(--foreground-muted)] transition-colors hover:bg-[var(--surface-muted)] hover:text-[var(--foreground)] disabled:opacity-30"
           >
             <ChevronRight className="h-4 w-4" />
@@ -127,7 +126,7 @@ export function HistoryCalendar({
 
         <span className="text-[11px] font-medium text-[var(--foreground-muted)] tabular-nums">
           {calendar.activeDaysCount}{" "}
-          {calendar.activeDaysCount === 1 ? "day" : "days"}
+          {calendar.activeDaysCount === 1 ? m.history.day : m.history.days}
           {calendar.totalSecondsInMonth > 0
             ? ` · ${formatTotalTime(calendar.totalSecondsInMonth)}`
             : ""}
@@ -136,7 +135,7 @@ export function HistoryCalendar({
 
       {/* Weekday Labels */}
       <div className="mt-2.5 grid grid-cols-7 gap-1 text-center">
-        {WEEKDAY_LABELS.map((label, idx) => (
+        {m.history.calendar.weekdays.map((label, idx) => (
           <span
             key={`${label}-${idx}`}
             className="text-[10px] font-medium text-[var(--foreground-muted)]/75"
@@ -184,8 +183,7 @@ export function HistoryCalendar({
               {selectedCell.dateKey}
             </strong>{" "}
             · {formatTotalTime(selectedCell.totalSeconds)} (
-            {selectedCell.sessionCount}{" "}
-            {selectedCell.sessionCount === 1 ? "session" : "sessions"})
+            {m.history.calendar.sessionCount(selectedCell.sessionCount)})
           </span>
           <button
             type="button"
@@ -193,7 +191,7 @@ export function HistoryCalendar({
             className="inline-flex items-center gap-0.5 font-medium text-[var(--accent)] hover:underline"
           >
             <X className="h-3 w-3" />
-            Clear
+            {m.common.clear}
           </button>
         </div>
       )}

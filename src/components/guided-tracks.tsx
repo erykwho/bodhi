@@ -21,11 +21,11 @@ import {
 } from "lucide-react";
 import { signInWithGoogle } from "@/app/actions";
 import { GuidedSessionPlayer } from "@/components/guided-session-player";
+import { useI18n } from "@/components/i18n-provider";
 import type { SessionUserSummary } from "@/lib/auth";
 import type { MeditationSessionItem } from "@/lib/history/types";
 import {
   SUGGESTED_TRACK_TAGS,
-  TRACK_PROVIDER_LABELS,
   normalizeTrackTags,
   parseTrackUrl,
 } from "@/lib/tracks/providers";
@@ -80,6 +80,7 @@ export function GuidedTracks({
   onSessionUpdated,
   onReorderingChange,
 }: GuidedTracksProps) {
+  const { m } = useI18n();
   const [tracks, setTracks] = useState<FavoriteTrackItem[]>(initialTracks);
   const [activeTrack, setActiveTrack] = useState<FavoriteTrackItem | null>(
     null
@@ -186,18 +187,18 @@ export function GuidedTracks({
       };
 
       if (!response.ok || !data.metadata) {
-        setErrorMessage(data.error ?? "Could not fetch track details.");
+        setErrorMessage(data.error ?? m.guided.errFetchMetadata);
         return;
       }
 
       setResolvedMeta(data.metadata);
       setTitleInput((prev) => (prev.trim() ? prev : data.metadata!.title));
     } catch {
-      setErrorMessage("Could not fetch track details right now.");
+      setErrorMessage(m.guided.errFetchMetadata);
     } finally {
       setIsResolving(false);
     }
-  }, []);
+  }, [m.guided.errFetchMetadata]);
 
   const handleUrlChange = useCallback(
     (nextValue: string) => {
@@ -224,9 +225,7 @@ export function GuidedTracks({
       setErrorMessage(null);
 
       if (!parseTrackUrl(urlInput)) {
-        setErrorMessage(
-          "Paste a valid YouTube, SoundCloud, or direct audio (.mp3/.m4a) URL."
-        );
+        setErrorMessage(m.guided.errInvalidUrl);
         return;
       }
 
@@ -254,7 +253,7 @@ export function GuidedTracks({
         };
 
         if (!response.ok || !data.track) {
-          setErrorMessage(data.error ?? "Failed to save favorite track.");
+          setErrorMessage(data.error ?? m.guided.errSaveTrack);
           return;
         }
 
@@ -270,12 +269,21 @@ export function GuidedTracks({
         });
         resetForm();
       } catch {
-        setErrorMessage("Failed to save favorite track.");
+        setErrorMessage(m.guided.errSaveTrack);
       } finally {
         setIsSaving(false);
       }
     },
-    [customTagInput, resetForm, resolvedMeta, tagsInput, titleInput, urlInput]
+    [
+      customTagInput,
+      m.guided.errInvalidUrl,
+      m.guided.errSaveTrack,
+      resetForm,
+      resolvedMeta,
+      tagsInput,
+      titleInput,
+      urlInput,
+    ]
   );
 
   const startEditingTrack = useCallback((track: FavoriteTrackItem) => {
@@ -297,7 +305,7 @@ export function GuidedTracks({
     async (id: string) => {
       const trimmedTitle = editTitleDraft.trim();
       if (!trimmedTitle) {
-        setErrorMessage("Track title cannot be empty.");
+        setErrorMessage(m.guided.errEmptyTitle);
         return;
       }
 
@@ -325,7 +333,7 @@ export function GuidedTracks({
         };
 
         if (!response.ok || !data.track) {
-          setErrorMessage(data.error ?? "Failed to update track.");
+          setErrorMessage(data.error ?? m.guided.errUpdateTrack);
           return;
         }
 
@@ -335,35 +343,45 @@ export function GuidedTracks({
         );
         cancelEditingTrack();
       } catch {
-        setErrorMessage("Failed to update track.");
+        setErrorMessage(m.guided.errUpdateTrack);
       } finally {
         setIsSavingEdit(false);
       }
     },
-    [cancelEditingTrack, editCustomTagDraft, editTagsDraft, editTitleDraft]
+    [
+      cancelEditingTrack,
+      editCustomTagDraft,
+      editTagsDraft,
+      editTitleDraft,
+      m.guided.errEmptyTitle,
+      m.guided.errUpdateTrack,
+    ]
   );
 
-  const handleDeleteTrack = useCallback(async (id: string) => {
-    setDeletingId(id);
-    setErrorMessage(null);
-    try {
-      const response = await fetch(`/api/tracks/${id}`, {
-        method: "DELETE",
-      });
+  const handleDeleteTrack = useCallback(
+    async (id: string) => {
+      setDeletingId(id);
+      setErrorMessage(null);
+      try {
+        const response = await fetch(`/api/tracks/${id}`, {
+          method: "DELETE",
+        });
 
-      if (!response.ok) {
-        const data = (await response.json()) as { error?: string };
-        setErrorMessage(data.error ?? "Failed to delete track.");
-        return;
+        if (!response.ok) {
+          const data = (await response.json()) as { error?: string };
+          setErrorMessage(data.error ?? m.guided.errDeleteTrack);
+          return;
+        }
+
+        setTracks((prev) => prev.filter((item) => item.id !== id));
+      } catch {
+        setErrorMessage(m.guided.errDeleteTrack);
+      } finally {
+        setDeletingId(null);
       }
-
-      setTracks((prev) => prev.filter((item) => item.id !== id));
-    } catch {
-      setErrorMessage("Failed to delete track.");
-    } finally {
-      setDeletingId(null);
-    }
-  }, []);
+    },
+    [m.guided.errDeleteTrack]
+  );
 
   const persistTrackOrder = useCallback(
     async (
@@ -382,14 +400,14 @@ export function GuidedTracks({
         if (!response.ok) {
           const data = (await response.json()) as { error?: string };
           setTracks(previousTracks);
-          setErrorMessage(data.error ?? "Failed to save track order.");
+          setErrorMessage(data.error ?? m.guided.errReorderTracks);
         }
       } catch {
         setTracks(previousTracks);
-        setErrorMessage("Failed to save track order.");
+        setErrorMessage(m.guided.errReorderTracks);
       }
     },
-    []
+    [m.guided.errReorderTracks]
   );
 
   const activateDrag = useCallback((session: DragSession) => {
@@ -667,11 +685,10 @@ export function GuidedTracks({
           </div>
 
           <h2 className="mt-4 text-lg font-semibold tracking-tight text-[var(--foreground)]">
-            You&apos;re Offline
+            {m.guided.offlineTitle}
           </h2>
           <p className="mt-2 text-sm leading-relaxed text-[var(--foreground-muted)]">
-            Guided tracks from YouTube and SoundCloud require an internet
-            connection. Your Meditation Timer works completely offline.
+            {m.guided.offlineBody}
           </p>
 
           {onSwitchToTimer && (
@@ -681,7 +698,7 @@ export function GuidedTracks({
               className="mt-5 flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-[var(--accent)] text-sm font-semibold text-[#fcfaf6] transition-colors hover:bg-[var(--accent-strong)] dark:text-[#151917]"
             >
               <Timer className="h-4 w-4" />
-              Open Meditation Timer
+              {m.guided.openTimer}
             </button>
           )}
         </div>
@@ -699,12 +716,10 @@ export function GuidedTracks({
           </div>
 
           <h2 className="mt-4 text-lg font-semibold tracking-tight text-[var(--foreground)]">
-            Favorite Guided Tracks
+            {m.guided.signedOutTitle}
           </h2>
           <p className="mt-2 text-sm leading-relaxed text-[var(--foreground-muted)]">
-            Save your favorite YouTube and SoundCloud meditations and listen to
-            the full track in a calm, distraction-free session synced across
-            devices.
+            {m.guided.signedOutBody}
           </p>
 
           {authConfigured ? (
@@ -714,13 +729,12 @@ export function GuidedTracks({
                 className="flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-[var(--accent)] text-sm font-semibold text-[#fcfaf6] transition-colors hover:bg-[var(--accent-strong)] dark:text-[#151917]"
               >
                 <LogIn className="h-4 w-4" />
-                Continue with Google
+                {m.common.continueWithGoogle}
               </button>
             </form>
           ) : (
             <p className="mt-4 rounded-xl bg-[var(--surface-muted)] px-3.5 py-2.5 text-xs text-[var(--foreground-muted)]">
-              Configure Google OAuth and Neon Postgres environment variables to
-              enable cloud-synced favorite tracks.
+              {m.guided.authNotConfigured}
             </p>
           )}
         </div>
@@ -742,7 +756,7 @@ export function GuidedTracks({
           ) : (
             <BellOff className="h-3.5 w-3.5" />
           )}
-          Closing bell: {closingBellEnabled ? "On" : "Off"}
+          {m.guided.closingBell}: {closingBellEnabled ? m.common.on : m.common.off}
         </button>
 
         <button
@@ -753,12 +767,12 @@ export function GuidedTracks({
           {isAdding ? (
             <>
               <X className="h-3.5 w-3.5" />
-              Cancel
+              {m.common.cancel}
             </>
           ) : (
             <>
               <Plus className="h-3.5 w-3.5" />
-              Add Track
+              {m.guided.addTrack}
             </>
           )}
         </button>
@@ -775,11 +789,11 @@ export function GuidedTracks({
               htmlFor="track-url-input"
               className="text-xs font-medium text-[var(--foreground)]"
             >
-              YouTube, SoundCloud, or Audio URL
+              {m.guided.urlLabel}
             </label>
             {detectedProvider && (
               <span className="rounded-full bg-[var(--accent-soft)] px-2 py-0.5 text-[11px] font-medium text-[var(--accent)]">
-                {TRACK_PROVIDER_LABELS[detectedProvider]}
+                {m.guided.providers[detectedProvider]}
               </span>
             )}
           </div>
@@ -790,7 +804,7 @@ export function GuidedTracks({
               id="track-url-input"
               type="url"
               required
-              placeholder="YouTube, SoundCloud, or direct .mp3 / .m4a link"
+              placeholder={m.guided.urlPlaceholder}
               value={urlInput}
               onChange={(event) => handleUrlChange(event.target.value)}
               className="h-11 w-full rounded-xl border border-black/10 bg-[var(--background)] pr-9 pl-9 text-sm text-[var(--foreground)] outline-none placeholder:text-[var(--foreground-muted)]/70 focus:border-[var(--accent)] dark:border-white/12"
@@ -805,12 +819,12 @@ export function GuidedTracks({
               htmlFor="track-title-input"
               className="text-xs font-medium text-[var(--foreground)]"
             >
-              Title
+              {m.guided.titleLabel}
             </label>
             <input
               id="track-title-input"
               type="text"
-              placeholder="Auto-filled from track link (editable)"
+              placeholder={m.guided.titlePlaceholder}
               value={titleInput}
               onChange={(event) => setTitleInput(event.target.value)}
               className="h-10 w-full rounded-xl border border-black/10 bg-[var(--background)] px-3 text-sm text-[var(--foreground)] outline-none placeholder:text-[var(--foreground-muted)]/70 focus:border-[var(--accent)] dark:border-white/12"
@@ -820,7 +834,7 @@ export function GuidedTracks({
           {/* Optional Tags Picker */}
           <div className="flex flex-col gap-1.5">
             <span className="text-xs font-medium text-[var(--foreground)]">
-              Tags (optional)
+              {m.guided.tagsLabel}
             </span>
             <div className="flex flex-wrap gap-1.5">
               {SUGGESTED_TRACK_TAGS.map((tag) => {
@@ -854,7 +868,7 @@ export function GuidedTracks({
             <input
               type="text"
               maxLength={24}
-              placeholder="Add custom tag..."
+              placeholder={m.guided.customTagPlaceholder}
               value={customTagInput}
               onChange={(event) => setCustomTagInput(event.target.value)}
               className="h-9 w-full rounded-xl border border-black/10 bg-[var(--background)] px-3 text-xs text-[var(--foreground)] outline-none placeholder:text-[var(--foreground-muted)]/70 focus:border-[var(--accent)] dark:border-white/12"
@@ -875,10 +889,10 @@ export function GuidedTracks({
             {isSaving ? (
               <>
                 <Loader2 className="h-4 w-4 animate-spin" />
-                Saving...
+                {m.guided.saving}
               </>
             ) : (
-              "Save to Favorites"
+              m.guided.saveToFavorites
             )}
           </button>
         </form>
@@ -902,7 +916,7 @@ export function GuidedTracks({
                 : "border border-black/6 bg-[var(--surface)] text-[var(--foreground-muted)] hover:text-[var(--foreground)] dark:border-white/10"
             }`}
           >
-            All
+            {m.common.all}
           </button>
           {availableTags.map((tag) => {
             const isSelected =
@@ -932,13 +946,13 @@ export function GuidedTracks({
           <Music2 className="h-7 w-7 text-[var(--foreground-muted)]" />
           <p className="mt-3 text-sm font-medium text-[var(--foreground)]">
             {tracks.length === 0
-              ? "No favorite tracks yet"
-              : "No tracks match this tag"}
+              ? m.guided.noTracksTitle
+              : m.guided.noTagMatchTitle}
           </p>
           <p className="mt-1 max-w-xs text-xs text-[var(--foreground-muted)]">
             {tracks.length === 0
-              ? 'Tap "Add Track" to save a YouTube, SoundCloud, or direct audio (.mp3/.m4a) guided meditation.'
-              : "Choose another tag or tap All to see all favorites."}
+              ? m.guided.noTracksBody
+              : m.guided.noTagMatchBody}
           </p>
         </div>
       ) : (
@@ -1017,7 +1031,7 @@ export function GuidedTracks({
                         </p>
                         <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-[var(--foreground-muted)]">
                           <span className="shrink-0 rounded-md bg-[var(--surface-muted)] px-1.5 py-0.5 text-[10px] font-medium">
-                            {TRACK_PROVIDER_LABELS[track.provider]}
+                            {m.guided.providers[track.provider]}
                           </span>
                           {track.author && (
                             <span className="truncate">{track.author}</span>
@@ -1050,7 +1064,7 @@ export function GuidedTracks({
                             ? cancelEditingTrack()
                             : startEditingTrack(track)
                         }
-                        aria-label={`Edit ${track.title}`}
+                        aria-label={`${m.common.edit} ${track.title}`}
                         className="flex h-8 w-8 items-center justify-center rounded-xl text-[var(--foreground-muted)] transition-colors hover:bg-[var(--surface-muted)] hover:text-[var(--foreground)]"
                       >
                         {isEditing ? (
@@ -1090,7 +1104,7 @@ export function GuidedTracks({
                         onChange={(event) =>
                           setEditTitleDraft(event.target.value)
                         }
-                        placeholder="Track title"
+                        placeholder={m.guided.editTrackTitlePlaceholder}
                         className="h-9 w-full rounded-xl border border-black/10 bg-[var(--background)] px-3 text-xs text-[var(--foreground)] outline-none focus:border-[var(--accent)] dark:border-white/12"
                       />
 
@@ -1131,7 +1145,7 @@ export function GuidedTracks({
                         <input
                           type="text"
                           maxLength={24}
-                          placeholder="Add custom tag..."
+                          placeholder={m.guided.customTagPlaceholder}
                           value={editCustomTagDraft}
                           onChange={(event) =>
                             setEditCustomTagDraft(event.target.value)
@@ -1143,7 +1157,7 @@ export function GuidedTracks({
                           onClick={cancelEditingTrack}
                           className="rounded-lg px-2.5 py-1 text-xs font-medium text-[var(--foreground-muted)] hover:text-[var(--foreground)]"
                         >
-                          Cancel
+                          {m.common.cancel}
                         </button>
                         <button
                           type="button"
@@ -1156,7 +1170,7 @@ export function GuidedTracks({
                           ) : (
                             <Check className="h-3 w-3" />
                           )}
-                          Save
+                          {m.common.save}
                         </button>
                       </div>
                     </div>
@@ -1168,7 +1182,7 @@ export function GuidedTracks({
 
           {selectedTagFilter === null && tracks.length >= 2 && (
             <p className="pt-1 text-center text-[11px] text-[var(--foreground-muted)]/75">
-              Hold and drag to reorder
+              {m.guided.holdAndDrag}
             </p>
           )}
         </div>

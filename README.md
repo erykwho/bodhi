@@ -41,6 +41,10 @@ A serene, mobile-first meditation Progressive Web App (PWA) built with Next.js 1
 - **Tags & Inline Editing:** Organize favorite tracks with custom or suggested tags (`Morning`, `Sleep`, `Breath`, `Focus`, `Body Scan`), filter by tag in one tap, and edit track titles and tags inline.
 - **Synced Closing Bell & Zen Dim Mode:** Guided sessions automatically use your configured Timer closing bell and include one-tap **Zen Dim Mode** for glare-free OLED listening.
 
+### V8 — Multi-Language Support (EN & PT-BR)
+- **Global Language Switcher:** Toggle between **English (`EN`)** and **Brazilian Portuguese (`PT`)** from the top header anywhere in the app.
+- **Persistent & Extensible i18n:** Selected language is persisted in `localStorage` (`bodhi-locale`), updates `<html lang>` and `Intl` date/calendar formatting automatically, and is backed by strongly-typed locale catalogs (`src/lib/i18n/messages/`) ready for additional languages.
+
 ## Environment Variables (V2+)
 
 Copy `.env.example` to `.env.local` for local development with cloud-synced Favorites, Presets, and Meditation History:

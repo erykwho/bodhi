@@ -10,6 +10,7 @@ import {
   Volume2,
   X,
 } from "lucide-react";
+import { useI18n } from "@/components/i18n-provider";
 import {
   AMBIENT_SOUNDS,
   BELL_SOUNDS,
@@ -48,28 +49,6 @@ interface SoundPickerSheetProps {
   onTogglePreviewAmbient: (id: AmbientSoundId) => void;
 }
 
-const SHEET_META: Record<
-  SoundSheetSlot,
-  { title: string; subtitle: string }
-> = {
-  start: {
-    title: "Opening Sound",
-    subtitle: "Chime played when your meditation begins",
-  },
-  interval: {
-    title: "Interval Sound",
-    subtitle: "Gentle repeating cue during your session",
-  },
-  end: {
-    title: "Closing Sound",
-    subtitle: "Chime played when your session completes",
-  },
-  background: {
-    title: "Background Sound",
-    subtitle: "Continuous ambient soundscape while meditating",
-  },
-};
-
 const INTERVAL_BELL_OPTIONS = BELL_SOUNDS.filter(
   (sound) => sound.kind !== "none"
 );
@@ -96,6 +75,8 @@ export function SoundPickerSheet({
   onPreviewBell,
   onTogglePreviewAmbient,
 }: SoundPickerSheetProps) {
+  const { m } = useI18n();
+
   useEffect(() => {
     if (!slot) return;
 
@@ -117,7 +98,27 @@ export function SoundPickerSheet({
 
   if (!slot) return null;
 
-  const meta = SHEET_META[slot];
+  const sheetMeta: Record<SoundSheetSlot, { title: string; subtitle: string }> =
+    {
+      start: {
+        title: m.soundPicker.startTitle,
+        subtitle: m.soundPicker.startSubtitle,
+      },
+      interval: {
+        title: m.soundPicker.intervalTitle,
+        subtitle: m.soundPicker.intervalSubtitle,
+      },
+      end: {
+        title: m.soundPicker.endTitle,
+        subtitle: m.soundPicker.endSubtitle,
+      },
+      background: {
+        title: m.soundPicker.backgroundTitle,
+        subtitle: m.soundPicker.backgroundSubtitle,
+      },
+    };
+
+  const meta = sheetMeta[slot];
   const intervalChimeCount = computeIntervalCount(
     durationMinutes,
     intervalMinutes
@@ -153,7 +154,7 @@ export function SoundPickerSheet({
           <button
             type="button"
             onClick={onClose}
-            aria-label="Close sound picker"
+            aria-label={m.soundPicker.closeLabel}
             className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--surface-muted)] text-[var(--foreground-muted)] transition-colors hover:text-[var(--foreground)]"
           >
             <X className="h-4 w-4" />
@@ -167,6 +168,7 @@ export function SoundPickerSheet({
               {BELL_SOUNDS.map((sound) => {
                 const selectedId = slot === "start" ? startBell : endBell;
                 const isSelected = selectedId === sound.id;
+                const soundName = m.sounds.bells[sound.id];
                 const handleSelect = () => {
                   if (slot === "start") {
                     onSelectStartBell(sound.id);
@@ -199,7 +201,7 @@ export function SoundPickerSheet({
                         {isSelected && <Check className="h-3 w-3" />}
                       </span>
                       <span className="truncate text-sm font-medium text-[var(--foreground)]">
-                        {sound.name}
+                        {soundName}
                       </span>
                     </button>
 
@@ -207,11 +209,11 @@ export function SoundPickerSheet({
                       <button
                         type="button"
                         onClick={() => onPreviewBell(sound.id)}
-                        aria-label={`Preview ${sound.name}`}
+                        aria-label={`${m.soundPicker.preview} ${soundName}`}
                         className="inline-flex h-8 shrink-0 items-center gap-1 rounded-lg bg-[var(--surface)] px-2.5 text-xs font-medium text-[var(--foreground-muted)] transition-colors hover:text-[var(--foreground)]"
                       >
                         <Play className="h-3 w-3 fill-current" />
-                        Preview
+                        {m.soundPicker.preview}
                       </button>
                     )}
                   </div>
@@ -226,14 +228,17 @@ export function SoundPickerSheet({
               <div className="flex items-center justify-between gap-3 rounded-xl border border-black/6 bg-[var(--background)]/60 px-3.5 py-3 dark:border-white/8">
                 <div className="min-w-0">
                   <p className="text-sm font-medium text-[var(--foreground)]">
-                    Repeat interval cue
+                    {m.soundPicker.repeatIntervalCue}
                   </p>
                   <p className="text-xs text-[var(--foreground-muted)]">
                     {intervalEnabled
                       ? intervalChimeCount > 0
-                        ? `Plays ${intervalChimeCount}× during ${durationMinutes}m session`
-                        : `No chimes fit in a ${durationMinutes}m session`
-                      : "Disabled by default"}
+                        ? m.soundPicker.intervalPlaysCount(
+                            intervalChimeCount,
+                            durationMinutes
+                          )
+                        : m.soundPicker.intervalNoneFit(durationMinutes)
+                      : m.soundPicker.disabledByDefault}
                   </p>
                 </div>
 
@@ -241,7 +246,7 @@ export function SoundPickerSheet({
                   type="button"
                   role="switch"
                   aria-checked={intervalEnabled}
-                  aria-label="Enable interval sound"
+                  aria-label={m.soundPicker.enableIntervalAria}
                   onClick={() => onToggleIntervalEnabled(!intervalEnabled)}
                   className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${
                     intervalEnabled
@@ -263,7 +268,7 @@ export function SoundPickerSheet({
                   <div className="flex flex-col gap-2.5">
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-medium text-[var(--foreground-muted)]">
-                        Repeat every
+                        {m.soundPicker.repeatEvery}
                       </span>
                       <div className="flex items-center gap-2">
                         <button
@@ -272,7 +277,7 @@ export function SoundPickerSheet({
                             onChangeIntervalMinutes(intervalMinutes - 1)
                           }
                           disabled={intervalMinutes <= MIN_INTERVAL_MINUTES}
-                          aria-label="Decrease interval by 1 minute"
+                          aria-label={m.soundPicker.decreaseIntervalAria}
                           className="flex h-7 w-7 items-center justify-center rounded-full bg-[var(--surface-muted)] text-[var(--foreground-muted)] transition-colors hover:text-[var(--foreground)] disabled:opacity-40"
                         >
                           <Minus className="h-3.5 w-3.5" />
@@ -286,7 +291,7 @@ export function SoundPickerSheet({
                             onChangeIntervalMinutes(intervalMinutes + 1)
                           }
                           disabled={intervalMinutes >= MAX_INTERVAL_MINUTES}
-                          aria-label="Increase interval by 1 minute"
+                          aria-label={m.soundPicker.increaseIntervalAria}
                           className="flex h-7 w-7 items-center justify-center rounded-full bg-[var(--surface-muted)] text-[var(--foreground-muted)] transition-colors hover:text-[var(--foreground)] disabled:opacity-40"
                         >
                           <Plus className="h-3.5 w-3.5" />
@@ -318,10 +323,11 @@ export function SoundPickerSheet({
                   {/* Interval Sound Choices */}
                   <div className="flex flex-col gap-2">
                     <span className="text-xs font-medium text-[var(--foreground-muted)]">
-                      Interval chime
+                      {m.soundPicker.intervalChime}
                     </span>
                     {INTERVAL_BELL_OPTIONS.map((sound) => {
                       const isSelected = intervalBell === sound.id;
+                      const soundName = m.sounds.bells[sound.id];
                       return (
                         <div
                           key={sound.id}
@@ -346,18 +352,18 @@ export function SoundPickerSheet({
                               {isSelected && <Check className="h-3 w-3" />}
                             </span>
                             <span className="truncate text-sm font-medium text-[var(--foreground)]">
-                              {sound.name}
+                              {soundName}
                             </span>
                           </button>
 
                           <button
                             type="button"
                             onClick={() => onPreviewBell(sound.id)}
-                            aria-label={`Preview ${sound.name}`}
+                            aria-label={`${m.soundPicker.preview} ${soundName}`}
                             className="inline-flex h-8 shrink-0 items-center gap-1 rounded-lg bg-[var(--surface)] px-2.5 text-xs font-medium text-[var(--foreground-muted)] transition-colors hover:text-[var(--foreground)]"
                           >
                             <Play className="h-3 w-3 fill-current" />
-                            Preview
+                            {m.soundPicker.preview}
                           </button>
                         </div>
                       );
@@ -374,6 +380,7 @@ export function SoundPickerSheet({
                 {AMBIENT_SOUNDS.map((sound) => {
                   const isSelected = ambientSound === sound.id;
                   const isPreviewing = previewingAmbientId === sound.id;
+                  const soundName = m.sounds.ambient[sound.id];
 
                   return (
                     <div
@@ -399,7 +406,7 @@ export function SoundPickerSheet({
                           {isSelected && <Check className="h-3 w-3" />}
                         </span>
                         <span className="truncate text-sm font-medium text-[var(--foreground)]">
-                          {sound.name}
+                          {soundName}
                         </span>
                       </button>
 
@@ -409,8 +416,8 @@ export function SoundPickerSheet({
                           onClick={() => onTogglePreviewAmbient(sound.id)}
                           aria-label={
                             isPreviewing
-                              ? `Stop ${sound.name} preview`
-                              : `Preview ${sound.name}`
+                              ? `${m.soundPicker.stop} ${soundName}`
+                              : `${m.soundPicker.preview} ${soundName}`
                           }
                           className={`inline-flex h-8 shrink-0 items-center gap-1 rounded-lg px-2.5 text-xs font-medium transition-colors ${
                             isPreviewing
@@ -421,12 +428,12 @@ export function SoundPickerSheet({
                           {isPreviewing ? (
                             <>
                               <Square className="h-3 w-3 fill-current" />
-                              Stop
+                              {m.soundPicker.stop}
                             </>
                           ) : (
                             <>
                               <Play className="h-3 w-3 fill-current" />
-                              Preview
+                              {m.soundPicker.preview}
                             </>
                           )}
                         </button>
@@ -448,7 +455,7 @@ export function SoundPickerSheet({
                     onChange={(event) =>
                       onChangeAmbientVolume(Number(event.target.value))
                     }
-                    aria-label="Background sound volume"
+                    aria-label={m.soundPicker.volumeAria}
                     className="h-1.5 w-full cursor-pointer accent-[var(--accent)]"
                   />
                   <span className="w-9 text-right text-xs font-medium text-[var(--foreground-muted)] tabular-nums">
