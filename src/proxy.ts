@@ -9,7 +9,8 @@ export const proxy = auth((req) => {
 
   if (
     pathname.startsWith("/api/tracks") ||
-    pathname.startsWith("/api/sessions")
+    pathname.startsWith("/api/sessions") ||
+    pathname.startsWith("/api/presets")
   ) {
     if (!isAuthConfigured()) {
       return NextResponse.json(

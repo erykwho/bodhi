@@ -12,9 +12,9 @@ Mobile-first meditation web application (**PWA**) designed for calm, distraction
 - **Framework:** Next.js 16 (App Router, TypeScript, Turbopack), React 19, Tailwind CSS v4, Lucide icons, Zod.
 - **Package Manager:** `pnpm` (v12, with `pnpm-workspace.yaml` enabling `allowBuilds` for Prisma and esbuild).
 - **Database:** Neon PostgreSQL + Prisma v6 (`prisma/schema.prisma`, with `scripts/vercel-db-sync.mjs` syncing schema automatically on `VERCEL_ENV=production`).
-- **Authentication:** Auth.js v5 (`next-auth@beta`, JWT session) with **Google OAuth 2.0** and optional `ALLOWED_EMAILS` allowlist (if empty/unset, any Google account is allowed). Route handling via `src/proxy.ts`. Login is optional — the Meditation Timer remains 100% public while signing in unlocks cloud-synced Favorite Guided Tracks (V2) and Meditation History (V3).
+- **Authentication:** Auth.js v5 (`next-auth@beta`, JWT session) with **Google OAuth 2.0** and optional `ALLOWED_EMAILS` allowlist (if empty/unset, any Google account is allowed). Route handling via `src/proxy.ts`. Login is optional — the Meditation Timer remains 100% public while signing in unlocks cloud-synced Favorite Guided Tracks, Meditation History, and Practice Presets.
 - **Audio Engine:**
-  - Native Web Audio API synthesis (`src/lib/audio/`) for singing bowl start/end bells and looping ambient background sounds (starting with White Noise), architected to support future static audio files (`.mp3`/`.ogg`).
+  - Native Web Audio API synthesis (`src/lib/audio/`) with 7 configurable bells (`None`, `Singing Bowl`, `Tibetan Healing Bowl`, `Deep Gong`, `Soft Chime`, `Crystal Bowl`, `Wood Block`) for start, interval, and end chimes, and 7 offline ambient soundscapes (`Silence`, `White Noise`, `Pink Noise`, `Brown Noise`, `Gentle Rain`, `Ocean Waves`, `Warm Drone`), architected to support future static audio files (`.mp3`/`.ogg`).
   - Official **YouTube IFrame Player API** and **SoundCloud Widget API** (`src/components/guided-session-player.tsx`) for full-track guided sessions.
 - **Testing & Linting:** Vitest (`pnpm test`), ESLint (`pnpm lint`).
 - **Hosting:** Vercel (continuous deployment from `master`).
@@ -22,44 +22,42 @@ Mobile-first meditation web application (**PWA**) designed for calm, distraction
 ## Product Roadmap
 
 1. **V1 — Meditation Timer (Completed):**
-   - Public timer with no login required.
-   - Duration presets (`5`, `10`, `15`, `20`, `30` min) + custom duration (`1–180` min).
-   - Optional warm-up countdown (`Off`, `5s`, `10s`).
-   - Singing bowl start & end bells.
-   - Selectable and previewable background sounds (`Silence` and `White Noise`).
-   - Timestamp-based drift-free countdown (`endTime - Date.now()`), Screen Wake Lock API, light/dark organic theme, and installable PWA.
-2. **V2 — Favorite Guided Tracks (SoundCloud & YouTube) + Auth + Neon + Pull-to-Refresh (Completed):**
-   - Optional Google OAuth (`src/auth.config.ts`, `src/lib/auth.ts`) and Neon PostgreSQL via Prisma (`User`, `FavoriteTrack`).
-   - Favorite tracks list where users paste a YouTube or SoundCloud URL (auto-detected provider + oEmbed metadata via `src/lib/tracks/`) and start a focused session playing the full track (no countdown timer), with optional closing singing bowl bell and Wake Lock.
-   - Mobile PWA Pull-to-Refresh (`src/components/pull-to-refresh.tsx`, `src/lib/pull-to-refresh.ts`), automatically disabled during active sessions.
+   - Public timer with duration presets (`5`, `10`, `15`, `20`, `30` min) + custom duration (`1–180` min), optional warm-up (`Off`, `5s`, `10s`), timestamp-based drift-free countdown, Screen Wake Lock API, light/dark organic theme, and installable PWA.
+2. **V2 — Favorite Guided Tracks + Auth + Neon + Pull-to-Refresh (Completed):**
+   - Optional Google OAuth and Neon PostgreSQL via Prisma (`User`, `FavoriteTrack`).
+   - Favorite YouTube/SoundCloud tracks (URL auto-detection + oEmbed metadata), full-track focused session player, press-and-hold drag reordering (`/api/tracks/reorder`), and mobile PWA Pull-to-Refresh.
 3. **V3 — Meditation History (Completed):**
-   - `MeditationSession` Prisma model (`SessionMode`: `TIMER | TRACK`) storing date, actual duration, completion status, track snapshot, and optional reflection note.
-   - Automatic session logging on completion for signed-in users, plus an inline prompt to save early stops with at least 1 minute elapsed (`MIN_SAVEABLE_EARLY_STOP_SECONDS = 60`).
-   - History view (`src/components/meditation-history.tsx`) with 3-column KPI strip (total time meditated, current daily streak, total sessions) and chronological session log with inline note editing and deletion.
-4. **V4 — Offline PWA / Airplane Mode (Current):**
-   - Zero-dependency Service Worker (`public/sw.js`, registered via `src/components/sw-register.tsx`) with silent automatic updates, Network-First navigation fallback to cached `/`, Cache-First static assets/icons, and strict Network-Only `/api/*` & `/api/auth/*` handling.
-   - Offline session queue and local history cache (`src/lib/offline/queue.ts` + `queue.test.ts`, `use-network-status.ts`) so signed-in Timer sessions completed offline queue locally with a `Pending sync` badge and automatically sync to Neon PostgreSQL when back online.
-   - Subtle offline/syncing status pill below the header (hidden during active sessions) and serene offline state in `GuidedTracks` with a quick shortcut to the Timer.
+   - `MeditationSession` Prisma model (`SessionMode`: `TIMER | TRACK`) with automatic logging on completion, early-stop save prompt (`MIN_SAVEABLE_EARLY_STOP_SECONDS = 60`), reflection notes, and History view (total time, daily streak, session count, chronological log).
+4. **V4 — Offline PWA / Airplane Mode & Configurable Sounds (Completed):**
+   - Zero-dependency Service Worker (`public/sw.js`) with silent updates, offline session queue & local history cache (`src/lib/offline/`), and automatic sync to Neon when back online.
+   - Configurable start/interval/end bells, 7 ambient soundscapes with bottom-sheet preview (`src/components/sound-picker-sheet.tsx`), and persisted timer preferences (`src/lib/timer/preferences.ts`).
+5. **V5 — Practice Presets & Zen Dim Mode (Current):**
+   - Named Practice Presets (`TimerPreset` Prisma model + `/api/presets`, `/api/presets/[id]`, local fallback via `src/lib/timer/presets.ts`, and compact single-row `src/components/preset-strip.tsx`) capturing full timer settings.
+   - OLED-friendly **Zen Dim Mode** during active timer sessions (`Dim screen` pill + tap-anywhere-to-wake overlay).
+6. **V6 — Visual History, Manual Logging & Export (Planned):**
+   - Monthly practice calendar/heatmap, longest streak display, period filters, manual session logging, and CSV/JSON export.
+7. **V7 — Direct Audio Guided Tracks & Track Organization (Planned):**
+   - Direct `.mp3`/`.m4a` audio URL support with HTML5 `<audio>` + Media Session API (lock-screen playback), inline title editing, tags/category filtering, and syncing the configured timer end bell into guided sessions.
 
-## Directory Structure (V4)
+## Directory Structure (V5)
 
 - `public/sw.js` — Offline PWA Service Worker (served with `Cache-Control: no-cache` via `next.config.ts` and excluded from `src/proxy.ts`).
-- `prisma/schema.prisma` — `User`, `FavoriteTrack`, and `MeditationSession` models (`TrackProvider`: `YOUTUBE | SOUNDCLOUD`, `SessionMode`: `TIMER | TRACK`).
+- `prisma/schema.prisma` — `User`, `FavoriteTrack`, `MeditationSession`, and `TimerPreset` models.
 - `scripts/vercel-db-sync.mjs` — Automatic Prisma schema sync on Vercel production deploys.
-- `src/app/` — App Router layout, global styles, PWA `manifest.ts`, server actions (`actions.ts`), main page, and REST API routes (`/api/auth/[...nextauth]`, `/api/tracks`, `/api/tracks/resolve`, `/api/tracks/[id]`, `/api/sessions`, `/api/sessions/[id]`).
-- `src/lib/timer/` — Pure timestamp-based timer calculations (`engine.ts`, `types.ts`) and Vitest unit tests (`engine.test.ts`).
-- `src/lib/audio/` — Extensible sound catalog (`sounds.ts`) and Web Audio API engine (`engine.ts`).
-- `src/lib/tracks/` — YouTube/SoundCloud URL parser (`providers.ts` + `providers.test.ts`), oEmbed metadata resolver (`oembed.ts`), and shared types (`types.ts`).
-- `src/lib/history/` — Pure history statistics & daily streak engine (`stats.ts` + `stats.test.ts`), client API helpers with offline fallback (`client.ts`), and shared types (`types.ts`).
+- `src/app/` — App Router layout, global styles, PWA `manifest.ts`, server actions (`actions.ts`), main page, and REST API routes (`/api/auth/[...nextauth]`, `/api/tracks`, `/api/tracks/resolve`, `/api/tracks/reorder`, `/api/tracks/[id]`, `/api/sessions`, `/api/sessions/[id]`, `/api/presets`, `/api/presets/[id]`).
+- `src/lib/timer/` — Timestamp-based timer engine (`engine.ts` + `engine.test.ts`), persisted preferences (`preferences.ts` + `preferences.test.ts`), named presets (`presets.ts` + `presets.test.ts`), and types (`types.ts`).
+- `src/lib/audio/` — Extensible bell & ambient sound catalog (`sounds.ts`) and Web Audio API synthesis engine (`engine.ts`).
+- `src/lib/tracks/` — YouTube/SoundCloud URL parser (`providers.ts` + `providers.test.ts`), oEmbed resolver (`oembed.ts`), drag-reorder helpers (`reorder.ts` + `reorder.test.ts`), and types (`types.ts`).
+- `src/lib/history/` — History statistics & daily streak engine (`stats.ts` + `stats.test.ts`), client helpers with offline fallback (`client.ts`), and types (`types.ts`).
 - `src/lib/offline/` — Offline session queue & history cache (`queue.ts` + `queue.test.ts`) and reactive online status hook (`use-network-status.ts`).
 - `src/lib/pull-to-refresh.ts` + `pull-to-refresh.test.ts` — Pure rubber-band pull-to-refresh physics and tests.
 - `src/lib/wake-lock.ts` — Screen Wake Lock hook.
-- `src/components/` — `BodhiShell`, `BodhiLogo`, `ThemeProvider`, `ServiceWorkerRegister`, `PullToRefresh`, `MeditationTimer`, `GuidedTracks`, `GuidedSessionPlayer`, and `MeditationHistory`.
+- `src/components/` — `BodhiShell`, `BodhiLogo`, `ThemeProvider`, `ServiceWorkerRegister`, `PullToRefresh`, `MeditationTimer`, `PresetStrip`, `SoundPickerSheet`, `GuidedTracks`, `GuidedSessionPlayer`, and `MeditationHistory`.
 - `public/icons/` — Official Bodhi leaf SVG, transparent PNG favicon, and PWA PNG icons.
 
 ## Commands & Conventions
 
-- `pnpm test` — Run unit tests (Vitest). Always add or update tests when changing `src/lib/timer/`, `src/lib/tracks/`, `src/lib/history/`, `src/lib/pull-to-refresh.ts`, or other pure domain logic.
+- `pnpm test` — Run unit tests (Vitest). Always add or update tests when changing pure domain logic in `src/lib/`.
 - `pnpm lint` — Run ESLint checks.
 - `pnpm build` — Run `prisma generate && node scripts/vercel-db-sync.mjs && next build` (always validate `pnpm test`, `pnpm lint`, and `pnpm build` before opening a PR).
 - **Git Commit Author (required for Vercel Hobby):** Before creating any commit, ensure:

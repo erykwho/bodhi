@@ -26,6 +26,7 @@ model User {
   updatedAt      DateTime            @updatedAt
   favoriteTracks FavoriteTrack[]
   sessions       MeditationSession[]
+  timerPresets   TimerPreset[]
 }
 
 model FavoriteTrack {
@@ -65,4 +66,16 @@ model MeditationSession {
   createdAt          DateTime       @default(now())
 
   @@index([userId, endedAt])
+}
+
+model TimerPreset {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String
+  config    Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, createdAt])
 }

@@ -3,6 +3,8 @@ import { BodhiShell } from "@/components/bodhi-shell";
 import { getOptionalSessionUser } from "@/lib/auth";
 import type { MeditationSessionItem } from "@/lib/history/types";
 import { prisma } from "@/lib/prisma";
+import { parseTimerPreferences } from "@/lib/timer/preferences";
+import { MAX_TIMER_PRESETS, type TimerPresetItem } from "@/lib/timer/presets";
 import type { FavoriteTrackItem } from "@/lib/tracks/types";
 
 export const dynamic = "force-dynamic";
@@ -19,10 +21,11 @@ export default async function HomePage(props: {
 
   let initialTracks: FavoriteTrackItem[] = [];
   let initialSessions: MeditationSessionItem[] = [];
+  let initialPresets: TimerPresetItem[] = [];
 
   if (user) {
     try {
-      const [trackRows, sessionRows] = await Promise.all([
+      const [trackRows, sessionRows, presetRows] = await Promise.all([
         prisma.favoriteTrack.findMany({
           where: { userId: user.id },
           orderBy: [{ position: "asc" }, { createdAt: "desc" }],
@@ -31,6 +34,11 @@ export default async function HomePage(props: {
           where: { userId: user.id },
           orderBy: { endedAt: "desc" },
           take: 200,
+        }),
+        prisma.timerPreset.findMany({
+          where: { userId: user.id },
+          orderBy: { createdAt: "asc" },
+          take: MAX_TIMER_PRESETS,
         }),
       ]);
 
@@ -58,6 +66,13 @@ export default async function HomePage(props: {
         startedAt: session.startedAt.toISOString(),
         endedAt: session.endedAt.toISOString(),
       }));
+
+      initialPresets = presetRows.map((preset) => ({
+        id: preset.id,
+        name: preset.name,
+        preferences: parseTimerPreferences(preset.config),
+        createdAt: preset.createdAt.toISOString(),
+      }));
     } catch (err) {
       console.error("[HomePage] Failed to load user data:", err);
     }
@@ -69,6 +84,7 @@ export default async function HomePage(props: {
       authConfigured={authConfigured}
       initialTracks={initialTracks}
       initialSessions={initialSessions}
+      initialPresets={initialPresets}
       authError={authError}
     />
   );
