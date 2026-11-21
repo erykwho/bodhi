@@ -25,7 +25,7 @@ export default async function HomePage(props: {
       const [trackRows, sessionRows] = await Promise.all([
         prisma.favoriteTrack.findMany({
           where: { userId: user.id },
-          orderBy: { createdAt: "desc" },
+          orderBy: [{ position: "asc" }, { createdAt: "desc" }],
         }),
         prisma.meditationSession.findMany({
           where: { userId: user.id },

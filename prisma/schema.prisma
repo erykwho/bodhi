@@ -38,12 +38,13 @@ model FavoriteTrack {
   title        String
   author       String?
   thumbnailUrl String?
+  position     Int                 @default(0)
   createdAt    DateTime            @default(now())
   updatedAt    DateTime            @updatedAt
   sessions     MeditationSession[]
 
   @@unique([userId, provider, externalId])
-  @@index([userId, createdAt])
+  @@index([userId, position, createdAt])
 }
 
 model MeditationSession {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Bell,
   BellOff,
@@ -21,10 +21,33 @@ import { GuidedSessionPlayer } from "@/components/guided-session-player";
 import type { SessionUserSummary } from "@/lib/auth";
 import type { MeditationSessionItem } from "@/lib/history/types";
 import { parseTrackUrl } from "@/lib/tracks/providers";
+import {
+  computeTargetIndex,
+  hasOrderChanged,
+  reorderItems,
+} from "@/lib/tracks/reorder";
 import type {
   FavoriteTrackItem,
   ResolvedTrackMetadata,
 } from "@/lib/tracks/types";
+import { cn } from "@/lib/utils";
+
+const LONG_PRESS_DELAY_MS = 250;
+const TOUCH_CANCEL_THRESHOLD_PX = 8;
+const MOUSE_DRAG_THRESHOLD_PX = 6;
+
+interface DragSession {
+  pointerId: number;
+  pointerType: string;
+  trackId: string;
+  startX: number;
+  startY: number;
+  anchorY: number;
+  currentY: number;
+  active: boolean;
+  longPressTimer: number | null;
+  initialTracks: FavoriteTrackItem[];
+}
 
 interface GuidedTracksProps {
   user: SessionUserSummary | null;
@@ -35,6 +58,7 @@ interface GuidedTracksProps {
   onSessionActiveChange: (active: boolean) => void;
   onSessionSaved?: (session: MeditationSessionItem) => void;
   onSessionUpdated?: (session: MeditationSessionItem) => void;
+  onReorderingChange?: (reordering: boolean) => void;
 }
 
 export function GuidedTracks({
@@ -46,6 +70,7 @@ export function GuidedTracks({
   onSessionActiveChange,
   onSessionSaved,
   onSessionUpdated,
+  onReorderingChange,
 }: GuidedTracksProps) {
   const [tracks, setTracks] = useState<FavoriteTrackItem[]>(initialTracks);
   const [activeTrack, setActiveTrack] = useState<FavoriteTrackItem | null>(
@@ -64,9 +89,27 @@ export function GuidedTracks({
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
+  // Drag-to-reorder state
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [dragOffsetY, setDragOffsetY] = useState<number>(0);
+
+  const tracksRef = useRef<FavoriteTrackItem[]>(tracks);
+  const itemElementsRef = useRef<Map<string, HTMLLIElement>>(new Map());
+  const dragSessionRef = useRef<DragSession | null>(null);
+  const dragOffsetYRef = useRef<number>(0);
+  const suppressClickRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    tracksRef.current = tracks;
+  }, [tracks]);
+
   useEffect(() => {
     onSessionActiveChange(activeTrack !== null);
   }, [activeTrack, onSessionActiveChange]);
+
+  useEffect(() => {
+    onReorderingChange?.(draggingId !== null);
+  }, [draggingId, onReorderingChange]);
 
   const detectedProvider = parseTrackUrl(urlInput)?.provider ?? null;
 
@@ -168,10 +211,15 @@ export function GuidedTracks({
         }
 
         const savedTrack = data.track;
-        setTracks((prev) => [
-          savedTrack,
-          ...prev.filter((item) => item.id !== savedTrack.id),
-        ]);
+        setTracks((prev) => {
+          const exists = prev.some((item) => item.id === savedTrack.id);
+          if (exists) {
+            return prev.map((item) =>
+              item.id === savedTrack.id ? savedTrack : item
+            );
+          }
+          return [...prev, savedTrack];
+        });
         resetForm();
       } catch {
         setErrorMessage("Failed to save favorite track.");
@@ -203,6 +251,285 @@ export function GuidedTracks({
       setDeletingId(null);
     }
   }, []);
+
+  const persistTrackOrder = useCallback(
+    async (
+      nextTracks: FavoriteTrackItem[],
+      previousTracks: FavoriteTrackItem[]
+    ) => {
+      try {
+        const response = await fetch("/api/tracks/reorder", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            orderedIds: nextTracks.map((item) => item.id),
+          }),
+        });
+
+        if (!response.ok) {
+          const data = (await response.json()) as { error?: string };
+          setTracks(previousTracks);
+          setErrorMessage(data.error ?? "Failed to save track order.");
+        }
+      } catch {
+        setTracks(previousTracks);
+        setErrorMessage("Failed to save track order.");
+      }
+    },
+    []
+  );
+
+  const activateDrag = useCallback((session: DragSession) => {
+    if (session.active) return;
+    session.active = true;
+    session.anchorY = session.currentY;
+    dragOffsetYRef.current = 0;
+    setDraggingId(session.trackId);
+    setDragOffsetY(0);
+    setErrorMessage(null);
+
+    if (
+      session.pointerType === "touch" &&
+      typeof navigator !== "undefined" &&
+      "vibrate" in navigator
+    ) {
+      navigator.vibrate(15);
+    }
+  }, []);
+
+  const endDrag = useCallback(
+    (commit: boolean) => {
+      const session = dragSessionRef.current;
+      if (!session) return;
+
+      if (session.longPressTimer !== null) {
+        window.clearTimeout(session.longPressTimer);
+      }
+
+      const wasActive = session.active;
+      const initialTracksSnapshot = session.initialTracks;
+      dragSessionRef.current = null;
+      dragOffsetYRef.current = 0;
+      setDraggingId(null);
+      setDragOffsetY(0);
+
+      if (!wasActive) return;
+
+      suppressClickRef.current = true;
+      window.setTimeout(() => {
+        suppressClickRef.current = false;
+      }, 0);
+
+      if (!commit) {
+        setTracks(initialTracksSnapshot);
+        return;
+      }
+
+      const currentTracks = tracksRef.current;
+      const previousIds = initialTracksSnapshot.map((item) => item.id);
+      const nextIds = currentTracks.map((item) => item.id);
+      if (hasOrderChanged(previousIds, nextIds)) {
+        void persistTrackOrder(currentTracks, initialTracksSnapshot);
+      }
+    },
+    [persistTrackOrder]
+  );
+
+  useEffect(() => {
+    const handlePointerMove = (event: PointerEvent) => {
+      const session = dragSessionRef.current;
+      if (!session || event.pointerId !== session.pointerId) return;
+
+      session.currentY = event.clientY;
+      const deltaX = event.clientX - session.startX;
+      const deltaY = event.clientY - session.startY;
+      const movedDistance = Math.hypot(deltaX, deltaY);
+
+      if (!session.active) {
+        if (session.pointerType === "touch") {
+          if (movedDistance > TOUCH_CANCEL_THRESHOLD_PX) {
+            endDrag(false);
+          }
+          return;
+        }
+
+        // Mouse/pen: start dragging once pointer moves past a small threshold
+        if (movedDistance >= MOUSE_DRAG_THRESHOLD_PX) {
+          activateDrag(session);
+        } else {
+          return;
+        }
+      }
+
+      const currentList = tracksRef.current;
+      const currentIndex = currentList.findIndex(
+        (item) => item.id === session.trackId
+      );
+      if (currentIndex === -1) {
+        endDrag(false);
+        return;
+      }
+
+      // Measure resting slot rects (compensating for the dragged card's current translateY)
+      const currentOffset = dragOffsetYRef.current;
+      const itemRects = currentList.map((item) => {
+        const el = itemElementsRef.current.get(item.id);
+        if (!el) return { top: 0, height: 0 };
+        const rect = el.getBoundingClientRect();
+        const isDragged = item.id === session.trackId;
+        return {
+          top: isDragged ? rect.top - currentOffset : rect.top,
+          height: rect.height,
+        };
+      });
+
+      const targetIndex = computeTargetIndex(
+        event.clientY,
+        itemRects,
+        currentIndex
+      );
+
+      if (targetIndex !== currentIndex) {
+        const slotDelta =
+          itemRects[targetIndex].top - itemRects[currentIndex].top;
+        session.anchorY += slotDelta;
+
+        const reordered = reorderItems(currentList, currentIndex, targetIndex);
+        tracksRef.current = reordered;
+        setTracks(reordered);
+
+        if (
+          session.pointerType === "touch" &&
+          typeof navigator !== "undefined" &&
+          "vibrate" in navigator
+        ) {
+          navigator.vibrate(5);
+        }
+      }
+
+      const nextOffset = event.clientY - session.anchorY;
+      dragOffsetYRef.current = nextOffset;
+      setDragOffsetY(nextOffset);
+
+      // Gentle edge auto-scroll when dragging near top or bottom of viewport
+      const edgeThreshold = 72;
+      if (event.clientY < edgeThreshold) {
+        window.scrollBy(0, -8);
+      } else if (event.clientY > window.innerHeight - edgeThreshold) {
+        window.scrollBy(0, 8);
+      }
+    };
+
+    const handlePointerUp = (event: PointerEvent) => {
+      const session = dragSessionRef.current;
+      if (!session || event.pointerId !== session.pointerId) return;
+      endDrag(true);
+    };
+
+    const handlePointerCancel = (event: PointerEvent) => {
+      const session = dragSessionRef.current;
+      if (!session || event.pointerId !== session.pointerId) return;
+      endDrag(false);
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+    window.addEventListener("pointercancel", handlePointerCancel);
+
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+      window.removeEventListener("pointercancel", handlePointerCancel);
+    };
+  }, [activateDrag, endDrag]);
+
+  // Lock touch scrolling and text selection only while a drag is actively in progress
+  useEffect(() => {
+    if (draggingId === null) return;
+
+    const preventTouchScroll = (event: TouchEvent) => {
+      if (event.cancelable) {
+        event.preventDefault();
+      }
+    };
+
+    const preventSelect = (event: Event) => {
+      event.preventDefault();
+    };
+
+    window.addEventListener("touchmove", preventTouchScroll, {
+      passive: false,
+    });
+    window.addEventListener("selectstart", preventSelect);
+
+    return () => {
+      window.removeEventListener("touchmove", preventTouchScroll);
+      window.removeEventListener("selectstart", preventSelect);
+    };
+  }, [draggingId]);
+
+  useEffect(() => {
+    return () => {
+      const session = dragSessionRef.current;
+      if (session?.longPressTimer !== null && session?.longPressTimer !== undefined) {
+        window.clearTimeout(session.longPressTimer);
+      }
+      dragSessionRef.current = null;
+      onReorderingChange?.(false);
+    };
+  }, [onReorderingChange]);
+
+  const handleTrackPointerDown = useCallback(
+    (trackId: string, event: React.PointerEvent<HTMLLIElement>) => {
+      if (tracksRef.current.length < 2) return;
+      if (event.pointerType === "mouse" && event.button !== 0) return;
+      if (
+        event.target instanceof HTMLElement &&
+        event.target.closest("[data-no-drag='true']")
+      ) {
+        return;
+      }
+
+      if (dragSessionRef.current?.longPressTimer != null) {
+        window.clearTimeout(dragSessionRef.current.longPressTimer);
+      }
+
+      const session: DragSession = {
+        pointerId: event.pointerId,
+        pointerType: event.pointerType,
+        trackId,
+        startX: event.clientX,
+        startY: event.clientY,
+        anchorY: event.clientY,
+        currentY: event.clientY,
+        active: false,
+        longPressTimer: null,
+        initialTracks: [...tracksRef.current],
+      };
+
+      if (event.pointerType === "touch") {
+        session.longPressTimer = window.setTimeout(() => {
+          if (dragSessionRef.current === session) {
+            activateDrag(session);
+          }
+        }, LONG_PRESS_DELAY_MS);
+      }
+
+      dragSessionRef.current = session;
+    },
+    [activateDrag]
+  );
+
+  const setTrackItemRef = useCallback(
+    (trackId: string, node: HTMLLIElement | null) => {
+      if (node) {
+        itemElementsRef.current.set(trackId, node);
+      } else {
+        itemElementsRef.current.delete(trackId);
+      }
+    },
+    []
+  );
 
   if (activeTrack) {
     return (
@@ -419,65 +746,108 @@ export function GuidedTracks({
           </p>
         </div>
       ) : (
-        <ul className="flex flex-col gap-2.5">
-          {tracks.map((track) => (
-            <li
-              key={track.id}
-              className="flex items-center gap-3 rounded-2xl border border-black/6 bg-[var(--surface)] p-3 shadow-xs transition-colors hover:border-[var(--accent)]/35 dark:border-white/10"
-            >
-              <button
-                type="button"
-                onClick={() => setActiveTrack(track)}
-                className="flex min-w-0 flex-1 items-center gap-3 text-left"
-              >
-                <div className="relative flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-[var(--accent-soft)] text-[var(--accent)]">
-                  {track.thumbnailUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={track.thumbnailUrl}
-                      alt=""
-                      referrerPolicy="no-referrer"
-                      className="h-full w-full object-cover"
-                    />
-                  ) : (
-                    <Music2 className="h-5 w-5" />
+        <div className="flex flex-col gap-2">
+          <ul className="flex flex-col gap-2.5">
+            {tracks.map((track) => {
+              const isDragged = draggingId === track.id;
+              return (
+                <li
+                  key={track.id}
+                  ref={(node) => setTrackItemRef(track.id, node)}
+                  onPointerDown={(event) =>
+                    handleTrackPointerDown(track.id, event)
+                  }
+                  onContextMenu={(event) => {
+                    if (tracks.length >= 2) {
+                      event.preventDefault();
+                    }
+                  }}
+                  style={
+                    isDragged
+                      ? {
+                          transform: `translate3d(0, ${dragOffsetY}px, 0) scale(1.02)`,
+                        }
+                      : undefined
+                  }
+                  className={cn(
+                    "relative flex select-none items-center gap-3 rounded-2xl border border-black/6 bg-[var(--surface)] p-3 shadow-xs transition-colors dark:border-white/10",
+                    isDragged
+                      ? "z-20 cursor-grabbing border-[var(--accent)]/50 shadow-lg ring-2 ring-[var(--accent)]/30"
+                      : "hover:border-[var(--accent)]/35",
+                    draggingId !== null && !isDragged && "opacity-85"
                   )}
-                  <span className="absolute inset-0 flex items-center justify-center bg-black/25 text-white">
-                    <Play className="h-4 w-4 fill-current" />
-                  </span>
-                </div>
-
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium text-[var(--foreground)]">
-                    {track.title}
-                  </p>
-                  <div className="mt-0.5 flex items-center gap-1.5 text-xs text-[var(--foreground-muted)]">
-                    <span className="shrink-0 rounded-md bg-[var(--surface-muted)] px-1.5 py-0.5 text-[10px] font-medium">
-                      {track.provider === "YOUTUBE" ? "YouTube" : "SoundCloud"}
-                    </span>
-                    {track.author && (
-                      <span className="truncate">{track.author}</span>
+                >
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (suppressClickRef.current) return;
+                      setActiveTrack(track);
+                    }}
+                    className={cn(
+                      "flex min-w-0 flex-1 items-center gap-3 text-left",
+                      isDragged && "cursor-grabbing"
                     )}
-                  </div>
-                </div>
-              </button>
+                  >
+                    <div className="relative flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-[var(--accent-soft)] text-[var(--accent)]">
+                      {track.thumbnailUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={track.thumbnailUrl}
+                          alt=""
+                          draggable={false}
+                          referrerPolicy="no-referrer"
+                          className="pointer-events-none h-full w-full object-cover"
+                        />
+                      ) : (
+                        <Music2 className="h-5 w-5" />
+                      )}
+                      <span className="absolute inset-0 flex items-center justify-center bg-black/25 text-white">
+                        <Play className="h-4 w-4 fill-current" />
+                      </span>
+                    </div>
 
-              <button
-                type="button"
-                onClick={() => void handleDeleteTrack(track.id)}
-                disabled={deletingId === track.id}
-                aria-label={`Remove ${track.title}`}
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-[var(--foreground-muted)] transition-colors hover:bg-red-500/10 hover:text-red-600 disabled:opacity-40 dark:hover:text-red-400"
-              >
-                {deletingId === track.id ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Trash2 className="h-4 w-4" />
-                )}
-              </button>
-            </li>
-          ))}
-        </ul>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium text-[var(--foreground)]">
+                        {track.title}
+                      </p>
+                      <div className="mt-0.5 flex items-center gap-1.5 text-xs text-[var(--foreground-muted)]">
+                        <span className="shrink-0 rounded-md bg-[var(--surface-muted)] px-1.5 py-0.5 text-[10px] font-medium">
+                          {track.provider === "YOUTUBE"
+                            ? "YouTube"
+                            : "SoundCloud"}
+                        </span>
+                        {track.author && (
+                          <span className="truncate">{track.author}</span>
+                        )}
+                      </div>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    data-no-drag="true"
+                    onClick={() => void handleDeleteTrack(track.id)}
+                    disabled={deletingId === track.id}
+                    aria-label={`Remove ${track.title}`}
+                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-[var(--foreground-muted)] transition-colors hover:bg-red-500/10 hover:text-red-600 disabled:opacity-40 dark:hover:text-red-400"
+                  >
+                    {deletingId === track.id ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Trash2 className="h-4 w-4" />
+                    )}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+
+          {tracks.length >= 2 && (
+            <p className="pt-1 text-center text-[11px] text-[var(--foreground-muted)]/75">
+              Hold and drag to reorder
+            </p>
+          )}
+        </div>
       )}
     </section>
   );

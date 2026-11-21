@@ -17,7 +17,7 @@ export async function GET() {
     const user = await requireUser();
     const tracks = await prisma.favoriteTrack.findMany({
       where: { userId: user.id },
-      orderBy: { createdAt: "desc" },
+      orderBy: [{ position: "asc" }, { createdAt: "desc" }],
     });
 
     return NextResponse.json({
@@ -83,6 +83,13 @@ export async function POST(request: Request) {
         ? thumbnailUrl
         : (resolved?.thumbnailUrl ?? parsedUrl.defaultThumbnailUrl);
 
+    const lastPosition = await prisma.favoriteTrack.aggregate({
+      where: { userId: user.id },
+      _max: { position: true },
+    });
+    const nextPosition =
+      lastPosition._max.position !== null ? lastPosition._max.position + 1 : 0;
+
     const saved = await prisma.favoriteTrack.upsert({
       where: {
         userId_provider_externalId: {
@@ -105,6 +112,7 @@ export async function POST(request: Request) {
         title: finalTitle,
         author: finalAuthor,
         thumbnailUrl: finalThumbnail,
+        position: nextPosition,
       },
     });
 
