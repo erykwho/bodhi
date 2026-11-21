@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { RefreshCw } from "lucide-react";
+import { useI18n } from "@/components/i18n-provider";
 import {
   PULL_REFRESH_HOLD_DISTANCE,
   PULL_THRESHOLD,
@@ -219,6 +220,7 @@ export function PullToRefresh({
     };
   }, []);
 
+  const { m } = useI18n();
   const effectiveDistance = disabled && !isRefreshing ? 0 : pullDistance;
   const phase = getPullPhase(effectiveDistance, isRefreshing);
   const progress = getPullProgress(effectiveDistance);
@@ -226,10 +228,10 @@ export function PullToRefresh({
 
   const label =
     phase === "refreshing"
-      ? "Refreshing..."
+      ? m.pullToRefresh.refreshing
       : phase === "ready"
-        ? "Release to refresh"
-        : "Pull to refresh";
+        ? m.pullToRefresh.release
+        : m.pullToRefresh.pull;
 
   return (
     <div ref={containerRef} className={cn("relative", className)}>

@@ -2,6 +2,7 @@
 
 import { useCallback, useState } from "react";
 import { Bookmark, Check, Loader2, Plus, X } from "lucide-react";
+import { useI18n } from "@/components/i18n-provider";
 import {
   MAX_PRESET_NAME_LENGTH,
   MAX_TIMER_PRESETS,
@@ -29,6 +30,7 @@ export function PresetStrip({
   onCreate,
   onDelete,
 }: PresetStripProps) {
+  const { m } = useI18n();
   const [isCreating, setIsCreating] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
@@ -100,7 +102,7 @@ export function PresetStrip({
                   type="button"
                   onClick={() => void handleDelete(preset.id)}
                   disabled={isDeleting}
-                  aria-label={`Delete preset ${preset.name}`}
+                  aria-label={m.presets.deletePresetAria(preset.name)}
                   className="flex h-4 w-4 items-center justify-center rounded-full text-[var(--foreground-muted)] transition-colors hover:bg-red-500/15 hover:text-red-600 dark:hover:text-red-400"
                 >
                   {isDeleting ? (
@@ -124,7 +126,7 @@ export function PresetStrip({
             className="inline-flex shrink-0 items-center gap-1 rounded-full border border-dashed border-black/15 bg-transparent px-2.5 py-1 text-xs font-medium text-[var(--foreground-muted)] whitespace-nowrap transition-colors hover:border-[var(--accent)]/50 hover:text-[var(--foreground)] dark:border-white/15"
           >
             <Plus className="h-3 w-3" />
-            Save preset
+            {m.presets.savePreset}
           </button>
         )}
 
@@ -134,7 +136,7 @@ export function PresetStrip({
             onClick={() => setIsEditing((prev) => !prev)}
             className="ml-auto shrink-0 px-1.5 py-1 text-[11px] font-medium text-[var(--foreground-muted)] whitespace-nowrap transition-colors hover:text-[var(--foreground)]"
           >
-            {isEditing ? "Done" : "Edit"}
+            {isEditing ? m.common.done : m.common.edit}
           </button>
         )}
       </div>
@@ -150,7 +152,7 @@ export function PresetStrip({
             autoFocus
             required
             maxLength={MAX_PRESET_NAME_LENGTH}
-            placeholder="Preset name (e.g. Morning, Deep Focus)"
+            placeholder={m.presets.placeholder}
             value={nameDraft}
             onChange={(event) => setNameDraft(event.target.value)}
             className="h-8 min-w-0 flex-1 rounded-lg bg-[var(--background)] px-2.5 text-xs text-[var(--foreground)] outline-none placeholder:text-[var(--foreground-muted)]/70"
@@ -162,7 +164,7 @@ export function PresetStrip({
               setNameDraft("");
             }}
             className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[var(--foreground-muted)] hover:bg-[var(--surface-muted)]"
-            aria-label="Cancel saving preset"
+            aria-label={m.presets.cancelSavingAria}
           >
             <X className="h-3.5 w-3.5" />
           </button>
@@ -176,7 +178,7 @@ export function PresetStrip({
             ) : (
               <Check className="h-3 w-3" />
             )}
-            Save
+            {m.common.save}
           </button>
         </form>
       )}

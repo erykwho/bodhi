@@ -16,6 +16,7 @@ import {
 import { signInWithGoogle, signOutUser } from "@/app/actions";
 import { BodhiLogo } from "@/components/bodhi-logo";
 import { GuidedTracks } from "@/components/guided-tracks";
+import { useI18n } from "@/components/i18n-provider";
 import { MeditationHistory } from "@/components/meditation-history";
 import { MeditationTimer } from "@/components/meditation-timer";
 import { PullToRefresh } from "@/components/pull-to-refresh";
@@ -23,6 +24,7 @@ import { useTheme } from "@/components/theme-provider";
 import type { SessionUserSummary } from "@/lib/auth";
 import { saveMeditationSession } from "@/lib/history/client";
 import type { MeditationSessionItem } from "@/lib/history/types";
+import { LOCALE_META } from "@/lib/i18n/types";
 import {
   isPendingSessionId,
   mergeSessionsWithPending,
@@ -56,6 +58,7 @@ export function BodhiShell({
   authError = null,
 }: BodhiShellProps) {
   const { theme, toggleTheme } = useTheme();
+  const { locale, toggleLocale, m } = useI18n();
   const isOnline = useOnlineStatus();
 
   const [mode, setMode] = useState<AppMode>("timer");
@@ -208,9 +211,7 @@ export function BodhiShell({
 
   const showAuthError = Boolean(authError && !user && !dismissedError);
   const authErrorMessage =
-    authError === "AccessDenied"
-      ? "Access denied. Your Google account is not on the allowed emails list."
-      : "Sign-in was interrupted or expired. Please try signing in again.";
+    authError === "AccessDenied" ? m.auth.accessDenied : m.auth.interrupted;
 
   const showNetworkStatus =
     !isSessionActive && (!isOnline || isSyncing || pendingCount > 0);
@@ -240,8 +241,8 @@ export function BodhiShell({
                   disabled={!isOnline}
                   title={
                     isOnline
-                      ? `Sign out (${user.email})`
-                      : "Reconnect to sign out"
+                      ? `${m.common.signOut} (${user.email})`
+                      : m.common.reconnectToSignOut
                   }
                   className="inline-flex h-9 items-center gap-2 rounded-full border border-black/6 bg-[var(--surface)] pr-3 pl-1.5 text-xs font-medium text-[var(--foreground-muted)] transition-colors hover:text-[var(--foreground)] disabled:opacity-50 dark:border-white/10"
                 >
@@ -270,7 +271,7 @@ export function BodhiShell({
                     className="inline-flex h-9 items-center gap-1.5 rounded-full border border-black/6 bg-[var(--surface)] px-3 text-xs font-medium text-[var(--foreground-muted)] transition-colors hover:text-[var(--foreground)] dark:border-white/10"
                   >
                     <LogIn className="h-3.5 w-3.5" />
-                    Sign in
+                    {m.common.signIn}
                   </button>
                 </form>
               )
@@ -278,11 +279,21 @@ export function BodhiShell({
 
             <button
               type="button"
+              onClick={toggleLocale}
+              aria-label={m.common.switchLanguage}
+              title={`${m.common.switchLanguage} (${LOCALE_META[locale].nativeLabel})`}
+              className="flex h-9 min-w-9 items-center justify-center rounded-full border border-black/6 bg-[var(--surface)] px-2 text-[11px] font-semibold tracking-wide text-[var(--foreground-muted)] transition-colors hover:text-[var(--foreground)] dark:border-white/10"
+            >
+              {LOCALE_META[locale].shortLabel}
+            </button>
+
+            <button
+              type="button"
               onClick={toggleTheme}
               aria-label={
                 theme === "dark"
-                  ? "Switch to light theme"
-                  : "Switch to dark theme"
+                  ? m.common.switchToLight
+                  : m.common.switchToDark
               }
               className="flex h-9 w-9 items-center justify-center rounded-full border border-black/6 bg-[var(--surface)] text-[var(--foreground-muted)] transition-colors hover:text-[var(--foreground)] dark:border-white/10"
             >
@@ -307,13 +318,13 @@ export function BodhiShell({
                 <>
                   <WifiOff className="h-3 w-3 text-[var(--warm-amber)]" />
                   {pendingCount > 0
-                    ? `Offline · ${pendingCount} ${pendingCount === 1 ? "session" : "sessions"} pending sync`
-                    : "Offline · Timer ready"}
+                    ? m.network.offlinePending(pendingCount)
+                    : m.network.offlineTimerReady}
                 </>
               ) : (
                 <>
                   <RefreshCw className="h-3 w-3 animate-spin text-[var(--accent)]" />
-                  {`Syncing ${pendingCount} ${pendingCount === 1 ? "session" : "sessions"}...`}
+                  {m.network.syncing(pendingCount)}
                 </>
               )}
             </span>
@@ -330,7 +341,7 @@ export function BodhiShell({
             <button
               type="button"
               onClick={() => setDismissedError(true)}
-              aria-label="Dismiss message"
+              aria-label={m.common.dismissMessage}
               className="shrink-0 rounded-lg p-0.5 text-[var(--foreground-muted)] transition-colors hover:text-[var(--foreground)]"
             >
               <X className="h-3.5 w-3.5" />
@@ -341,7 +352,7 @@ export function BodhiShell({
         {/* Single-row Mode Switcher (hidden during active sessions) */}
         {!isSessionActive && (
           <nav
-            aria-label="Practice mode"
+            aria-label={m.common.practiceMode}
             className="mt-3 grid grid-cols-3 gap-1 rounded-2xl bg-[var(--surface-muted)] p-1"
           >
             <button
@@ -354,7 +365,7 @@ export function BodhiShell({
               }`}
             >
               <Timer className="h-3.5 w-3.5" />
-              Timer
+              {m.nav.timer}
             </button>
             <button
               type="button"
@@ -366,7 +377,7 @@ export function BodhiShell({
               }`}
             >
               <Headphones className="h-3.5 w-3.5" />
-              Guided
+              {m.nav.guided}
             </button>
             <button
               type="button"
@@ -378,7 +389,7 @@ export function BodhiShell({
               }`}
             >
               <CalendarDays className="h-3.5 w-3.5" />
-              History
+              {m.nav.history}
             </button>
           </nav>
         )}

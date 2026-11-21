@@ -24,18 +24,14 @@ import {
   VolumeX,
 } from "lucide-react";
 import { BodhiLogo } from "@/components/bodhi-logo";
+import { useI18n } from "@/components/i18n-provider";
 import { PresetStrip } from "@/components/preset-strip";
 import {
   SoundPickerSheet,
   type SoundSheetSlot,
 } from "@/components/sound-picker-sheet";
 import { MeditationAudioEngine } from "@/lib/audio/engine";
-import {
-  getAmbientSoundOption,
-  getBellSoundOption,
-  type AmbientSoundId,
-  type BellSoundId,
-} from "@/lib/audio/sounds";
+import type { AmbientSoundId, BellSoundId } from "@/lib/audio/sounds";
 import {
   saveMeditationSession,
   updateMeditationSessionNote,
@@ -99,6 +95,7 @@ export function MeditationTimer({
   onSessionSaved,
   onSessionUpdated,
 }: MeditationTimerProps) {
+  const { m } = useI18n();
   // Persisted setup preferences (SSR-safe via useSyncExternalStore)
   const prefs = useSyncExternalStore(
     subscribeTimerPreferences,
@@ -569,17 +566,17 @@ export function MeditationTimer({
         : computeProgress(activeTotalMs, remainingMs);
   const strokeDashoffset = RING_CIRCUMFERENCE * (1 - progress);
 
-  const startBellMeta = getBellSoundOption(startBell);
-  const endBellMeta = getBellSoundOption(endBell);
-  const intervalBellMeta = getBellSoundOption(intervalBell);
-  const selectedSoundMeta = getAmbientSoundOption(selectedSound);
+  const startBellName = m.sounds.bells[startBell];
+  const endBellName = m.sounds.bells[endBell];
+  const intervalBellName = m.sounds.bells[intervalBell];
+  const selectedSoundName = m.sounds.ambient[selectedSound];
 
   const activeSessionSubtitleParts: string[] = [];
   if (selectedSound !== "silence") {
-    activeSessionSubtitleParts.push(selectedSoundMeta.name);
+    activeSessionSubtitleParts.push(selectedSoundName);
   }
   if (intervalEnabled) {
-    activeSessionSubtitleParts.push(`Every ${intervalMinutes}m`);
+    activeSessionSubtitleParts.push(m.timer.everyMinutes(intervalMinutes));
   }
   const activeSessionSubtitle =
     activeSessionSubtitleParts.length > 0
@@ -595,34 +592,34 @@ export function MeditationTimer({
   }> = [
     {
       slot: "start",
-      label: "Start",
-      value: startBellMeta.name,
+      label: m.timer.slotStart,
+      value: startBellName,
       isMutedValue: startBell === "none",
       icon: Bell,
     },
     {
       slot: "interval",
-      label: "Interval",
+      label: m.timer.slotInterval,
       value: intervalEnabled
-        ? `${intervalBellMeta.name} · ${intervalMinutes}m`
-        : "Off",
+        ? `${intervalBellName} · ${intervalMinutes}m`
+        : m.common.off,
       isMutedValue: !intervalEnabled,
       icon: Repeat,
     },
     {
       slot: "end",
-      label: "End",
-      value: endBellMeta.name,
+      label: m.timer.slotEnd,
+      value: endBellName,
       isMutedValue: endBell === "none",
       icon: BellRing,
     },
     {
       slot: "background",
-      label: "Background",
+      label: m.timer.slotBackground,
       value:
         selectedSound === "silence"
-          ? "Silence"
-          : `${selectedSoundMeta.name} · ${Math.round(ambientVolume * 100)}%`,
+          ? m.sounds.ambient.silence
+          : `${selectedSoundName} · ${Math.round(ambientVolume * 100)}%`,
       isMutedValue: selectedSound === "silence",
       icon: Volume2,
     },
@@ -711,7 +708,7 @@ export function MeditationTimer({
             <section className="flex flex-col items-center pt-1">
               <div className="relative flex h-44 w-44 flex-col items-center justify-center rounded-full border border-black/6 bg-[var(--surface)] shadow-xs dark:border-white/10">
                 <span className="text-[11px] font-medium tracking-[0.18em] text-[var(--foreground-muted)] uppercase">
-                  Duration
+                  {m.timer.duration}
                 </span>
                 <span className="mt-1 font-mono text-4xl font-medium tracking-tight text-[var(--foreground)] tabular-nums">
                   {formatTimerDisplay(totalSessionMs)}
@@ -721,7 +718,7 @@ export function MeditationTimer({
                     type="button"
                     onClick={() => handleDurationChange(durationMinutes - 1)}
                     disabled={durationMinutes <= MIN_DURATION_MINUTES}
-                    aria-label="Decrease duration by 1 minute"
+                    aria-label={m.timer.decreaseDurationAria}
                     className="flex h-7 w-7 items-center justify-center rounded-full bg-[var(--surface-muted)] text-[var(--foreground-muted)] transition-colors hover:text-[var(--foreground)] disabled:opacity-40"
                   >
                     <Minus className="h-3.5 w-3.5" />
@@ -733,7 +730,7 @@ export function MeditationTimer({
                     type="button"
                     onClick={() => handleDurationChange(durationMinutes + 1)}
                     disabled={durationMinutes >= MAX_DURATION_MINUTES}
-                    aria-label="Increase duration by 1 minute"
+                    aria-label={m.timer.increaseDurationAria}
                     className="flex h-7 w-7 items-center justify-center rounded-full bg-[var(--surface-muted)] text-[var(--foreground-muted)] transition-colors hover:text-[var(--foreground)] disabled:opacity-40"
                   >
                     <Plus className="h-3.5 w-3.5" />
@@ -781,10 +778,10 @@ export function MeditationTimer({
               <div className="flex items-center justify-between gap-3 rounded-2xl border border-black/6 bg-[var(--surface)] px-4 py-3 dark:border-white/10">
                 <div>
                   <p className="text-sm font-medium text-[var(--foreground)]">
-                    Warm-up
+                    {m.timer.warmup}
                   </p>
                   <p className="text-xs text-[var(--foreground-muted)]">
-                    Preparation before opening bell
+                    {m.timer.warmupSubtitle}
                   </p>
                 </div>
 
@@ -804,7 +801,7 @@ export function MeditationTimer({
                             : "text-[var(--foreground-muted)] hover:text-[var(--foreground)]"
                         }`}
                       >
-                        {seconds === 0 ? "Off" : `${seconds}s`}
+                        {seconds === 0 ? m.common.off : `${seconds}s`}
                       </button>
                     );
                   })}
@@ -854,7 +851,7 @@ export function MeditationTimer({
                 className="flex h-13 w-full items-center justify-center gap-2 rounded-2xl bg-[var(--accent)] text-base font-semibold text-[#fcfaf6] shadow-xs transition-colors hover:bg-[var(--accent-strong)] active:scale-[0.99] dark:text-[#151917]"
               >
                 <Play className="h-4 w-4 fill-current" />
-                Begin Session
+                {m.timer.beginSession}
               </button>
             </div>
           </>
@@ -873,14 +870,14 @@ export function MeditationTimer({
                   }`}
                 />
                 {phase === "warmup"
-                  ? "Prepare"
+                  ? m.timer.phasePrepare
                   : phase === "paused"
-                    ? "Paused"
-                    : "Meditating"}
+                    ? m.timer.phasePaused
+                    : m.timer.phaseMeditating}
               </span>
               {isWakeLockActive && (
                 <span className="text-[11px] text-[var(--foreground-muted)]">
-                  Screen awake
+                  {m.timer.screenAwake}
                 </span>
               )}
             </div>
@@ -933,7 +930,7 @@ export function MeditationTimer({
                 </span>
                 <span className="mt-2 text-xs text-[var(--foreground-muted)]">
                   {phase === "warmup"
-                    ? "Take a comfortable seat"
+                    ? m.timer.takeComfortableSeat
                     : activeSessionSubtitle}
                 </span>
               </div>
@@ -952,12 +949,12 @@ export function MeditationTimer({
                       {isAmbientMuted ? (
                         <>
                           <VolumeX className="h-3.5 w-3.5" />
-                          Sound muted
+                          {m.timer.soundMuted}
                         </>
                       ) : (
                         <>
                           <Volume2 className="h-3.5 w-3.5" />
-                          {selectedSoundMeta?.name} on
+                          {m.timer.soundOn(selectedSoundName)}
                         </>
                       )}
                     </button>
@@ -970,7 +967,7 @@ export function MeditationTimer({
                       className="inline-flex items-center gap-1.5 rounded-full border border-black/6 bg-[var(--surface)] px-3.5 py-1.5 text-xs font-medium text-[var(--foreground-muted)] transition-colors hover:text-[var(--foreground)] dark:border-white/10"
                     >
                       <EyeOff className="h-3.5 w-3.5" />
-                      Dim screen
+                      {m.timer.dimScreen}
                     </button>
                   )}
                 </div>
@@ -981,14 +978,14 @@ export function MeditationTimer({
                 <button
                   type="button"
                   onClick={() => setIsDimmed(false)}
-                  aria-label="Wake dimmed screen"
+                  aria-label={m.timer.wakeDimmedAria}
                   className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-3 bg-[#050605] text-center focus:outline-none"
                 >
                   <span className="font-mono text-4xl font-normal tracking-tight text-white/25 tabular-nums">
                     {formatTimerDisplay(remainingMs)}
                   </span>
                   <span className="text-[11px] tracking-wide text-white/15">
-                    Tap anywhere to wake
+                    {m.timer.tapToWake}
                   </span>
                 </button>
               )}
@@ -996,15 +993,17 @@ export function MeditationTimer({
               {earlyStopElapsedSec !== null ? (
                 <div className="w-full rounded-2xl border border-black/8 bg-[var(--surface)] p-4 text-left shadow-xs dark:border-white/10">
                   <p className="text-sm font-semibold text-[var(--foreground)]">
-                    Save partial session?
+                    {m.timer.savePartialTitle}
                   </p>
                   <p className="mt-0.5 text-xs text-[var(--foreground-muted)]">
-                    You meditated for {formatSessionDuration(earlyStopElapsedSec)}.
+                    {m.timer.meditatedFor(
+                      formatSessionDuration(earlyStopElapsedSec)
+                    )}
                   </p>
                   <textarea
                     rows={2}
                     maxLength={500}
-                    placeholder="Optional reflection note..."
+                    placeholder={m.timer.optionalNotePlaceholder}
                     value={noteInput}
                     onChange={(event) => setNoteInput(event.target.value)}
                     className="mt-2.5 w-full resize-none rounded-xl border border-black/10 bg-[var(--background)] px-3 py-2 text-xs text-[var(--foreground)] outline-none placeholder:text-[var(--foreground-muted)]/70 focus:border-[var(--accent)] dark:border-white/12"
@@ -1016,7 +1015,7 @@ export function MeditationTimer({
                       disabled={isSavingEarlyStop}
                       className="flex h-10 items-center justify-center rounded-xl border border-black/8 bg-[var(--background)] text-xs font-medium text-[var(--foreground)] transition-colors hover:bg-[var(--surface-muted)] dark:border-white/10"
                     >
-                      Discard
+                      {m.timer.discard}
                     </button>
                     <button
                       type="button"
@@ -1029,7 +1028,7 @@ export function MeditationTimer({
                       ) : (
                         <Check className="h-3.5 w-3.5" />
                       )}
-                      Save Session
+                      {m.timer.saveSession}
                     </button>
                   </div>
                 </div>
@@ -1041,7 +1040,7 @@ export function MeditationTimer({
                     className="flex h-12 items-center justify-center gap-2 rounded-2xl border border-black/8 bg-[var(--surface)] text-sm font-medium text-[var(--foreground)] transition-colors hover:bg-[var(--surface-muted)] dark:border-white/10"
                   >
                     <RotateCcw className="h-4 w-4" />
-                    Reset
+                    {m.timer.reset}
                   </button>
 
                   {phase === "paused" ? (
@@ -1051,7 +1050,7 @@ export function MeditationTimer({
                       className="flex h-12 items-center justify-center gap-2 rounded-2xl bg-[var(--accent)] text-sm font-semibold text-[#fcfaf6] transition-colors hover:bg-[var(--accent-strong)] dark:text-[#151917]"
                     >
                       <Play className="h-4 w-4 fill-current" />
-                      Resume
+                      {m.timer.resume}
                     </button>
                   ) : (
                     <button
@@ -1060,7 +1059,7 @@ export function MeditationTimer({
                       className="flex h-12 items-center justify-center gap-2 rounded-2xl bg-[var(--accent)] text-sm font-semibold text-[#fcfaf6] transition-colors hover:bg-[var(--accent-strong)] dark:text-[#151917]"
                     >
                       <Pause className="h-4 w-4 fill-current" />
-                      Pause
+                      {m.timer.pause}
                     </button>
                   )}
                 </div>
@@ -1080,17 +1079,19 @@ export function MeditationTimer({
 
               <div>
                 <h1 className="text-2xl font-semibold tracking-tight text-[var(--foreground)]">
-                  Session Complete
+                  {m.timer.sessionComplete}
                 </h1>
                 <p className="mt-1.5 text-sm text-[var(--foreground-muted)]">
-                  {formatDurationLabel(durationMinutes)} of mindful stillness.
+                  {m.timer.mindfulStillness(
+                    formatDurationLabel(durationMinutes)
+                  )}
                 </p>
                 {savedSessionId && (
                   <p className="mt-1.5 inline-flex items-center gap-1 rounded-full bg-[var(--accent-soft)] px-2.5 py-0.5 text-[11px] font-medium text-[var(--accent)]">
                     <Check className="h-3 w-3" />
                     {savedSessionPending
-                      ? "Saved offline · will sync when online"
-                      : "Saved to history"}
+                      ? m.timer.savedOffline
+                      : m.timer.savedToHistory}
                   </p>
                 )}
               </div>
@@ -1100,7 +1101,7 @@ export function MeditationTimer({
                   <textarea
                     rows={2}
                     maxLength={500}
-                    placeholder="Add an optional reflection note..."
+                    placeholder={m.timer.addReflectionPlaceholder}
                     value={noteInput}
                     onChange={(event) => {
                       setNoteInput(event.target.value);
@@ -1110,7 +1111,7 @@ export function MeditationTimer({
                   />
                   <div className="mt-2 flex items-center justify-between">
                     <span className="text-[11px] text-[var(--foreground-muted)]">
-                      {noteSaved ? "Note saved" : "Optional note"}
+                      {noteSaved ? m.timer.noteSaved : m.timer.optionalNote}
                     </span>
                     <button
                       type="button"
@@ -1123,7 +1124,7 @@ export function MeditationTimer({
                       ) : (
                         <Check className="h-3 w-3" />
                       )}
-                      Save note
+                      {m.timer.saveNote}
                     </button>
                   </div>
                 </div>
@@ -1136,7 +1137,7 @@ export function MeditationTimer({
                 onClick={resetToIdle}
                 className="flex h-12 items-center justify-center gap-2 rounded-2xl border border-black/8 bg-[var(--surface)] text-sm font-medium text-[var(--foreground)] transition-colors hover:bg-[var(--surface-muted)] dark:border-white/10"
               >
-                Configure
+                {m.timer.configure}
               </button>
               <button
                 type="button"
@@ -1144,7 +1145,7 @@ export function MeditationTimer({
                 className="flex h-12 items-center justify-center gap-2 rounded-2xl bg-[var(--accent)] text-sm font-semibold text-[#fcfaf6] transition-colors hover:bg-[var(--accent-strong)] dark:text-[#151917]"
               >
                 <RotateCcw className="h-4 w-4" />
-                Repeat
+                {m.timer.repeat}
               </button>
             </div>
           </div>

@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { JetBrains_Mono, Plus_Jakarta_Sans } from "next/font/google";
+import { I18nProvider } from "@/components/i18n-provider";
 import { ServiceWorkerRegister } from "@/components/sw-register";
 import {
   THEME_STORAGE_KEY,
@@ -68,8 +69,10 @@ export default function RootLayout({
         className={`${plusJakarta.variable} ${jetbrainsMono.variable} min-h-dvh antialiased`}
       >
         <ThemeProvider>
-          <ServiceWorkerRegister />
-          {children}
+          <I18nProvider>
+            <ServiceWorkerRegister />
+            {children}
+          </I18nProvider>
         </ThemeProvider>
       </body>
     </html>
