@@ -7,8 +7,8 @@ A serene, mobile-first meditation Progressive Web App (PWA) built with Next.js 1
 ### V1 — Meditation Timer
 - **Mindful Timer:** Quick presets (`5`, `10`, `15`, `20`, `30` min) and custom durations (`1–180` min) powered by timestamp-based drift-free timing.
 - **Warm-up Countdown:** Optional `5s` or `10s` preparation period before the opening bell.
-- **Singing Bowl Bells:** Warm harmonic singing bowl synthesized locally via the Web Audio API at session start and completion.
-- **Background Sounds with Preview:** Preview and choose ambient soundscapes (`Silence` and softly filtered `White Noise`) with smooth fade-in/fade-out and volume control.
+- **Opening, Closing & Interval Bells:** Synthesized locally via the Web Audio API (`None`, `Singing Bowl`, `Deep Gong`, `Soft Chime`, `Crystal Bowl`, and `Wood Block`), plus an optional repeating interval bell (disabled by default, configurable from `1–60` min) that pauses with the timer.
+- **Background Soundscapes with Preview:** Preview and choose from synthesized ambient soundscapes (`Silence`, `White Noise`, `Pink Noise`, `Brown Noise`, `Gentle Rain`, `Ocean Waves`, and `Warm Drone`) with smooth fade-in/fade-out, volume control, and automatic local preference persistence.
 - **Screen Wake Lock:** Keeps the screen awake during active meditation sessions on supported mobile browsers.
 
 ### V2 — Favorite Guided Tracks & Mobile Pull-to-Refresh

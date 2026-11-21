@@ -1,20 +1,27 @@
-import type { AmbientSoundId } from "@/lib/audio/sounds";
+import type { AmbientSoundId, BellSoundId } from "@/lib/audio/sounds";
 
 type WebkitWindow = Window & {
   webkitAudioContext?: typeof AudioContext;
 };
 
+interface ActiveAmbientGraph {
+  sources: AudioScheduledSourceNode[];
+  nodes: AudioNode[];
+  masterGain: GainNode;
+  gainCeiling: number;
+}
+
 /**
  * Self-contained Web Audio API engine for meditation bells and ambient loops.
  * Designed to stay 100% offline with smooth fade envelopes and zero audio files
- * required in V1, while remaining extensible for file-backed tracks later.
+ * required, while remaining extensible for file-backed tracks later.
  */
 export class MeditationAudioEngine {
   private ctx: AudioContext | null = null;
-  private noiseBuffer: AudioBuffer | null = null;
-  private ambientSource: AudioBufferSourceNode | null = null;
-  private ambientGain: GainNode | null = null;
-  private ambientFilter: BiquadFilterNode | null = null;
+  private whiteNoiseBuffer: AudioBuffer | null = null;
+  private pinkNoiseBuffer: AudioBuffer | null = null;
+  private brownNoiseBuffer: AudioBuffer | null = null;
+  private ambientGraph: ActiveAmbientGraph | null = null;
   private activeSoundId: AmbientSoundId = "silence";
   private isPreviewing = false;
   private previewTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -44,18 +51,48 @@ export class MeditationAudioEngine {
   }
 
   /**
-   * Synthesizes a warm Tibetan singing bowl strike using harmonic partials
-   * with natural exponential decay.
+   * Backward-compatible helper used by GuidedSessionPlayer and legacy callers.
    */
   public playBell(variant: "start" | "end" = "start"): void {
+    this.playBellSound(variant === "end" ? "deep-gong" : "singing-bowl");
+  }
+
+  /**
+   * Plays a synthesized meditation chime/bell by catalog ID.
+   */
+  public playBellSound(soundId: BellSoundId): void {
+    if (soundId === "none") return;
+
     const ctx = this.ensureContext();
     if (!ctx) return;
 
-    const now = ctx.currentTime;
-    const baseFreq = variant === "start" ? 216 : 196;
-    const duration = variant === "start" ? 5.5 : 7.0;
+    switch (soundId) {
+      case "singing-bowl":
+        this.playSingingBowl(ctx);
+        break;
+      case "deep-gong":
+        this.playDeepGong(ctx);
+        break;
+      case "soft-chime":
+        this.playSoftChime(ctx);
+        break;
+      case "crystal-bowl":
+        this.playCrystalBowl(ctx);
+        break;
+      case "wood-block":
+        this.playWoodBlock(ctx);
+        break;
+    }
+  }
 
-    // Singing bowl partials: fundamental + gentle metallic overtones
+  /**
+   * Warm Tibetan singing bowl strike with harmonic partials and natural decay.
+   */
+  private playSingingBowl(ctx: AudioContext): void {
+    const now = ctx.currentTime;
+    const baseFreq = 216;
+    const duration = 5.5;
+
     const partials: Array<{ ratio: number; gain: number; decay: number }> = [
       { ratio: 1.0, gain: 0.28, decay: duration },
       { ratio: 2.0, gain: 0.11, decay: duration * 0.72 },
@@ -63,10 +100,154 @@ export class MeditationAudioEngine {
       { ratio: 5.404, gain: 0.025, decay: duration * 0.3 },
     ];
 
+    this.playHarmonicTone(ctx, now, baseFreq, partials, {
+      attack: 0.035,
+      masterPeak: 0.85,
+      duration,
+    });
+  }
+
+  /**
+   * Deep resonant temple gong with slow bloom and gentle metallic shimmer.
+   */
+  private playDeepGong(ctx: AudioContext): void {
+    const now = ctx.currentTime;
+    const baseFreq = 110;
+    const duration = 7.2;
+
+    const partials: Array<{ ratio: number; gain: number; decay: number }> = [
+      { ratio: 1.0, gain: 0.32, decay: duration },
+      { ratio: 1.007, gain: 0.14, decay: duration * 0.92 },
+      { ratio: 1.498, gain: 0.12, decay: duration * 0.72 },
+      { ratio: 2.02, gain: 0.08, decay: duration * 0.58 },
+      { ratio: 2.71, gain: 0.045, decay: duration * 0.42 },
+      { ratio: 3.65, gain: 0.022, decay: duration * 0.28 },
+    ];
+
+    this.playHarmonicTone(ctx, now, baseFreq, partials, {
+      attack: 0.09,
+      masterPeak: 0.88,
+      duration,
+    });
+  }
+
+  /**
+   * Delicate ting-sha / wind chime with airy upper partials.
+   */
+  private playSoftChime(ctx: AudioContext): void {
+    const now = ctx.currentTime;
+    const baseFreq = 880;
+    const duration = 3.8;
+
+    const partials: Array<{ ratio: number; gain: number; decay: number }> = [
+      { ratio: 1.0, gain: 0.22, decay: duration },
+      { ratio: 1.003, gain: 0.12, decay: duration * 0.9 },
+      { ratio: 1.5, gain: 0.085, decay: duration * 0.65 },
+      { ratio: 2.0, gain: 0.055, decay: duration * 0.48 },
+      { ratio: 2.997, gain: 0.025, decay: duration * 0.3 },
+    ];
+
+    this.playHarmonicTone(ctx, now, baseFreq, partials, {
+      attack: 0.012,
+      masterPeak: 0.62,
+      duration,
+    });
+  }
+
+  /**
+   * Pure quartz crystal bowl with serene beating and smooth bloom.
+   */
+  private playCrystalBowl(ctx: AudioContext): void {
+    const now = ctx.currentTime;
+    const baseFreq = 432;
+    const duration = 6.2;
+
+    const partials: Array<{ ratio: number; gain: number; decay: number }> = [
+      { ratio: 1.0, gain: 0.26, decay: duration },
+      { ratio: 1.0028, gain: 0.18, decay: duration * 0.96 },
+      { ratio: 2.0, gain: 0.055, decay: duration * 0.6 },
+      { ratio: 3.0, gain: 0.02, decay: duration * 0.35 },
+    ];
+
+    this.playHarmonicTone(ctx, now, baseFreq, partials, {
+      attack: 0.14,
+      masterPeak: 0.72,
+      duration,
+    });
+  }
+
+  /**
+   * Crisp organic temple wood block (mokugyo) tap.
+   */
+  private playWoodBlock(ctx: AudioContext): void {
+    const now = ctx.currentTime;
+
     const masterGain = ctx.createGain();
     masterGain.gain.setValueAtTime(0.0001, now);
-    masterGain.gain.exponentialRampToValueAtTime(0.85, now + 0.035);
-    masterGain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+    masterGain.gain.exponentialRampToValueAtTime(0.75, now + 0.004);
+    masterGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.24);
+    masterGain.connect(ctx.destination);
+
+    // Resonant hollow wooden body
+    const bodySpecs = [
+      { freq: 680, endFreq: 650, gain: 0.42, decay: 0.19 },
+      { freq: 1035, endFreq: 990, gain: 0.2, decay: 0.11 },
+    ];
+
+    for (const spec of bodySpecs) {
+      const osc = ctx.createOscillator();
+      const g = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(spec.freq, now);
+      osc.frequency.exponentialRampToValueAtTime(spec.endFreq, now + spec.decay);
+
+      g.gain.setValueAtTime(spec.gain, now);
+      g.gain.exponentialRampToValueAtTime(0.0001, now + spec.decay);
+
+      osc.connect(g);
+      g.connect(masterGain);
+      osc.start(now);
+      osc.stop(now + spec.decay + 0.03);
+    }
+
+    // Brief woody mallet transient
+    const clickSource = ctx.createBufferSource();
+    clickSource.buffer = this.getWhiteNoiseBuffer(ctx);
+
+    const clickFilter = ctx.createBiquadFilter();
+    clickFilter.type = "bandpass";
+    clickFilter.frequency.setValueAtTime(1900, now);
+    clickFilter.Q.setValueAtTime(4.5, now);
+
+    const clickGain = ctx.createGain();
+    clickGain.gain.setValueAtTime(0.35, now);
+    clickGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.028);
+
+    clickSource.connect(clickFilter);
+    clickFilter.connect(clickGain);
+    clickGain.connect(masterGain);
+
+    clickSource.start(now);
+    clickSource.stop(now + 0.04);
+  }
+
+  private playHarmonicTone(
+    ctx: AudioContext,
+    now: number,
+    baseFreq: number,
+    partials: Array<{ ratio: number; gain: number; decay: number }>,
+    envelope: { attack: number; masterPeak: number; duration: number }
+  ): void {
+    const masterGain = ctx.createGain();
+    masterGain.gain.setValueAtTime(0.0001, now);
+    masterGain.gain.exponentialRampToValueAtTime(
+      envelope.masterPeak,
+      now + envelope.attack
+    );
+    masterGain.gain.exponentialRampToValueAtTime(
+      0.0001,
+      now + envelope.duration
+    );
     masterGain.connect(ctx.destination);
 
     for (const partial of partials) {
@@ -91,11 +272,13 @@ export class MeditationAudioEngine {
   }
 
   private getWhiteNoiseBuffer(ctx: AudioContext): AudioBuffer {
-    if (this.noiseBuffer && this.noiseBuffer.sampleRate === ctx.sampleRate) {
-      return this.noiseBuffer;
+    if (
+      this.whiteNoiseBuffer &&
+      this.whiteNoiseBuffer.sampleRate === ctx.sampleRate
+    ) {
+      return this.whiteNoiseBuffer;
     }
 
-    // 4-second stereo buffer for seamless, non-repetitive looping
     const length = ctx.sampleRate * 4;
     const buffer = ctx.createBuffer(2, length, ctx.sampleRate);
 
@@ -106,7 +289,94 @@ export class MeditationAudioEngine {
       }
     }
 
-    this.noiseBuffer = buffer;
+    this.whiteNoiseBuffer = buffer;
+    return buffer;
+  }
+
+  /**
+   * Generates a 5-second stereo pink noise buffer using Paul Kellet's filter.
+   */
+  private getPinkNoiseBuffer(ctx: AudioContext): AudioBuffer {
+    if (
+      this.pinkNoiseBuffer &&
+      this.pinkNoiseBuffer.sampleRate === ctx.sampleRate
+    ) {
+      return this.pinkNoiseBuffer;
+    }
+
+    const length = ctx.sampleRate * 5;
+    const buffer = ctx.createBuffer(2, length, ctx.sampleRate);
+
+    for (let channel = 0; channel < 2; channel++) {
+      const data = buffer.getChannelData(channel);
+      let b0 = 0;
+      let b1 = 0;
+      let b2 = 0;
+      let b3 = 0;
+      let b4 = 0;
+      let b5 = 0;
+      let b6 = 0;
+      let peak = 0;
+
+      for (let i = 0; i < length; i++) {
+        const white = Math.random() * 2 - 1;
+        b0 = 0.99886 * b0 + white * 0.0555179;
+        b1 = 0.99332 * b1 + white * 0.0750759;
+        b2 = 0.969 * b2 + white * 0.153852;
+        b3 = 0.8665 * b3 + white * 0.3104856;
+        b4 = 0.55 * b4 + white * 0.5329522;
+        b5 = -0.7616 * b5 - white * 0.016898;
+        const sample = b0 + b1 + b2 + b3 + b4 + b5 + b6 + white * 0.5362;
+        b6 = white * 0.115926;
+        data[i] = sample;
+        const abs = Math.abs(sample);
+        if (abs > peak) peak = abs;
+      }
+
+      const scale = peak > 0 ? 0.85 / peak : 1;
+      for (let i = 0; i < length; i++) {
+        data[i] *= scale;
+      }
+    }
+
+    this.pinkNoiseBuffer = buffer;
+    return buffer;
+  }
+
+  /**
+   * Generates a 5-second stereo brown (Brownian) noise buffer.
+   */
+  private getBrownNoiseBuffer(ctx: AudioContext): AudioBuffer {
+    if (
+      this.brownNoiseBuffer &&
+      this.brownNoiseBuffer.sampleRate === ctx.sampleRate
+    ) {
+      return this.brownNoiseBuffer;
+    }
+
+    const length = ctx.sampleRate * 5;
+    const buffer = ctx.createBuffer(2, length, ctx.sampleRate);
+
+    for (let channel = 0; channel < 2; channel++) {
+      const data = buffer.getChannelData(channel);
+      let lastOut = 0;
+      let peak = 0;
+
+      for (let i = 0; i < length; i++) {
+        const white = Math.random() * 2 - 1;
+        lastOut = (lastOut + 0.02 * white) / 1.02;
+        data[i] = lastOut;
+        const abs = Math.abs(lastOut);
+        if (abs > peak) peak = abs;
+      }
+
+      const scale = peak > 0 ? 0.85 / peak : 1;
+      for (let i = 0; i < length; i++) {
+        data[i] *= scale;
+      }
+    }
+
+    this.brownNoiseBuffer = buffer;
     return buffer;
   }
 
@@ -129,49 +399,252 @@ export class MeditationAudioEngine {
     const ctx = this.ensureContext();
     if (!ctx) return;
 
-    // Tear down any existing ambient loop cleanly before starting a new one
     this.teardownAmbientImmediate();
 
     const now = ctx.currentTime;
-    const source = ctx.createBufferSource();
-    source.buffer = this.getWhiteNoiseBuffer(ctx);
-    source.loop = true;
+    const graph = this.buildAmbientGraph(ctx, soundId, now);
 
-    // Gentle low-pass filter softens harsh high-frequency hiss into a calm air texture
-    const filter = ctx.createBiquadFilter();
-    filter.type = "lowpass";
-    filter.frequency.setValueAtTime(2600, now);
-    filter.Q.setValueAtTime(0.5, now);
-
-    const gainNode = ctx.createGain();
-    const targetGain = this.mapVolumeToGain(volume);
-    gainNode.gain.setValueAtTime(0.0001, now);
-    gainNode.gain.exponentialRampToValueAtTime(
+    const targetGain = this.mapVolumeToGain(volume, graph.gainCeiling);
+    graph.masterGain.gain.setValueAtTime(0.0001, now);
+    graph.masterGain.gain.exponentialRampToValueAtTime(
       Math.max(0.0001, targetGain),
       now + Math.max(0.05, fadeInSeconds)
     );
+    graph.masterGain.connect(ctx.destination);
 
-    source.connect(filter);
-    filter.connect(gainNode);
-    gainNode.connect(ctx.destination);
+    for (const source of graph.sources) {
+      source.start(now);
+    }
 
-    source.start(now);
-
-    this.ambientSource = source;
-    this.ambientFilter = filter;
-    this.ambientGain = gainNode;
+    this.ambientGraph = graph;
     this.activeSoundId = soundId;
+  }
+
+  private buildAmbientGraph(
+    ctx: AudioContext,
+    soundId: Exclude<AmbientSoundId, "silence">,
+    now: number
+  ): ActiveAmbientGraph {
+    const masterGain = ctx.createGain();
+    const sources: AudioScheduledSourceNode[] = [];
+    const nodes: AudioNode[] = [masterGain];
+
+    if (soundId === "white-noise") {
+      const source = ctx.createBufferSource();
+      source.buffer = this.getWhiteNoiseBuffer(ctx);
+      source.loop = true;
+
+      const filter = ctx.createBiquadFilter();
+      filter.type = "lowpass";
+      filter.frequency.setValueAtTime(2600, now);
+      filter.Q.setValueAtTime(0.5, now);
+
+      source.connect(filter);
+      filter.connect(masterGain);
+
+      sources.push(source);
+      nodes.push(source, filter);
+      return { sources, nodes, masterGain, gainCeiling: 0.28 };
+    }
+
+    if (soundId === "pink-noise") {
+      const source = ctx.createBufferSource();
+      source.buffer = this.getPinkNoiseBuffer(ctx);
+      source.loop = true;
+
+      const filter = ctx.createBiquadFilter();
+      filter.type = "lowpass";
+      filter.frequency.setValueAtTime(3200, now);
+      filter.Q.setValueAtTime(0.4, now);
+
+      source.connect(filter);
+      filter.connect(masterGain);
+
+      sources.push(source);
+      nodes.push(source, filter);
+      return { sources, nodes, masterGain, gainCeiling: 0.36 };
+    }
+
+    if (soundId === "brown-noise") {
+      const source = ctx.createBufferSource();
+      source.buffer = this.getBrownNoiseBuffer(ctx);
+      source.loop = true;
+
+      const filter = ctx.createBiquadFilter();
+      filter.type = "lowpass";
+      filter.frequency.setValueAtTime(850, now);
+      filter.Q.setValueAtTime(0.5, now);
+
+      source.connect(filter);
+      filter.connect(masterGain);
+
+      sources.push(source);
+      nodes.push(source, filter);
+      return { sources, nodes, masterGain, gainCeiling: 0.45 };
+    }
+
+    if (soundId === "gentle-rain") {
+      // Base steady rain layer
+      const baseSource = ctx.createBufferSource();
+      baseSource.buffer = this.getPinkNoiseBuffer(ctx);
+      baseSource.loop = true;
+
+      const baseFilter = ctx.createBiquadFilter();
+      baseFilter.type = "lowpass";
+      baseFilter.frequency.setValueAtTime(1600, now);
+      baseFilter.Q.setValueAtTime(0.4, now);
+
+      const baseGain = ctx.createGain();
+      baseGain.gain.setValueAtTime(0.75, now);
+
+      baseSource.connect(baseFilter);
+      baseFilter.connect(baseGain);
+      baseGain.connect(masterGain);
+
+      // Soft upper-frequency rainfall shimmer with slow organic modulation
+      const patterSource = ctx.createBufferSource();
+      patterSource.buffer = this.getWhiteNoiseBuffer(ctx);
+      patterSource.loop = true;
+
+      const patterFilter = ctx.createBiquadFilter();
+      patterFilter.type = "bandpass";
+      patterFilter.frequency.setValueAtTime(3400, now);
+      patterFilter.Q.setValueAtTime(0.9, now);
+
+      const patterGain = ctx.createGain();
+      patterGain.gain.setValueAtTime(0.18, now);
+
+      const lfo = ctx.createOscillator();
+      lfo.type = "sine";
+      lfo.frequency.setValueAtTime(0.17, now);
+
+      const lfoGain = ctx.createGain();
+      lfoGain.gain.setValueAtTime(0.06, now);
+
+      lfo.connect(lfoGain);
+      lfoGain.connect(patterGain.gain);
+
+      patterSource.connect(patterFilter);
+      patterFilter.connect(patterGain);
+      patterGain.connect(masterGain);
+
+      sources.push(baseSource, patterSource, lfo);
+      nodes.push(
+        baseSource,
+        baseFilter,
+        baseGain,
+        patterSource,
+        patterFilter,
+        patterGain,
+        lfo,
+        lfoGain
+      );
+      return { sources, nodes, masterGain, gainCeiling: 0.36 };
+    }
+
+    if (soundId === "ocean-waves") {
+      const source = ctx.createBufferSource();
+      source.buffer = this.getBrownNoiseBuffer(ctx);
+      source.loop = true;
+
+      const filter = ctx.createBiquadFilter();
+      filter.type = "lowpass";
+      filter.frequency.setValueAtTime(520, now);
+      filter.Q.setValueAtTime(0.7, now);
+
+      const swellGain = ctx.createGain();
+      swellGain.gain.setValueAtTime(0.65, now);
+
+      // Slow ~9s wave swell modulating both filter cutoff and amplitude
+      const waveLfo = ctx.createOscillator();
+      waveLfo.type = "sine";
+      waveLfo.frequency.setValueAtTime(0.11, now);
+
+      const filterLfoGain = ctx.createGain();
+      filterLfoGain.gain.setValueAtTime(320, now);
+
+      const ampLfoGain = ctx.createGain();
+      ampLfoGain.gain.setValueAtTime(0.3, now);
+
+      waveLfo.connect(filterLfoGain);
+      filterLfoGain.connect(filter.frequency);
+
+      waveLfo.connect(ampLfoGain);
+      ampLfoGain.connect(swellGain.gain);
+
+      source.connect(filter);
+      filter.connect(swellGain);
+      swellGain.connect(masterGain);
+
+      sources.push(source, waveLfo);
+      nodes.push(
+        source,
+        filter,
+        swellGain,
+        waveLfo,
+        filterLfoGain,
+        ampLfoGain
+      );
+      return { sources, nodes, masterGain, gainCeiling: 0.48 };
+    }
+
+    // "warm-drone": meditative tanpura-inspired harmonic pad
+    const filter = ctx.createBiquadFilter();
+    filter.type = "lowpass";
+    filter.frequency.setValueAtTime(540, now);
+    filter.Q.setValueAtTime(0.6, now);
+
+    const droneLfo = ctx.createOscillator();
+    droneLfo.type = "sine";
+    droneLfo.frequency.setValueAtTime(0.08, now);
+
+    const droneLfoGain = ctx.createGain();
+    droneLfoGain.gain.setValueAtTime(110, now);
+    droneLfo.connect(droneLfoGain);
+    droneLfoGain.connect(filter.frequency);
+
+    const voices: Array<{
+      freq: number;
+      type: OscillatorType;
+      gain: number;
+    }> = [
+      { freq: 108, type: "sine", gain: 0.34 },
+      { freq: 108.35, type: "sine", gain: 0.2 },
+      { freq: 162, type: "triangle", gain: 0.14 },
+      { freq: 216, type: "sine", gain: 0.12 },
+    ];
+
+    for (const voice of voices) {
+      const osc = ctx.createOscillator();
+      const voiceGain = ctx.createGain();
+      osc.type = voice.type;
+      osc.frequency.setValueAtTime(voice.freq, now);
+      voiceGain.gain.setValueAtTime(voice.gain, now);
+      osc.connect(voiceGain);
+      voiceGain.connect(filter);
+      sources.push(osc);
+      nodes.push(osc, voiceGain);
+    }
+
+    filter.connect(masterGain);
+    sources.push(droneLfo);
+    nodes.push(filter, droneLfo, droneLfoGain);
+
+    return { sources, nodes, masterGain, gainCeiling: 0.34 };
   }
 
   /**
    * Smoothly adjusts ambient sound volume while playing.
    */
   public setAmbientVolume(volume: number): void {
-    if (!this.ctx || !this.ambientGain) return;
+    if (!this.ctx || !this.ambientGraph) return;
     const now = this.ctx.currentTime;
-    const target = Math.max(0.0001, this.mapVolumeToGain(volume));
-    this.ambientGain.gain.cancelScheduledValues(now);
-    this.ambientGain.gain.setTargetAtTime(target, now, 0.08);
+    const target = Math.max(
+      0.0001,
+      this.mapVolumeToGain(volume, this.ambientGraph.gainCeiling)
+    );
+    this.ambientGraph.masterGain.gain.cancelScheduledValues(now);
+    this.ambientGraph.masterGain.gain.setTargetAtTime(target, now, 0.08);
   }
 
   /**
@@ -181,36 +654,28 @@ export class MeditationAudioEngine {
     this.clearPreviewTimer();
     this.isPreviewing = false;
 
-    if (!this.ctx || !this.ambientSource || !this.ambientGain) {
+    if (!this.ctx || !this.ambientGraph) {
       this.teardownAmbientImmediate();
       return;
     }
 
     const ctx = this.ctx;
-    const source = this.ambientSource;
-    const gainNode = this.ambientGain;
-    const filter = this.ambientFilter;
+    const graph = this.ambientGraph;
 
-    this.ambientSource = null;
-    this.ambientGain = null;
-    this.ambientFilter = null;
+    this.ambientGraph = null;
     this.activeSoundId = "silence";
 
     const now = ctx.currentTime;
     const fade = Math.max(0.05, fadeOutSeconds);
-    gainNode.gain.cancelScheduledValues(now);
-    gainNode.gain.setValueAtTime(Math.max(0.0001, gainNode.gain.value), now);
-    gainNode.gain.exponentialRampToValueAtTime(0.0001, now + fade);
+    graph.masterGain.gain.cancelScheduledValues(now);
+    graph.masterGain.gain.setValueAtTime(
+      Math.max(0.0001, graph.masterGain.gain.value),
+      now
+    );
+    graph.masterGain.gain.exponentialRampToValueAtTime(0.0001, now + fade);
 
     setTimeout(() => {
-      try {
-        source.stop();
-      } catch {
-        // Ignore if already stopped
-      }
-      source.disconnect();
-      filter?.disconnect();
-      gainNode.disconnect();
+      this.disposeGraph(graph);
     }, Math.ceil((fade + 0.08) * 1000));
   }
 
@@ -267,33 +732,37 @@ export class MeditationAudioEngine {
     }
   }
 
-  private teardownAmbientImmediate(): void {
-    if (this.ambientSource) {
+  private disposeGraph(graph: ActiveAmbientGraph): void {
+    for (const source of graph.sources) {
       try {
-        this.ambientSource.stop();
+        source.stop();
       } catch {
         // Ignore if already stopped
       }
-      this.ambientSource.disconnect();
-      this.ambientSource = null;
     }
-    if (this.ambientFilter) {
-      this.ambientFilter.disconnect();
-      this.ambientFilter = null;
+    for (const node of graph.nodes) {
+      try {
+        node.disconnect();
+      } catch {
+        // Ignore if already disconnected
+      }
     }
-    if (this.ambientGain) {
-      this.ambientGain.disconnect();
-      this.ambientGain = null;
+  }
+
+  private teardownAmbientImmediate(): void {
+    if (this.ambientGraph) {
+      this.disposeGraph(this.ambientGraph);
+      this.ambientGraph = null;
     }
     this.activeSoundId = "silence";
   }
 
   /**
    * Maps a [0, 1] UI slider value to a comfortable acoustic gain ceiling
-   * so white noise remains gentle even near 100%.
+   * using a quadratic curve for smooth perceived loudness control.
    */
-  private mapVolumeToGain(volume: number): number {
+  private mapVolumeToGain(volume: number, ceiling: number): number {
     const clamped = Math.min(1, Math.max(0, volume));
-    return clamped * clamped * 0.28;
+    return clamped * clamped * ceiling;
   }
 }

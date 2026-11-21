@@ -1,6 +1,8 @@
 import {
   MAX_DURATION_MINUTES,
+  MAX_INTERVAL_MINUTES,
   MIN_DURATION_MINUTES,
+  MIN_INTERVAL_MINUTES,
 } from "@/lib/timer/types";
 
 /**
@@ -12,6 +14,65 @@ export function clampDurationMinutes(value: number): number {
     MAX_DURATION_MINUTES,
     Math.max(MIN_DURATION_MINUTES, Math.round(value))
   );
+}
+
+/**
+ * Clamps a requested interval bell period (in minutes) into the supported range.
+ */
+export function clampIntervalMinutes(value: number): number {
+  if (!Number.isFinite(value)) return MIN_INTERVAL_MINUTES;
+  return Math.min(
+    MAX_INTERVAL_MINUTES,
+    Math.max(MIN_INTERVAL_MINUTES, Math.round(value))
+  );
+}
+
+/**
+ * Computes how many times an interval bell will chime strictly between session
+ * start (0) and completion (durationMinutes). Never counts 0 or completion.
+ */
+export function computeIntervalCount(
+  durationMinutes: number,
+  intervalMinutes: number
+): number {
+  if (
+    !Number.isFinite(durationMinutes) ||
+    !Number.isFinite(intervalMinutes) ||
+    durationMinutes <= 0 ||
+    intervalMinutes <= 0
+  ) {
+    return 0;
+  }
+
+  return Math.max(0, Math.ceil(durationMinutes / intervalMinutes) - 1);
+}
+
+/**
+ * Returns the 1-based index of the most recent interval mark crossed during a
+ * session, or 0 if no interval mark has been reached yet (or if the session
+ * has reached completion, where the closing bell takes over).
+ */
+export function computeIntervalBellIndex(
+  elapsedMs: number,
+  totalMs: number,
+  intervalMs: number
+): number {
+  if (
+    !Number.isFinite(elapsedMs) ||
+    !Number.isFinite(totalMs) ||
+    !Number.isFinite(intervalMs) ||
+    totalMs <= 0 ||
+    intervalMs <= 0 ||
+    elapsedMs <= 0 ||
+    elapsedMs >= totalMs
+  ) {
+    return 0;
+  }
+
+  const maxIndex = Math.max(0, Math.ceil(totalMs / intervalMs) - 1);
+  if (maxIndex === 0) return 0;
+
+  return Math.min(maxIndex, Math.floor(elapsedMs / intervalMs));
 }
 
 /**
