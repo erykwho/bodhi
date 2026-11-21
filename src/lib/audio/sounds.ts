@@ -1,6 +1,7 @@
 export type BellSoundId =
   | "none"
   | "singing-bowl"
+  | "tibetan-healing-bowl"
   | "deep-gong"
   | "soft-chime"
   | "crystal-bowl"
@@ -28,6 +29,12 @@ export const BELL_SOUNDS: readonly BellSoundOption[] = [
     id: "singing-bowl",
     name: "Singing Bowl",
     description: "Warm Tibetan harmonic bowl",
+    kind: "synth",
+  },
+  {
+    id: "tibetan-healing-bowl",
+    name: "Tibetan Healing Bowl",
+    description: "Deep hand-hammered resonant shimmer",
     kind: "synth",
   },
   {

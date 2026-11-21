@@ -70,6 +70,9 @@ export class MeditationAudioEngine {
       case "singing-bowl":
         this.playSingingBowl(ctx);
         break;
+      case "tibetan-healing-bowl":
+        this.playTibetanHealingBowl(ctx);
+        break;
       case "deep-gong":
         this.playDeepGong(ctx);
         break;
@@ -91,20 +94,151 @@ export class MeditationAudioEngine {
   private playSingingBowl(ctx: AudioContext): void {
     const now = ctx.currentTime;
     const baseFreq = 216;
-    const duration = 5.5;
+    const duration = 8.5;
 
     const partials: Array<{ ratio: number; gain: number; decay: number }> = [
       { ratio: 1.0, gain: 0.28, decay: duration },
+      { ratio: 1.004, gain: 0.1, decay: duration * 0.9 },
       { ratio: 2.0, gain: 0.11, decay: duration * 0.72 },
-      { ratio: 2.756, gain: 0.06, decay: duration * 0.5 },
-      { ratio: 5.404, gain: 0.025, decay: duration * 0.3 },
+      { ratio: 2.756, gain: 0.06, decay: duration * 0.55 },
+      { ratio: 5.404, gain: 0.025, decay: duration * 0.35 },
     ];
 
     this.playHarmonicTone(ctx, now, baseFreq, partials, {
-      attack: 0.035,
+      attack: 0.04,
       masterPeak: 0.85,
       duration,
     });
+  }
+
+  /**
+   * Deep hand-hammered Tibetan healing bowl with soft felt mallet strike,
+   * paired doublet partials for authentic slow acoustic beating ("wah-wah" shimmer),
+   * subtle stereo width, and a long resonant tail.
+   */
+  private playTibetanHealingBowl(ctx: AudioContext): void {
+    const now = ctx.currentTime;
+    const baseFreq = 174; // Grounding deep healing bowl fundamental (~F3)
+    const duration = 13.5;
+
+    const masterGain = ctx.createGain();
+    masterGain.gain.setValueAtTime(0.0001, now);
+    masterGain.gain.exponentialRampToValueAtTime(0.88, now + 0.08);
+    masterGain.gain.setValueAtTime(0.88, now + duration * 0.65);
+    masterGain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+    masterGain.connect(ctx.destination);
+
+    // Subtle soft felt mallet strike transient
+    const malletSource = ctx.createBufferSource();
+    malletSource.buffer = this.getPinkNoiseBuffer(ctx);
+
+    const malletFilter = ctx.createBiquadFilter();
+    malletFilter.type = "bandpass";
+    malletFilter.frequency.setValueAtTime(260, now);
+    malletFilter.Q.setValueAtTime(1.4, now);
+
+    const malletGain = ctx.createGain();
+    malletGain.gain.setValueAtTime(0.0001, now);
+    malletGain.gain.exponentialRampToValueAtTime(0.24, now + 0.008);
+    malletGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.075);
+
+    malletSource.connect(malletFilter);
+    malletFilter.connect(malletGain);
+    malletGain.connect(masterGain);
+
+    malletSource.start(now);
+    malletSource.stop(now + 0.09);
+
+    // Paired detuned partials replicate hand-hammered bowl asymmetry & lush beating
+    const partials: Array<{
+      freq: number;
+      gain: number;
+      attack: number;
+      decay: number;
+      pan: number;
+    }> = [
+      // Fundamental doublet (0.9 Hz warm breathing pulse)
+      { freq: baseFreq, gain: 0.28, attack: 0.06, decay: duration, pan: -0.18 },
+      {
+        freq: baseFreq + 0.9,
+        gain: 0.22,
+        attack: 0.09,
+        decay: duration * 0.96,
+        pan: 0.18,
+      },
+      // Second bowl mode (~2.76x, 1.6 Hz shimmer)
+      {
+        freq: baseFreq * 2.756,
+        gain: 0.11,
+        attack: 0.03,
+        decay: duration * 0.82,
+        pan: -0.25,
+      },
+      {
+        freq: baseFreq * 2.756 + 1.6,
+        gain: 0.09,
+        attack: 0.05,
+        decay: duration * 0.78,
+        pan: 0.25,
+      },
+      // Third metallic overtone (~5.40x, 2.4 Hz airy shimmer)
+      {
+        freq: baseFreq * 5.404,
+        gain: 0.048,
+        attack: 0.015,
+        decay: duration * 0.56,
+        pan: -0.15,
+      },
+      {
+        freq: baseFreq * 5.404 + 2.4,
+        gain: 0.038,
+        attack: 0.02,
+        decay: duration * 0.52,
+        pan: 0.15,
+      },
+      // High crystalline strike sparkle (~8.93x)
+      {
+        freq: baseFreq * 8.93,
+        gain: 0.018,
+        attack: 0.008,
+        decay: duration * 0.3,
+        pan: 0,
+      },
+    ];
+
+    const supportsStereoPanner = typeof ctx.createStereoPanner === "function";
+
+    for (const partial of partials) {
+      const osc = ctx.createOscillator();
+      const partialGain = ctx.createGain();
+
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(partial.freq, now);
+
+      partialGain.gain.setValueAtTime(0.0001, now);
+      partialGain.gain.exponentialRampToValueAtTime(
+        partial.gain,
+        now + partial.attack
+      );
+      partialGain.gain.exponentialRampToValueAtTime(
+        0.0001,
+        now + partial.decay
+      );
+
+      osc.connect(partialGain);
+
+      if (supportsStereoPanner && partial.pan !== 0) {
+        const panner = ctx.createStereoPanner();
+        panner.pan.setValueAtTime(partial.pan, now);
+        partialGain.connect(panner);
+        panner.connect(masterGain);
+      } else {
+        partialGain.connect(masterGain);
+      }
+
+      osc.start(now);
+      osc.stop(now + partial.decay + 0.08);
+    }
   }
 
   /**
@@ -113,15 +247,15 @@ export class MeditationAudioEngine {
   private playDeepGong(ctx: AudioContext): void {
     const now = ctx.currentTime;
     const baseFreq = 110;
-    const duration = 7.2;
+    const duration = 11.0;
 
     const partials: Array<{ ratio: number; gain: number; decay: number }> = [
       { ratio: 1.0, gain: 0.32, decay: duration },
-      { ratio: 1.007, gain: 0.14, decay: duration * 0.92 },
-      { ratio: 1.498, gain: 0.12, decay: duration * 0.72 },
-      { ratio: 2.02, gain: 0.08, decay: duration * 0.58 },
-      { ratio: 2.71, gain: 0.045, decay: duration * 0.42 },
-      { ratio: 3.65, gain: 0.022, decay: duration * 0.28 },
+      { ratio: 1.007, gain: 0.16, decay: duration * 0.94 },
+      { ratio: 1.498, gain: 0.12, decay: duration * 0.76 },
+      { ratio: 2.02, gain: 0.08, decay: duration * 0.62 },
+      { ratio: 2.71, gain: 0.045, decay: duration * 0.46 },
+      { ratio: 3.65, gain: 0.022, decay: duration * 0.32 },
     ];
 
     this.playHarmonicTone(ctx, now, baseFreq, partials, {
@@ -137,14 +271,14 @@ export class MeditationAudioEngine {
   private playSoftChime(ctx: AudioContext): void {
     const now = ctx.currentTime;
     const baseFreq = 880;
-    const duration = 3.8;
+    const duration = 6.0;
 
     const partials: Array<{ ratio: number; gain: number; decay: number }> = [
       { ratio: 1.0, gain: 0.22, decay: duration },
-      { ratio: 1.003, gain: 0.12, decay: duration * 0.9 },
-      { ratio: 1.5, gain: 0.085, decay: duration * 0.65 },
-      { ratio: 2.0, gain: 0.055, decay: duration * 0.48 },
-      { ratio: 2.997, gain: 0.025, decay: duration * 0.3 },
+      { ratio: 1.003, gain: 0.12, decay: duration * 0.92 },
+      { ratio: 1.5, gain: 0.085, decay: duration * 0.68 },
+      { ratio: 2.0, gain: 0.055, decay: duration * 0.5 },
+      { ratio: 2.997, gain: 0.025, decay: duration * 0.32 },
     ];
 
     this.playHarmonicTone(ctx, now, baseFreq, partials, {
@@ -160,13 +294,13 @@ export class MeditationAudioEngine {
   private playCrystalBowl(ctx: AudioContext): void {
     const now = ctx.currentTime;
     const baseFreq = 432;
-    const duration = 6.2;
+    const duration = 9.5;
 
     const partials: Array<{ ratio: number; gain: number; decay: number }> = [
       { ratio: 1.0, gain: 0.26, decay: duration },
-      { ratio: 1.0028, gain: 0.18, decay: duration * 0.96 },
-      { ratio: 2.0, gain: 0.055, decay: duration * 0.6 },
-      { ratio: 3.0, gain: 0.02, decay: duration * 0.35 },
+      { ratio: 1.0028, gain: 0.19, decay: duration * 0.96 },
+      { ratio: 2.0, gain: 0.055, decay: duration * 0.64 },
+      { ratio: 3.0, gain: 0.02, decay: duration * 0.38 },
     ];
 
     this.playHarmonicTone(ctx, now, baseFreq, partials, {
@@ -185,13 +319,13 @@ export class MeditationAudioEngine {
     const masterGain = ctx.createGain();
     masterGain.gain.setValueAtTime(0.0001, now);
     masterGain.gain.exponentialRampToValueAtTime(0.75, now + 0.004);
-    masterGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.24);
+    masterGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.36);
     masterGain.connect(ctx.destination);
 
     // Resonant hollow wooden body
     const bodySpecs = [
-      { freq: 680, endFreq: 650, gain: 0.42, decay: 0.19 },
-      { freq: 1035, endFreq: 990, gain: 0.2, decay: 0.11 },
+      { freq: 680, endFreq: 645, gain: 0.42, decay: 0.3 },
+      { freq: 1035, endFreq: 985, gain: 0.2, decay: 0.18 },
     ];
 
     for (const spec of bodySpecs) {
@@ -207,7 +341,7 @@ export class MeditationAudioEngine {
       osc.connect(g);
       g.connect(masterGain);
       osc.start(now);
-      osc.stop(now + spec.decay + 0.03);
+      osc.stop(now + spec.decay + 0.04);
     }
 
     // Brief woody mallet transient
@@ -221,14 +355,14 @@ export class MeditationAudioEngine {
 
     const clickGain = ctx.createGain();
     clickGain.gain.setValueAtTime(0.35, now);
-    clickGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.028);
+    clickGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.032);
 
     clickSource.connect(clickFilter);
     clickFilter.connect(clickGain);
     clickGain.connect(masterGain);
 
     clickSource.start(now);
-    clickSource.stop(now + 0.04);
+    clickSource.stop(now + 0.045);
   }
 
   private playHarmonicTone(
@@ -238,11 +372,17 @@ export class MeditationAudioEngine {
     partials: Array<{ ratio: number; gain: number; decay: number }>,
     envelope: { attack: number; masterPeak: number; duration: number }
   ): void {
+    // Master envelope shapes the attack and final tail fade without doubling
+    // each partial's exponential decay rate.
     const masterGain = ctx.createGain();
     masterGain.gain.setValueAtTime(0.0001, now);
     masterGain.gain.exponentialRampToValueAtTime(
       envelope.masterPeak,
       now + envelope.attack
+    );
+    masterGain.gain.setValueAtTime(
+      envelope.masterPeak,
+      now + envelope.duration * 0.7
     );
     masterGain.gain.exponentialRampToValueAtTime(
       0.0001,
@@ -267,7 +407,7 @@ export class MeditationAudioEngine {
       partialGain.connect(masterGain);
 
       osc.start(now);
-      osc.stop(now + partial.decay + 0.05);
+      osc.stop(now + partial.decay + 0.08);
     }
   }
 
