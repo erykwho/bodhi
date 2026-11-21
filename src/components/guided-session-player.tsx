@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
   Bell,
@@ -28,6 +28,8 @@ interface YouTubeAPI {
     element: HTMLElement | string,
     options: {
       videoId: string;
+      width?: string | number;
+      height?: string | number;
       playerVars?: Record<string, string | number>;
       events?: {
         onReady?: () => void;
@@ -147,8 +149,7 @@ export function GuidedSessionPlayer({
   const [playbackState, setPlaybackState] = useState<PlaybackState>("loading");
   const [playerError, setPlayerError] = useState<string | null>(null);
 
-  const playerDomId = useId().replace(/:/g, "");
-  const ytContainerRef = useRef<HTMLDivElement | null>(null);
+  const ytHostRef = useRef<HTMLDivElement | null>(null);
   const ytPlayerRef = useRef<YouTubePlayerInstance | null>(null);
   const scIframeRef = useRef<HTMLIFrameElement | null>(null);
   const scWidgetRef = useRef<SoundCloudWidgetInstance | null>(null);
@@ -186,17 +187,26 @@ export function GuidedSessionPlayer({
     }
   }, [getAudioEngine]);
 
-  // Mount YouTube IFrame Player API
+  // Mount YouTube IFrame Player API into an unmanaged child node so YouTube's
+  // in-place iframe replacement never conflicts with React's unmount reconciliation.
   useEffect(() => {
     if (track.provider !== "YOUTUBE") return;
     let cancelled = false;
+    const host = ytHostRef.current;
 
     void loadYouTubeApi()
       .then((YT) => {
-        if (cancelled || !ytContainerRef.current) return;
+        if (cancelled || !host) return;
 
-        ytPlayerRef.current = new YT.Player(ytContainerRef.current, {
+        host.innerHTML = "";
+        const mountNode = document.createElement("div");
+        mountNode.className = "h-full w-full";
+        host.appendChild(mountNode);
+
+        ytPlayerRef.current = new YT.Player(mountNode, {
           videoId: track.externalId,
+          width: "100%",
+          height: "100%",
           playerVars: {
             rel: 0,
             modestbranding: 1,
@@ -238,6 +248,9 @@ export function GuidedSessionPlayer({
         // Ignore teardown errors
       }
       ytPlayerRef.current = null;
+      if (host) {
+        host.innerHTML = "";
+      }
     };
   }, [getAudioEngine, handleTrackCompleted, track.externalId, track.provider]);
 
@@ -285,11 +298,15 @@ export function GuidedSessionPlayer({
       cancelled = true;
       const widget = scWidgetRef.current;
       if (widget && window.SC?.Widget?.Events) {
-        const Events = window.SC.Widget.Events;
-        widget.unbind(Events.READY);
-        widget.unbind(Events.PLAY);
-        widget.unbind(Events.PAUSE);
-        widget.unbind(Events.FINISH);
+        try {
+          const Events = window.SC.Widget.Events;
+          widget.unbind(Events.READY);
+          widget.unbind(Events.PLAY);
+          widget.unbind(Events.PAUSE);
+          widget.unbind(Events.FINISH);
+        } catch {
+          // Ignore teardown errors if the iframe is already detached
+        }
       }
       scWidgetRef.current = null;
     };
@@ -412,11 +429,7 @@ export function GuidedSessionPlayer({
               </div>
             ) : track.provider === "YOUTUBE" ? (
               <div className="relative aspect-video w-full bg-black">
-                <div
-                  id={playerDomId}
-                  ref={ytContainerRef}
-                  className="h-full w-full"
-                />
+                <div ref={ytHostRef} className="h-full w-full" />
               </div>
             ) : (
               <iframe
