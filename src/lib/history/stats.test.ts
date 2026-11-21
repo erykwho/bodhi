@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildMonthlyCalendar,
   computeCurrentStreak,
   computeHistoryStats,
   computeLongestStreak,
+  filterSessionsByPeriod,
   formatSessionDuration,
   formatTotalTime,
 } from "./stats";
@@ -75,6 +77,54 @@ describe("meditation history stats", () => {
         currentStreakDays: 2,
         longestStreakDays: 2,
       });
+    });
+  });
+
+  describe("filterSessionsByPeriod", () => {
+    it("filters sessions accurately for 7d, 30d, and all", () => {
+      const now = new Date(2026, 10, 21, 12);
+      const sessions = [
+        { id: "today", endedAt: localIso(2026, 11, 21, 9) },
+        { id: "day6", endedAt: localIso(2026, 11, 15, 9) },
+        { id: "day20", endedAt: localIso(2026, 11, 1, 9) },
+        { id: "old", endedAt: localIso(2026, 9, 10, 9) },
+      ];
+
+      expect(
+        filterSessionsByPeriod(sessions, "7d", now).map((s) => s.id)
+      ).toEqual(["today", "day6"]);
+      expect(
+        filterSessionsByPeriod(sessions, "30d", now).map((s) => s.id)
+      ).toEqual(["today", "day6", "day20"]);
+      expect(
+        filterSessionsByPeriod(sessions, "all", now).map((s) => s.id)
+      ).toHaveLength(4);
+    });
+  });
+
+  describe("buildMonthlyCalendar", () => {
+    it("computes daily intensities, active days, and leading offsets", () => {
+      const now = new Date(2026, 10, 21, 12);
+      const cal = buildMonthlyCalendar(
+        [
+          { actualDurationSec: 300, endedAt: localIso(2026, 11, 5, 8) },
+          { actualDurationSec: 900, endedAt: localIso(2026, 11, 10, 8) },
+          { actualDurationSec: 1800, endedAt: localIso(2026, 11, 21, 8) },
+          { actualDurationSec: 600, endedAt: localIso(2026, 10, 15, 8) },
+        ],
+        2026,
+        10, // November (0-indexed)
+        now
+      );
+
+      expect(cal.days).toHaveLength(30);
+      expect(cal.activeDaysCount).toBe(3);
+      expect(cal.totalSecondsInMonth).toBe(3000);
+      expect(cal.days[4].intensity).toBe(1); // Nov 5 (5m)
+      expect(cal.days[9].intensity).toBe(2); // Nov 10 (15m)
+      expect(cal.days[20].intensity).toBe(3); // Nov 21 (30m)
+      expect(cal.days[20].isToday).toBe(true);
+      expect(cal.days[25].isFuture).toBe(true);
     });
   });
 

@@ -8,6 +8,28 @@ import type {
  */
 export const MIN_SAVEABLE_EARLY_STOP_SECONDS = 60;
 
+export type HistoryPeriod = "7d" | "30d" | "all";
+
+export interface CalendarDayCell {
+  dateKey: string;
+  dayOfMonth: number;
+  sessionCount: number;
+  totalSeconds: number;
+  /** Heatmap intensity level: 0 = none, 1 = <10m, 2 = 10-24m, 3 = 25m+ */
+  intensity: 0 | 1 | 2 | 3;
+  isToday: boolean;
+  isFuture: boolean;
+}
+
+export interface MonthlyCalendarData {
+  year: number;
+  month: number; // 0-indexed (0 = Jan, 11 = Dec)
+  leadingEmptyCells: number;
+  days: CalendarDayCell[];
+  activeDaysCount: number;
+  totalSecondsInMonth: number;
+}
+
 /**
  * Converts a Date into a local YYYY-MM-DD calendar key.
  */
@@ -27,6 +49,108 @@ function addDays(date: Date, deltaDays: number): Date {
 function parseDateKey(key: string): Date {
   const [y, m, d] = key.split("-").map(Number);
   return new Date(y, m - 1, d);
+}
+
+/**
+ * Filters sessions by relative period ("7d", "30d", or "all") using local calendar boundaries.
+ */
+export function filterSessionsByPeriod<T extends Pick<MeditationSessionItem, "endedAt">>(
+  sessions: ReadonlyArray<T>,
+  period: HistoryPeriod,
+  now: Date = new Date()
+): T[] {
+  if (period === "all") {
+    return [...sessions];
+  }
+
+  const daysBack = period === "7d" ? 6 : 29;
+  const startOfWindow = addDays(
+    new Date(now.getFullYear(), now.getMonth(), now.getDate()),
+    -daysBack
+  );
+  const cutoffMs = startOfWindow.getTime();
+
+  return sessions.filter((session) => {
+    const ts = new Date(session.endedAt).getTime();
+    return !Number.isNaN(ts) && ts >= cutoffMs;
+  });
+}
+
+/**
+ * Builds a monthly calendar heatmap grid (Sunday-first) for the given local year & month.
+ */
+export function buildMonthlyCalendar(
+  sessions: ReadonlyArray<
+    Pick<MeditationSessionItem, "actualDurationSec" | "endedAt">
+  >,
+  year: number,
+  month: number,
+  now: Date = new Date()
+): MonthlyCalendarData {
+  const firstOfMonth = new Date(year, month, 1);
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const leadingEmptyCells = firstOfMonth.getDay();
+
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const todayKey = toLocalDateKey(today);
+  const todayMs = today.getTime();
+
+  const totalsByDay = new Map<string, { count: number; seconds: number }>();
+  for (const session of sessions) {
+    const parsed = new Date(session.endedAt);
+    if (Number.isNaN(parsed.getTime())) continue;
+    if (parsed.getFullYear() !== year || parsed.getMonth() !== month) continue;
+
+    const key = toLocalDateKey(parsed);
+    const prev = totalsByDay.get(key) ?? { count: 0, seconds: 0 };
+    prev.count += 1;
+    prev.seconds += Math.max(0, Math.round(session.actualDurationSec));
+    totalsByDay.set(key, prev);
+  }
+
+  const days: CalendarDayCell[] = [];
+  let activeDaysCount = 0;
+  let totalSecondsInMonth = 0;
+
+  for (let day = 1; day <= daysInMonth; day++) {
+    const cellDate = new Date(year, month, day);
+    const dateKey = toLocalDateKey(cellDate);
+    const agg = totalsByDay.get(dateKey);
+    const sessionCount = agg?.count ?? 0;
+    const totalSeconds = agg?.seconds ?? 0;
+
+    let intensity: 0 | 1 | 2 | 3 = 0;
+    if (sessionCount > 0) {
+      activeDaysCount += 1;
+      totalSecondsInMonth += totalSeconds;
+      if (totalSeconds >= 25 * 60) {
+        intensity = 3;
+      } else if (totalSeconds >= 10 * 60) {
+        intensity = 2;
+      } else {
+        intensity = 1;
+      }
+    }
+
+    days.push({
+      dateKey,
+      dayOfMonth: day,
+      sessionCount,
+      totalSeconds,
+      intensity,
+      isToday: dateKey === todayKey,
+      isFuture: cellDate.getTime() > todayMs,
+    });
+  }
+
+  return {
+    year,
+    month,
+    leadingEmptyCells,
+    days,
+    activeDaysCount,
+    totalSecondsInMonth,
+  };
 }
 
 /**
