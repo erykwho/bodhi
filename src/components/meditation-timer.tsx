@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Bell,
   Check,
+  Loader2,
   Minus,
   Pause,
   Play,
@@ -22,7 +23,17 @@ import {
   type AmbientSoundId,
 } from "@/lib/audio/sounds";
 import {
+  saveMeditationSession,
+  updateMeditationSessionNote,
+} from "@/lib/history/client";
+import {
+  MIN_SAVEABLE_EARLY_STOP_SECONDS,
+  formatSessionDuration,
+} from "@/lib/history/stats";
+import type { MeditationSessionItem } from "@/lib/history/types";
+import {
   clampDurationMinutes,
+  computeElapsedMs,
   computeProgress,
   computeRemainingMs,
   formatDurationLabel,
@@ -46,11 +57,17 @@ const RING_RADIUS = (RING_SIZE - RING_STROKE * 2) / 2;
 const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
 
 interface MeditationTimerProps {
+  isAuthenticated?: boolean;
   onSessionActiveChange?: (active: boolean) => void;
+  onSessionSaved?: (session: MeditationSessionItem) => void;
+  onSessionUpdated?: (session: MeditationSessionItem) => void;
 }
 
 export function MeditationTimer({
+  isAuthenticated = false,
   onSessionActiveChange,
+  onSessionSaved,
+  onSessionUpdated,
 }: MeditationTimerProps) {
   // Setup state
   const [durationMinutes, setDurationMinutes] = useState<number>(
@@ -79,7 +96,18 @@ export function MeditationTimer({
   );
 
   const endTimeRef = useRef<number | null>(null);
+  const sessionStartedAtRef = useRef<string | null>(null);
   const audioRef = useRef<MeditationAudioEngine | null>(null);
+
+  // V3 History logging state
+  const [savedSessionId, setSavedSessionId] = useState<string | null>(null);
+  const [noteInput, setNoteInput] = useState<string>("");
+  const [isSavingNote, setIsSavingNote] = useState<boolean>(false);
+  const [noteSaved, setNoteSaved] = useState<boolean>(false);
+  const [earlyStopElapsedSec, setEarlyStopElapsedSec] = useState<number | null>(
+    null
+  );
+  const [isSavingEarlyStop, setIsSavingEarlyStop] = useState<boolean>(false);
 
   const getAudioEngine = useCallback(() => {
     if (!audioRef.current) {
@@ -122,6 +150,7 @@ export function MeditationTimer({
         if (phase === "warmup") {
           const nextEnd = Date.now() + totalSessionMs;
           endTimeRef.current = nextEnd;
+          sessionStartedAtRef.current = new Date().toISOString();
           setRemainingMs(totalSessionMs);
           setPhase("running");
           audio.playBell("start");
@@ -134,6 +163,24 @@ export function MeditationTimer({
           setPhase("completed");
           audio.stopAmbient(1.2);
           audio.playBell("end");
+
+          if (isAuthenticated) {
+            const endedAt = new Date().toISOString();
+            const plannedSec = Math.round(totalSessionMs / 1000);
+            void saveMeditationSession({
+              mode: "TIMER",
+              plannedDurationSec: plannedSec,
+              actualDurationSec: plannedSec,
+              completed: true,
+              startedAt: sessionStartedAtRef.current ?? undefined,
+              endedAt,
+            }).then((saved) => {
+              if (saved) {
+                setSavedSessionId(saved.id);
+                onSessionSaved?.(saved);
+              }
+            });
+          }
         }
         return;
       }
@@ -147,6 +194,8 @@ export function MeditationTimer({
     ambientVolume,
     getAudioEngine,
     isAmbientMuted,
+    isAuthenticated,
+    onSessionSaved,
     phase,
     selectedSound,
     totalSessionMs,
@@ -232,14 +281,20 @@ export function MeditationTimer({
     audio.unlock();
     stopPreview();
     setIsAmbientMuted(false);
+    setSavedSessionId(null);
+    setNoteInput("");
+    setNoteSaved(false);
+    setEarlyStopElapsedSec(null);
 
     if (warmupSeconds > 0) {
       const warmupMs = warmupSeconds * 1000;
       endTimeRef.current = Date.now() + warmupMs;
+      sessionStartedAtRef.current = null;
       setRemainingMs(warmupMs);
       setPhase("warmup");
     } else {
       endTimeRef.current = Date.now() + totalSessionMs;
+      sessionStartedAtRef.current = new Date().toISOString();
       setRemainingMs(totalSessionMs);
       setPhase("running");
       audio.playBell("start");
@@ -275,6 +330,7 @@ export function MeditationTimer({
     if (phase !== "paused") return;
     const audio = getAudioEngine();
     audio.unlock();
+    setEarlyStopElapsedSec(null);
 
     endTimeRef.current = Date.now() + remainingMs;
     setPhase(pausedFromPhase);
@@ -296,14 +352,93 @@ export function MeditationTimer({
     selectedSound,
   ]);
 
-  const handleReset = useCallback(() => {
+  const resetToIdle = useCallback(() => {
     endTimeRef.current = null;
+    sessionStartedAtRef.current = null;
     audioRef.current?.stopAmbient(0.4);
     stopPreview();
     setIsAmbientMuted(false);
+    setEarlyStopElapsedSec(null);
+    setSavedSessionId(null);
+    setNoteInput("");
+    setNoteSaved(false);
     setRemainingMs(totalSessionMs);
     setPhase("idle");
   }, [stopPreview, totalSessionMs]);
+
+  const handleReset = useCallback(() => {
+    const isActiveMeditation =
+      phase === "running" ||
+      (phase === "paused" && pausedFromPhase === "running");
+
+    if (isAuthenticated && isActiveMeditation) {
+      const currentRemaining =
+        endTimeRef.current !== null
+          ? computeRemainingMs(endTimeRef.current, Date.now())
+          : remainingMs;
+      const elapsedSec = Math.floor(
+        computeElapsedMs(totalSessionMs, currentRemaining) / 1000
+      );
+
+      if (elapsedSec >= MIN_SAVEABLE_EARLY_STOP_SECONDS) {
+        endTimeRef.current = null;
+        setRemainingMs(currentRemaining);
+        setPausedFromPhase("running");
+        setPhase("paused");
+        audioRef.current?.stopAmbient(0.4);
+        setEarlyStopElapsedSec(elapsedSec);
+        return;
+      }
+    }
+
+    resetToIdle();
+  }, [
+    isAuthenticated,
+    pausedFromPhase,
+    phase,
+    remainingMs,
+    resetToIdle,
+    totalSessionMs,
+  ]);
+
+  const handleSaveEarlyStop = useCallback(async () => {
+    if (earlyStopElapsedSec === null) return;
+    setIsSavingEarlyStop(true);
+    const saved = await saveMeditationSession({
+      mode: "TIMER",
+      plannedDurationSec: Math.round(totalSessionMs / 1000),
+      actualDurationSec: earlyStopElapsedSec,
+      completed: false,
+      note: noteInput.trim() || null,
+      startedAt: sessionStartedAtRef.current ?? undefined,
+      endedAt: new Date().toISOString(),
+    });
+    setIsSavingEarlyStop(false);
+    if (saved) {
+      onSessionSaved?.(saved);
+    }
+    resetToIdle();
+  }, [
+    earlyStopElapsedSec,
+    noteInput,
+    onSessionSaved,
+    resetToIdle,
+    totalSessionMs,
+  ]);
+
+  const handleSaveCompletedNote = useCallback(async () => {
+    if (!savedSessionId) return;
+    setIsSavingNote(true);
+    const updated = await updateMeditationSessionNote(
+      savedSessionId,
+      noteInput.trim() || null
+    );
+    setIsSavingNote(false);
+    if (updated) {
+      setNoteSaved(true);
+      onSessionUpdated?.(updated);
+    }
+  }, [noteInput, onSessionUpdated, savedSessionId]);
 
   // Compute progress ring geometry
   const activeTotalMs =
@@ -642,45 +777,87 @@ export function MeditationTimer({
                 </button>
               )}
 
-              <div className="grid w-full grid-cols-2 gap-3">
-                <button
-                  type="button"
-                  onClick={handleReset}
-                  className="flex h-12 items-center justify-center gap-2 rounded-2xl border border-black/8 bg-[var(--surface)] text-sm font-medium text-[var(--foreground)] transition-colors hover:bg-[var(--surface-muted)] dark:border-white/10"
-                >
-                  <RotateCcw className="h-4 w-4" />
-                  Reset
-                </button>
+              {earlyStopElapsedSec !== null ? (
+                <div className="w-full rounded-2xl border border-black/8 bg-[var(--surface)] p-4 text-left shadow-xs dark:border-white/10">
+                  <p className="text-sm font-semibold text-[var(--foreground)]">
+                    Save partial session?
+                  </p>
+                  <p className="mt-0.5 text-xs text-[var(--foreground-muted)]">
+                    You meditated for {formatSessionDuration(earlyStopElapsedSec)}.
+                  </p>
+                  <textarea
+                    rows={2}
+                    maxLength={500}
+                    placeholder="Optional reflection note..."
+                    value={noteInput}
+                    onChange={(event) => setNoteInput(event.target.value)}
+                    className="mt-2.5 w-full resize-none rounded-xl border border-black/10 bg-[var(--background)] px-3 py-2 text-xs text-[var(--foreground)] outline-none placeholder:text-[var(--foreground-muted)]/70 focus:border-[var(--accent)] dark:border-white/12"
+                  />
+                  <div className="mt-3 grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={resetToIdle}
+                      disabled={isSavingEarlyStop}
+                      className="flex h-10 items-center justify-center rounded-xl border border-black/8 bg-[var(--background)] text-xs font-medium text-[var(--foreground)] transition-colors hover:bg-[var(--surface-muted)] dark:border-white/10"
+                    >
+                      Discard
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleSaveEarlyStop()}
+                      disabled={isSavingEarlyStop}
+                      className="flex h-10 items-center justify-center gap-1.5 rounded-xl bg-[var(--accent)] text-xs font-semibold text-[#fcfaf6] transition-colors hover:bg-[var(--accent-strong)] disabled:opacity-50 dark:text-[#151917]"
+                    >
+                      {isSavingEarlyStop ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Check className="h-3.5 w-3.5" />
+                      )}
+                      Save Session
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="grid w-full grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={handleReset}
+                    className="flex h-12 items-center justify-center gap-2 rounded-2xl border border-black/8 bg-[var(--surface)] text-sm font-medium text-[var(--foreground)] transition-colors hover:bg-[var(--surface-muted)] dark:border-white/10"
+                  >
+                    <RotateCcw className="h-4 w-4" />
+                    Reset
+                  </button>
 
-                {phase === "paused" ? (
-                  <button
-                    type="button"
-                    onClick={handleResume}
-                    className="flex h-12 items-center justify-center gap-2 rounded-2xl bg-[var(--accent)] text-sm font-semibold text-[#fcfaf6] transition-colors hover:bg-[var(--accent-strong)] dark:text-[#151917]"
-                  >
-                    <Play className="h-4 w-4 fill-current" />
-                    Resume
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={handlePause}
-                    className="flex h-12 items-center justify-center gap-2 rounded-2xl bg-[var(--accent)] text-sm font-semibold text-[#fcfaf6] transition-colors hover:bg-[var(--accent-strong)] dark:text-[#151917]"
-                  >
-                    <Pause className="h-4 w-4 fill-current" />
-                    Pause
-                  </button>
-                )}
-              </div>
+                  {phase === "paused" ? (
+                    <button
+                      type="button"
+                      onClick={handleResume}
+                      className="flex h-12 items-center justify-center gap-2 rounded-2xl bg-[var(--accent)] text-sm font-semibold text-[#fcfaf6] transition-colors hover:bg-[var(--accent-strong)] dark:text-[#151917]"
+                    >
+                      <Play className="h-4 w-4 fill-current" />
+                      Resume
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={handlePause}
+                      className="flex h-12 items-center justify-center gap-2 rounded-2xl bg-[var(--accent)] text-sm font-semibold text-[#fcfaf6] transition-colors hover:bg-[var(--accent-strong)] dark:text-[#151917]"
+                    >
+                      <Pause className="h-4 w-4 fill-current" />
+                      Pause
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         )}
 
         {phase === "completed" && (
-          <div className="flex flex-1 flex-col items-center justify-between py-6 text-center">
+          <div className="flex flex-1 flex-col items-center justify-between gap-4 py-6 text-center">
             <div />
 
-            <div className="flex flex-col items-center gap-4">
+            <div className="flex w-full flex-col items-center gap-4">
               <div className="flex h-20 w-20 items-center justify-center rounded-full bg-[var(--accent-soft)]">
                 <BodhiLogo className="h-11 w-11" />
               </div>
@@ -692,13 +869,53 @@ export function MeditationTimer({
                 <p className="mt-1.5 text-sm text-[var(--foreground-muted)]">
                   {formatDurationLabel(durationMinutes)} of mindful stillness.
                 </p>
+                {savedSessionId && (
+                  <p className="mt-1.5 inline-flex items-center gap-1 rounded-full bg-[var(--accent-soft)] px-2.5 py-0.5 text-[11px] font-medium text-[var(--accent)]">
+                    <Check className="h-3 w-3" />
+                    Saved to history
+                  </p>
+                )}
               </div>
+
+              {savedSessionId && (
+                <div className="w-full rounded-2xl border border-black/6 bg-[var(--surface)] p-3.5 text-left dark:border-white/10">
+                  <textarea
+                    rows={2}
+                    maxLength={500}
+                    placeholder="Add an optional reflection note..."
+                    value={noteInput}
+                    onChange={(event) => {
+                      setNoteInput(event.target.value);
+                      setNoteSaved(false);
+                    }}
+                    className="w-full resize-none rounded-xl border border-black/10 bg-[var(--background)] px-3 py-2 text-xs text-[var(--foreground)] outline-none placeholder:text-[var(--foreground-muted)]/70 focus:border-[var(--accent)] dark:border-white/12"
+                  />
+                  <div className="mt-2 flex items-center justify-between">
+                    <span className="text-[11px] text-[var(--foreground-muted)]">
+                      {noteSaved ? "Note saved" : "Optional note"}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => void handleSaveCompletedNote()}
+                      disabled={isSavingNote || !noteInput.trim()}
+                      className="inline-flex items-center gap-1 rounded-lg bg-[var(--accent)] px-3 py-1 text-xs font-semibold text-[#fcfaf6] disabled:opacity-40 dark:text-[#151917]"
+                    >
+                      {isSavingNote ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : (
+                        <Check className="h-3 w-3" />
+                      )}
+                      Save note
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="grid w-full grid-cols-2 gap-3">
               <button
                 type="button"
-                onClick={handleReset}
+                onClick={resetToIdle}
                 className="flex h-12 items-center justify-center gap-2 rounded-2xl border border-black/8 bg-[var(--surface)] text-sm font-medium text-[var(--foreground)] transition-colors hover:bg-[var(--surface-muted)] dark:border-white/10"
               >
                 Configure

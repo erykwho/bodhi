@@ -28,30 +28,32 @@ Mobile-first meditation web application (**PWA**) designed for calm, distraction
    - Singing bowl start & end bells.
    - Selectable and previewable background sounds (`Silence` and `White Noise`).
    - Timestamp-based drift-free countdown (`endTime - Date.now()`), Screen Wake Lock API, light/dark organic theme, and installable PWA.
-2. **V2 — Favorite Guided Tracks (SoundCloud & YouTube) + Auth + Neon + Pull-to-Refresh (Current):**
+2. **V2 — Favorite Guided Tracks (SoundCloud & YouTube) + Auth + Neon + Pull-to-Refresh (Completed):**
    - Optional Google OAuth (`src/auth.config.ts`, `src/lib/auth.ts`) and Neon PostgreSQL via Prisma (`User`, `FavoriteTrack`).
    - Favorite tracks list where users paste a YouTube or SoundCloud URL (auto-detected provider + oEmbed metadata via `src/lib/tracks/`) and start a focused session playing the full track (no countdown timer), with optional closing singing bowl bell and Wake Lock.
    - Mobile PWA Pull-to-Refresh (`src/components/pull-to-refresh.tsx`, `src/lib/pull-to-refresh.ts`), automatically disabled during active sessions.
-3. **V3 — Meditation History (Planned):**
-   - Automatic session logging on completion (plus prompt to save early stops with at least 1 minute elapsed) storing date, actual duration, mode (`TIMER` or `TRACK`), and optional note.
-   - History view with total time meditated, current daily streak, and chronological session log.
+3. **V3 — Meditation History (Current):**
+   - `MeditationSession` Prisma model (`SessionMode`: `TIMER | TRACK`) storing date, actual duration, completion status, track snapshot, and optional reflection note.
+   - Automatic session logging on completion for signed-in users, plus an inline prompt to save early stops with at least 1 minute elapsed (`MIN_SAVEABLE_EARLY_STOP_SECONDS = 60`).
+   - History view (`src/components/meditation-history.tsx`) with 3-column KPI strip (total time meditated, current daily streak, total sessions) and chronological session log with inline note editing and deletion.
 
-## Directory Structure (V2)
+## Directory Structure (V3)
 
-- `prisma/schema.prisma` — `User` and `FavoriteTrack` models (`TrackProvider`: `YOUTUBE | SOUNDCLOUD`).
+- `prisma/schema.prisma` — `User`, `FavoriteTrack`, and `MeditationSession` models (`TrackProvider`: `YOUTUBE | SOUNDCLOUD`, `SessionMode`: `TIMER | TRACK`).
 - `scripts/vercel-db-sync.mjs` — Automatic Prisma schema sync on Vercel production deploys.
-- `src/app/` — App Router layout, global styles, PWA `manifest.ts`, server actions (`actions.ts`), main page, and REST API routes (`/api/auth/[...nextauth]`, `/api/tracks`, `/api/tracks/resolve`, `/api/tracks/[id]`).
+- `src/app/` — App Router layout, global styles, PWA `manifest.ts`, server actions (`actions.ts`), main page, and REST API routes (`/api/auth/[...nextauth]`, `/api/tracks`, `/api/tracks/resolve`, `/api/tracks/[id]`, `/api/sessions`, `/api/sessions/[id]`).
 - `src/lib/timer/` — Pure timestamp-based timer calculations (`engine.ts`, `types.ts`) and Vitest unit tests (`engine.test.ts`).
 - `src/lib/audio/` — Extensible sound catalog (`sounds.ts`) and Web Audio API engine (`engine.ts`).
 - `src/lib/tracks/` — YouTube/SoundCloud URL parser (`providers.ts` + `providers.test.ts`), oEmbed metadata resolver (`oembed.ts`), and shared types (`types.ts`).
+- `src/lib/history/` — Pure history statistics & daily streak engine (`stats.ts` + `stats.test.ts`), client API helpers (`client.ts`), and shared types (`types.ts`).
 - `src/lib/pull-to-refresh.ts` + `pull-to-refresh.test.ts` — Pure rubber-band pull-to-refresh physics and tests.
 - `src/lib/wake-lock.ts` — Screen Wake Lock hook.
-- `src/components/` — `BodhiShell`, `BodhiLogo`, `ThemeProvider`, `PullToRefresh`, `MeditationTimer`, `GuidedTracks`, and `GuidedSessionPlayer`.
+- `src/components/` — `BodhiShell`, `BodhiLogo`, `ThemeProvider`, `PullToRefresh`, `MeditationTimer`, `GuidedTracks`, `GuidedSessionPlayer`, and `MeditationHistory`.
 - `public/icons/` — Official Bodhi leaf SVG, transparent PNG favicon, and PWA PNG icons.
 
 ## Commands & Conventions
 
-- `pnpm test` — Run unit tests (Vitest). Always add or update tests when changing `src/lib/timer/`, `src/lib/tracks/`, `src/lib/pull-to-refresh.ts`, or other pure domain logic.
+- `pnpm test` — Run unit tests (Vitest). Always add or update tests when changing `src/lib/timer/`, `src/lib/tracks/`, `src/lib/history/`, `src/lib/pull-to-refresh.ts`, or other pure domain logic.
 - `pnpm lint` — Run ESLint checks.
 - `pnpm build` — Run `prisma generate && node scripts/vercel-db-sync.mjs && next build` (always validate `pnpm test`, `pnpm lint`, and `pnpm build` before opening a PR).
 - **Git Commit Author (required for Vercel Hobby):** Before creating any commit, ensure:

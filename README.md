@@ -14,12 +14,17 @@ A serene, mobile-first meditation Progressive Web App (PWA) built with Next.js 1
 ### V2 — Favorite Guided Tracks & Mobile Pull-to-Refresh
 - **YouTube & SoundCloud Favorites:** Paste a YouTube video or SoundCloud track URL to auto-detect the provider, fetch metadata via oEmbed, and save to your cloud-synced favorites list.
 - **Full-Track Guided Sessions:** Listen to the complete track via the official YouTube IFrame Player API or SoundCloud Widget API with Screen Wake Lock and an optional closing singing bowl bell.
-- **Optional Google Sign-In:** The timer stays 100% public; signing in with Google (Auth.js v5 + Neon PostgreSQL) syncs your favorite tracks across devices.
+- **Optional Google Sign-In:** The timer stays 100% public; signing in with Google (Auth.js v5 + Neon PostgreSQL) syncs your favorite tracks and history across devices.
 - **Mobile Pull-to-Refresh:** Smooth rubber-band pull-to-refresh gesture for standalone PWA usage (automatically disabled during active sessions).
+
+### V3 — Meditation History
+- **Automatic Session Logging:** Completed Timer and Guided Track sessions are automatically logged to Neon PostgreSQL for signed-in users.
+- **Partial Session Prompt:** Stopping a session early after at least 1 minute prompts you to save or discard the partial practice.
+- **Streaks, Totals & Notes:** View total practice time, current daily streak, total sessions, and a chronological session log with optional reflection notes.
 
 ## Environment Variables (V2+)
 
-Copy `.env.example` to `.env.local` for local development with Favorite Guided Tracks:
+Copy `.env.example` to `.env.local` for local development with Favorite Guided Tracks and Meditation History:
 
 - `DATABASE_URL` — Neon PostgreSQL connection string
 - `AUTH_SECRET` — Random 32-byte secret (`openssl rand -base64 32`)
@@ -41,7 +46,3 @@ pnpm test
 pnpm lint
 pnpm build
 ```
-
-## Roadmap
-
-- **V3:** Meditation history tracking, daily streak, total practice time, and optional session notes.

@@ -17,6 +17,7 @@ import {
 import { signInWithGoogle } from "@/app/actions";
 import { GuidedSessionPlayer } from "@/components/guided-session-player";
 import type { SessionUserSummary } from "@/lib/auth";
+import type { MeditationSessionItem } from "@/lib/history/types";
 import { parseTrackUrl } from "@/lib/tracks/providers";
 import type {
   FavoriteTrackItem,
@@ -28,6 +29,8 @@ interface GuidedTracksProps {
   authConfigured: boolean;
   initialTracks: FavoriteTrackItem[];
   onSessionActiveChange: (active: boolean) => void;
+  onSessionSaved?: (session: MeditationSessionItem) => void;
+  onSessionUpdated?: (session: MeditationSessionItem) => void;
 }
 
 export function GuidedTracks({
@@ -35,6 +38,8 @@ export function GuidedTracks({
   authConfigured,
   initialTracks,
   onSessionActiveChange,
+  onSessionSaved,
+  onSessionUpdated,
 }: GuidedTracksProps) {
   const [tracks, setTracks] = useState<FavoriteTrackItem[]>(initialTracks);
   const [activeTrack, setActiveTrack] = useState<FavoriteTrackItem | null>(
@@ -198,8 +203,11 @@ export function GuidedTracks({
       <GuidedSessionPlayer
         track={activeTrack}
         closingBellEnabled={closingBellEnabled}
+        isAuthenticated={Boolean(user)}
         onToggleClosingBell={() => setClosingBellEnabled((prev) => !prev)}
         onExit={() => setActiveTrack(null)}
+        onSessionSaved={onSessionSaved}
+        onSessionUpdated={onSessionUpdated}
       />
     );
   }
