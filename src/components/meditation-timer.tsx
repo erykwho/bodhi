@@ -5,18 +5,15 @@ import {
   Bell,
   Check,
   Minus,
-  Moon,
   Pause,
   Play,
   Plus,
   RotateCcw,
   Square,
-  Sun,
   Volume2,
   VolumeX,
 } from "lucide-react";
 import { BodhiLogo } from "@/components/bodhi-logo";
-import { useTheme } from "@/components/theme-provider";
 import { MeditationAudioEngine } from "@/lib/audio/engine";
 import {
   AMBIENT_SOUNDS,
@@ -48,9 +45,13 @@ const RING_STROKE = 6;
 const RING_RADIUS = (RING_SIZE - RING_STROKE * 2) / 2;
 const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
 
-export function MeditationTimer() {
-  const { theme, toggleTheme } = useTheme();
+interface MeditationTimerProps {
+  onSessionActiveChange?: (active: boolean) => void;
+}
 
+export function MeditationTimer({
+  onSessionActiveChange,
+}: MeditationTimerProps) {
   // Setup state
   const [durationMinutes, setDurationMinutes] = useState<number>(
     DEFAULT_DURATION_MINUTES
@@ -86,6 +87,10 @@ export function MeditationTimer() {
     }
     return audioRef.current;
   }, []);
+
+  useEffect(() => {
+    onSessionActiveChange?.(phase !== "idle");
+  }, [onSessionActiveChange, phase]);
 
   useEffect(() => {
     return () => {
@@ -316,35 +321,8 @@ export function MeditationTimer() {
   const selectedSoundMeta = AMBIENT_SOUNDS.find((s) => s.id === selectedSound);
 
   return (
-    <div className="mx-auto flex min-h-dvh w-full max-w-md flex-col px-5 pt-4 pb-safe">
-      {/* Top Bar */}
-      <header className="flex items-center justify-between py-1">
-        <div className="flex items-center gap-2.5">
-          <BodhiLogo className="h-7 w-7" />
-          <span className="text-lg font-semibold tracking-tight text-[var(--foreground)]">
-            Bodhi
-          </span>
-        </div>
-
-        <button
-          type="button"
-          onClick={toggleTheme}
-          aria-label={
-            theme === "dark" ? "Switch to light theme" : "Switch to dark theme"
-          }
-          className="flex h-9 w-9 items-center justify-center rounded-full border border-black/5 bg-[var(--surface)] text-[var(--foreground-muted)] transition-colors hover:text-[var(--foreground)] dark:border-white/10"
-        >
-          {theme === "dark" ? (
-            <Sun className="h-4 w-4" />
-          ) : (
-            <Moon className="h-4 w-4" />
-          )}
-        </button>
-      </header>
-
-      {/* Main Content */}
-      <main className="flex flex-1 flex-col justify-between gap-5 py-4">
-        {phase === "idle" && (
+    <>
+      {phase === "idle" && (
           <>
             {/* Duration Preview & Fine Adjustment */}
             <section className="flex flex-col items-center pt-1">
@@ -736,7 +714,6 @@ export function MeditationTimer() {
             </div>
           </div>
         )}
-      </main>
-    </div>
+    </>
   );
 }

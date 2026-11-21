@@ -1,15 +1,31 @@
 # Bodhi
 
-A serene, mobile-first meditation timer Progressive Web App (PWA) built with Next.js 16, React 19, and Tailwind CSS v4.
+A serene, mobile-first meditation Progressive Web App (PWA) built with Next.js 16, React 19, Tailwind CSS v4, Prisma, and Neon PostgreSQL.
 
-## Features (V1)
+## Features
 
+### V1 — Meditation Timer
 - **Mindful Timer:** Quick presets (`5`, `10`, `15`, `20`, `30` min) and custom durations (`1–180` min) powered by timestamp-based drift-free timing.
 - **Warm-up Countdown:** Optional `5s` or `10s` preparation period before the opening bell.
 - **Singing Bowl Bells:** Warm harmonic singing bowl synthesized locally via the Web Audio API at session start and completion.
-- **Background Sounds with Preview:** Preview and choose ambient soundscapes (starting with `Silence` and softly filtered `White Noise`) with smooth fade-in/fade-out and volume control.
+- **Background Sounds with Preview:** Preview and choose ambient soundscapes (`Silence` and softly filtered `White Noise`) with smooth fade-in/fade-out and volume control.
 - **Screen Wake Lock:** Keeps the screen awake during active meditation sessions on supported mobile browsers.
-- **Installable PWA & Theme Support:** Serene warm stone light mode and deep charcoal dark mode with automatic system preference detection.
+
+### V2 — Favorite Guided Tracks & Mobile Pull-to-Refresh
+- **YouTube & SoundCloud Favorites:** Paste a YouTube video or SoundCloud track URL to auto-detect the provider, fetch metadata via oEmbed, and save to your cloud-synced favorites list.
+- **Full-Track Guided Sessions:** Listen to the complete track via the official YouTube IFrame Player API or SoundCloud Widget API with Screen Wake Lock and an optional closing singing bowl bell.
+- **Optional Google Sign-In:** The timer stays 100% public; signing in with Google (Auth.js v5 + Neon PostgreSQL) syncs your favorite tracks across devices.
+- **Mobile Pull-to-Refresh:** Smooth rubber-band pull-to-refresh gesture for standalone PWA usage (automatically disabled during active sessions).
+
+## Environment Variables (V2+)
+
+Copy `.env.example` to `.env.local` for local development with Favorite Guided Tracks:
+
+- `DATABASE_URL` — Neon PostgreSQL connection string
+- `AUTH_SECRET` — Random 32-byte secret (`openssl rand -base64 32`)
+- `AUTH_GOOGLE_ID` — Google OAuth 2.0 Client ID
+- `AUTH_GOOGLE_SECRET` — Google OAuth 2.0 Client Secret
+- `ALLOWED_EMAILS` — Optional comma-separated allowlist of Google emails (leave empty to allow any Google account)
 
 ## Development
 
@@ -28,5 +44,4 @@ pnpm build
 
 ## Roadmap
 
-- **V2:** Favorite guided meditation tracks from SoundCloud and YouTube (optional Google OAuth + Neon PostgreSQL sync).
 - **V3:** Meditation history tracking, daily streak, total practice time, and optional session notes.

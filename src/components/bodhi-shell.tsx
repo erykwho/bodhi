@@ -1,0 +1,154 @@
+"use client";
+
+import { useState } from "react";
+import { Headphones, LogIn, LogOut, Moon, Sun, Timer } from "lucide-react";
+import { signInWithGoogle, signOutUser } from "@/app/actions";
+import { BodhiLogo } from "@/components/bodhi-logo";
+import { GuidedTracks } from "@/components/guided-tracks";
+import { MeditationTimer } from "@/components/meditation-timer";
+import { PullToRefresh } from "@/components/pull-to-refresh";
+import { useTheme } from "@/components/theme-provider";
+import type { SessionUserSummary } from "@/lib/auth";
+import type { FavoriteTrackItem } from "@/lib/tracks/types";
+
+type AppMode = "timer" | "guided";
+
+interface BodhiShellProps {
+  user: SessionUserSummary | null;
+  authConfigured: boolean;
+  initialTracks: FavoriteTrackItem[];
+}
+
+export function BodhiShell({
+  user,
+  authConfigured,
+  initialTracks,
+}: BodhiShellProps) {
+  const { theme, toggleTheme } = useTheme();
+  const [mode, setMode] = useState<AppMode>("timer");
+  const [isSessionActive, setIsSessionActive] = useState<boolean>(false);
+
+  const userInitial = (user?.name ?? user?.email ?? "B")
+    .trim()
+    .charAt(0)
+    .toUpperCase();
+
+  return (
+    <PullToRefresh disabled={isSessionActive}>
+      <div className="mx-auto flex min-h-dvh w-full max-w-md flex-col px-5 pt-4 pb-safe">
+        {/* Top Bar */}
+        <header className="flex items-center justify-between gap-2 py-1">
+          <div className="flex items-center gap-2.5">
+            <BodhiLogo className="h-7 w-7" />
+            <span className="text-lg font-semibold tracking-tight text-[var(--foreground)]">
+              Bodhi
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {user ? (
+              <form action={signOutUser}>
+                <button
+                  type="submit"
+                  title={`Sign out (${user.email})`}
+                  className="inline-flex h-9 items-center gap-2 rounded-full border border-black/6 bg-[var(--surface)] pr-3 pl-1.5 text-xs font-medium text-[var(--foreground-muted)] transition-colors hover:text-[var(--foreground)] dark:border-white/10"
+                >
+                  {user.image ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={user.image}
+                      alt=""
+                      referrerPolicy="no-referrer"
+                      className="h-6 w-6 rounded-full object-cover"
+                    />
+                  ) : (
+                    <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[var(--accent-soft)] text-[11px] font-semibold text-[var(--accent)]">
+                      {userInitial}
+                    </span>
+                  )}
+                  <LogOut className="h-3.5 w-3.5" />
+                </button>
+              </form>
+            ) : (
+              authConfigured && (
+                <form action={signInWithGoogle}>
+                  <button
+                    type="submit"
+                    className="inline-flex h-9 items-center gap-1.5 rounded-full border border-black/6 bg-[var(--surface)] px-3 text-xs font-medium text-[var(--foreground-muted)] transition-colors hover:text-[var(--foreground)] dark:border-white/10"
+                  >
+                    <LogIn className="h-3.5 w-3.5" />
+                    Sign in
+                  </button>
+                </form>
+              )
+            )}
+
+            <button
+              type="button"
+              onClick={toggleTheme}
+              aria-label={
+                theme === "dark"
+                  ? "Switch to light theme"
+                  : "Switch to dark theme"
+              }
+              className="flex h-9 w-9 items-center justify-center rounded-full border border-black/6 bg-[var(--surface)] text-[var(--foreground-muted)] transition-colors hover:text-[var(--foreground)] dark:border-white/10"
+            >
+              {theme === "dark" ? (
+                <Sun className="h-4 w-4" />
+              ) : (
+                <Moon className="h-4 w-4" />
+              )}
+            </button>
+          </div>
+        </header>
+
+        {/* Single-row Mode Switcher (hidden during active sessions) */}
+        {!isSessionActive && (
+          <nav
+            aria-label="Practice mode"
+            className="mt-3 grid grid-cols-2 gap-1 rounded-2xl bg-[var(--surface-muted)] p-1"
+          >
+            <button
+              type="button"
+              onClick={() => setMode("timer")}
+              className={`flex h-9 items-center justify-center gap-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-colors ${
+                mode === "timer"
+                  ? "bg-[var(--surface)] text-[var(--foreground)] shadow-xs"
+                  : "text-[var(--foreground-muted)] hover:text-[var(--foreground)]"
+              }`}
+            >
+              <Timer className="h-3.5 w-3.5" />
+              Timer
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode("guided")}
+              className={`flex h-9 items-center justify-center gap-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-colors ${
+                mode === "guided"
+                  ? "bg-[var(--surface)] text-[var(--foreground)] shadow-xs"
+                  : "text-[var(--foreground-muted)] hover:text-[var(--foreground)]"
+              }`}
+            >
+              <Headphones className="h-3.5 w-3.5" />
+              Guided
+            </button>
+          </nav>
+        )}
+
+        {/* Active View */}
+        <main className="flex flex-1 flex-col justify-between gap-4 py-4">
+          {mode === "timer" ? (
+            <MeditationTimer onSessionActiveChange={setIsSessionActive} />
+          ) : (
+            <GuidedTracks
+              user={user}
+              authConfigured={authConfigured}
+              initialTracks={initialTracks}
+              onSessionActiveChange={setIsSessionActive}
+            />
+          )}
+        </main>
+      </div>
+    </PullToRefresh>
+  );
+}

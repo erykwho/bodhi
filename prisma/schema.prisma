@@ -1,0 +1,40 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum TrackProvider {
+  YOUTUBE
+  SOUNDCLOUD
+}
+
+model User {
+  id             String          @id @default(cuid())
+  email          String          @unique
+  name           String?
+  image          String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  favoriteTracks FavoriteTrack[]
+}
+
+model FavoriteTrack {
+  id           String        @id @default(cuid())
+  userId       String
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider     TrackProvider
+  url          String
+  externalId   String
+  title        String
+  author       String?
+  thumbnailUrl String?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  @@unique([userId, provider, externalId])
+  @@index([userId, createdAt])
+}
