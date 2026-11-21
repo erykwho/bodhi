@@ -1,0 +1,72 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme inline {
+  --font-sans: var(--font-plus-jakarta), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, SFMono-Regular, monospace;
+}
+
+:root {
+  --background: #f5f2eb;
+  --surface: #fcfaf6;
+  --surface-muted: #ece7dc;
+  --foreground: #232a26;
+  --foreground-muted: #5c665f;
+  --accent: #4a6b5d;
+  --accent-strong: #3b584b;
+  --accent-soft: #e3ebe6;
+  --warm-amber: #c88a55;
+  color-scheme: light;
+}
+
+.dark {
+  --background: #151917;
+  --surface: #1d2320;
+  --surface-muted: #262e2a;
+  --foreground: #eceae4;
+  --foreground-muted: #9aa69e;
+  --accent: #7da390;
+  --accent-strong: #92b6a4;
+  --accent-soft: #24322b;
+  --warm-amber: #d49b63;
+  color-scheme: dark;
+}
+
+html,
+body {
+  overscroll-behavior-y: contain;
+}
+
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes breathe {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.35;
+  }
+  50% {
+    transform: scale(1.06);
+    opacity: 0.65;
+  }
+}
+
+.animate-breathe {
+  animation: breathe 8s ease-in-out infinite;
+}
+
+@layer utilities {
+  .pb-safe {
+    padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+  }
+}
