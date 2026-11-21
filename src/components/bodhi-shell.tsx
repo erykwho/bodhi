@@ -57,6 +57,7 @@ export function BodhiShell({
 
   const [mode, setMode] = useState<AppMode>("timer");
   const [isSessionActive, setIsSessionActive] = useState<boolean>(false);
+  const [isReordering, setIsReordering] = useState<boolean>(false);
   const [dismissedError, setDismissedError] = useState<boolean>(false);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [sessions, setSessions] =
@@ -217,7 +218,7 @@ export function BodhiShell({
     .toUpperCase();
 
   return (
-    <PullToRefresh disabled={isSessionActive || !isOnline}>
+    <PullToRefresh disabled={isSessionActive || !isOnline || isReordering}>
       <div className="mx-auto flex min-h-dvh w-full max-w-md flex-col px-5 pt-4 pb-safe">
         {/* Top Bar */}
         <header className="flex items-center justify-between gap-2 py-1">
@@ -400,6 +401,7 @@ export function BodhiShell({
               onSessionActiveChange={setIsSessionActive}
               onSessionSaved={handleSessionSaved}
               onSessionUpdated={handleSessionUpdated}
+              onReorderingChange={setIsReordering}
             />
           )}
           {mode === "history" && (
