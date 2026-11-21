@@ -6,7 +6,13 @@ import type { FavoriteTrackItem } from "@/lib/tracks/types";
 
 export const dynamic = "force-dynamic";
 
-export default async function HomePage() {
+export default async function HomePage(props: {
+  searchParams: Promise<{ error?: string }>;
+}) {
+  const searchParams = await props.searchParams;
+  const authError =
+    typeof searchParams.error === "string" ? searchParams.error : null;
+
   const authConfigured = isAuthConfigured();
   const user = await getOptionalSessionUser();
 
@@ -37,6 +43,7 @@ export default async function HomePage() {
       user={user}
       authConfigured={authConfigured}
       initialTracks={initialTracks}
+      authError={authError}
     />
   );
 }

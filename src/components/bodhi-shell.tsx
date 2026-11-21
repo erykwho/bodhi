@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { Headphones, LogIn, LogOut, Moon, Sun, Timer } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Headphones, LogIn, LogOut, Moon, Sun, Timer, X } from "lucide-react";
 import { signInWithGoogle, signOutUser } from "@/app/actions";
 import { BodhiLogo } from "@/components/bodhi-logo";
 import { GuidedTracks } from "@/components/guided-tracks";
@@ -17,16 +17,34 @@ interface BodhiShellProps {
   user: SessionUserSummary | null;
   authConfigured: boolean;
   initialTracks: FavoriteTrackItem[];
+  authError?: string | null;
 }
 
 export function BodhiShell({
   user,
   authConfigured,
   initialTracks,
+  authError = null,
 }: BodhiShellProps) {
   const { theme, toggleTheme } = useTheme();
   const [mode, setMode] = useState<AppMode>("timer");
   const [isSessionActive, setIsSessionActive] = useState<boolean>(false);
+  const [dismissedError, setDismissedError] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (!authError) return;
+    const url = new URL(window.location.href);
+    if (url.searchParams.has("error")) {
+      url.searchParams.delete("error");
+      window.history.replaceState({}, "", `${url.pathname}${url.search}`);
+    }
+  }, [authError]);
+
+  const showAuthError = Boolean(authError && !user && !dismissedError);
+  const authErrorMessage =
+    authError === "AccessDenied"
+      ? "Access denied. Your Google account is not on the allowed emails list."
+      : "Sign-in was interrupted or expired. Please try signing in again.";
 
   const userInitial = (user?.name ?? user?.email ?? "B")
     .trim()
@@ -101,6 +119,24 @@ export function BodhiShell({
             </button>
           </div>
         </header>
+
+        {/* Dismissible Auth Error Banner */}
+        {showAuthError && (
+          <div
+            role="alert"
+            className="mt-3 flex items-start justify-between gap-2 rounded-2xl border border-amber-500/25 bg-amber-500/10 px-3.5 py-2.5 text-xs text-[var(--foreground)]"
+          >
+            <p className="leading-relaxed">{authErrorMessage}</p>
+            <button
+              type="button"
+              onClick={() => setDismissedError(true)}
+              aria-label="Dismiss message"
+              className="shrink-0 rounded-lg p-0.5 text-[var(--foreground-muted)] transition-colors hover:text-[var(--foreground)]"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        )}
 
         {/* Single-row Mode Switcher (hidden during active sessions) */}
         {!isSessionActive && (

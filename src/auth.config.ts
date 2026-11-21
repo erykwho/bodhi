@@ -26,12 +26,17 @@ export function isAuthConfigured(): boolean {
 }
 
 export const authConfig: NextAuthConfig = {
+  trustHost: true,
   providers: [
     Google({
       clientId: process.env.AUTH_GOOGLE_ID,
       clientSecret: process.env.AUTH_GOOGLE_SECRET,
     }),
   ],
+  pages: {
+    signIn: "/",
+    error: "/",
+  },
   session: {
     strategy: "jwt",
   },
