@@ -1,22 +1,34 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Headphones, LogIn, LogOut, Moon, Sun, Timer, X } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import {
+  CalendarDays,
+  Headphones,
+  LogIn,
+  LogOut,
+  Moon,
+  Sun,
+  Timer,
+  X,
+} from "lucide-react";
 import { signInWithGoogle, signOutUser } from "@/app/actions";
 import { BodhiLogo } from "@/components/bodhi-logo";
 import { GuidedTracks } from "@/components/guided-tracks";
+import { MeditationHistory } from "@/components/meditation-history";
 import { MeditationTimer } from "@/components/meditation-timer";
 import { PullToRefresh } from "@/components/pull-to-refresh";
 import { useTheme } from "@/components/theme-provider";
 import type { SessionUserSummary } from "@/lib/auth";
+import type { MeditationSessionItem } from "@/lib/history/types";
 import type { FavoriteTrackItem } from "@/lib/tracks/types";
 
-type AppMode = "timer" | "guided";
+type AppMode = "timer" | "guided" | "history";
 
 interface BodhiShellProps {
   user: SessionUserSummary | null;
   authConfigured: boolean;
   initialTracks: FavoriteTrackItem[];
+  initialSessions: MeditationSessionItem[];
   authError?: string | null;
 }
 
@@ -24,12 +36,15 @@ export function BodhiShell({
   user,
   authConfigured,
   initialTracks,
+  initialSessions,
   authError = null,
 }: BodhiShellProps) {
   const { theme, toggleTheme } = useTheme();
   const [mode, setMode] = useState<AppMode>("timer");
   const [isSessionActive, setIsSessionActive] = useState<boolean>(false);
   const [dismissedError, setDismissedError] = useState<boolean>(false);
+  const [sessions, setSessions] =
+    useState<MeditationSessionItem[]>(initialSessions);
 
   useEffect(() => {
     if (!authError) return;
@@ -39,6 +54,23 @@ export function BodhiShell({
       window.history.replaceState({}, "", `${url.pathname}${url.search}`);
     }
   }, [authError]);
+
+  const handleSessionSaved = useCallback((saved: MeditationSessionItem) => {
+    setSessions((prev) => [
+      saved,
+      ...prev.filter((item) => item.id !== saved.id),
+    ]);
+  }, []);
+
+  const handleSessionUpdated = useCallback((updated: MeditationSessionItem) => {
+    setSessions((prev) =>
+      prev.map((item) => (item.id === updated.id ? updated : item))
+    );
+  }, []);
+
+  const handleSessionDeleted = useCallback((id: string) => {
+    setSessions((prev) => prev.filter((item) => item.id !== id));
+  }, []);
 
   const showAuthError = Boolean(authError && !user && !dismissedError);
   const authErrorMessage =
@@ -142,7 +174,7 @@ export function BodhiShell({
         {!isSessionActive && (
           <nav
             aria-label="Practice mode"
-            className="mt-3 grid grid-cols-2 gap-1 rounded-2xl bg-[var(--surface-muted)] p-1"
+            className="mt-3 grid grid-cols-3 gap-1 rounded-2xl bg-[var(--surface-muted)] p-1"
           >
             <button
               type="button"
@@ -168,19 +200,48 @@ export function BodhiShell({
               <Headphones className="h-3.5 w-3.5" />
               Guided
             </button>
+            <button
+              type="button"
+              onClick={() => setMode("history")}
+              className={`flex h-9 items-center justify-center gap-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-colors ${
+                mode === "history"
+                  ? "bg-[var(--surface)] text-[var(--foreground)] shadow-xs"
+                  : "text-[var(--foreground-muted)] hover:text-[var(--foreground)]"
+              }`}
+            >
+              <CalendarDays className="h-3.5 w-3.5" />
+              History
+            </button>
           </nav>
         )}
 
         {/* Active View */}
         <main className="flex flex-1 flex-col justify-between gap-4 py-4">
-          {mode === "timer" ? (
-            <MeditationTimer onSessionActiveChange={setIsSessionActive} />
-          ) : (
+          {mode === "timer" && (
+            <MeditationTimer
+              isAuthenticated={Boolean(user)}
+              onSessionActiveChange={setIsSessionActive}
+              onSessionSaved={handleSessionSaved}
+              onSessionUpdated={handleSessionUpdated}
+            />
+          )}
+          {mode === "guided" && (
             <GuidedTracks
               user={user}
               authConfigured={authConfigured}
               initialTracks={initialTracks}
               onSessionActiveChange={setIsSessionActive}
+              onSessionSaved={handleSessionSaved}
+              onSessionUpdated={handleSessionUpdated}
+            />
+          )}
+          {mode === "history" && (
+            <MeditationHistory
+              user={user}
+              authConfigured={authConfigured}
+              sessions={sessions}
+              onSessionUpdated={handleSessionUpdated}
+              onSessionDeleted={handleSessionDeleted}
             />
           )}
         </main>

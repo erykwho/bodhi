@@ -12,29 +12,56 @@ enum TrackProvider {
   SOUNDCLOUD
 }
 
+enum SessionMode {
+  TIMER
+  TRACK
+}
+
 model User {
-  id             String          @id @default(cuid())
-  email          String          @unique
+  id             String              @id @default(cuid())
+  email          String              @unique
   name           String?
   image          String?
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
   favoriteTracks FavoriteTrack[]
+  sessions       MeditationSession[]
 }
 
 model FavoriteTrack {
-  id           String        @id @default(cuid())
+  id           String              @id @default(cuid())
   userId       String
-  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user         User                @relation(fields: [userId], references: [id], onDelete: Cascade)
   provider     TrackProvider
   url          String
   externalId   String
   title        String
   author       String?
   thumbnailUrl String?
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+  sessions     MeditationSession[]
 
   @@unique([userId, provider, externalId])
   @@index([userId, createdAt])
+}
+
+model MeditationSession {
+  id                 String         @id @default(cuid())
+  userId             String
+  user               User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  mode               SessionMode
+  trackId            String?
+  track              FavoriteTrack? @relation(fields: [trackId], references: [id], onDelete: SetNull)
+  trackTitle         String?
+  trackProvider      TrackProvider?
+  plannedDurationSec Int?
+  actualDurationSec  Int
+  completed          Boolean        @default(true)
+  note               String?
+  startedAt          DateTime
+  endedAt            DateTime       @default(now())
+  createdAt          DateTime       @default(now())
+
+  @@index([userId, endedAt])
 }

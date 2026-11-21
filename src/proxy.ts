@@ -7,7 +7,10 @@ const { auth } = NextAuth(authConfig);
 export const proxy = auth((req) => {
   const { pathname } = req.nextUrl;
 
-  if (pathname.startsWith("/api/tracks")) {
+  if (
+    pathname.startsWith("/api/tracks") ||
+    pathname.startsWith("/api/sessions")
+  ) {
     if (!isAuthConfigured()) {
       return NextResponse.json(
         { error: "Authentication is not configured yet" },
