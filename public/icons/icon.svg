@@ -1,23 +1,25 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
-  <rect width="512" height="512" rx="112" fill="#F5F2EB" />
-  <!-- Left half of the Bodhi leaf -->
-  <path
-    d="M256 96 C244 148 214 170 184 198 C144 236 126 286 144 334 C158 370 198 386 234 370 C244 365 251 358 256 350 Z"
-    fill="#577562"
-  />
-  <!-- Right half of the Bodhi leaf -->
-  <path
-    d="M256 96 C268 148 298 170 328 198 C368 236 386 286 368 334 C354 370 314 386 278 370 C268 365 261 358 256 350 Z"
-    fill="#435F4E"
-  />
-  <!-- Dark stem shadow -->
-  <path
-    d="M258 344 C258 378 254 402 246 416 L256 416 C264 400 268 374 266 344 Z"
-    fill="#435F4E"
-  />
-  <!-- Warm sand central vein & stem -->
-  <path
-    d="M256 176 C259 240 261 308 258 356 C256 384 250 404 240 416 L248 416 C256 402 262 380 263 354 C264 306 260 238 256 176 Z"
-    fill="#DDD0B4"
-  />
+  <rect width="512" height="512" rx="112" fill="#F3EFE4" />
+  <g transform="translate(256 256) scale(1.24) translate(-256 -256)">
+    <!-- Left half of the Bodhi leaf -->
+    <path
+      d="M256 96 C244 148 214 170 184 198 C144 236 126 286 144 334 C158 370 198 386 234 370 C244 365 251 358 256 350 Z"
+      fill="#577562"
+    />
+    <!-- Right half of the Bodhi leaf -->
+    <path
+      d="M256 96 C268 148 298 170 328 198 C368 236 386 286 368 334 C354 370 314 386 278 370 C268 365 261 358 256 350 Z"
+      fill="#435F4E"
+    />
+    <!-- Dark stem shadow -->
+    <path
+      d="M258 344 C258 378 254 402 246 416 L256 416 C264 400 268 374 266 344 Z"
+      fill="#435F4E"
+    />
+    <!-- Warm sand central vein & stem -->
+    <path
+      d="M256 176 C259 240 261 308 258 356 C256 384 250 404 240 416 L248 416 C256 402 262 380 263 354 C264 306 260 238 256 176 Z"
+      fill="#DDD0B4"
+    />
+  </g>
 </svg>
