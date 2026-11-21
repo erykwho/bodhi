@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { buildSoundCloudEmbedUrl, parseTrackUrl } from "./providers";
+import {
+  MAX_TRACK_TAGS,
+  buildSoundCloudEmbedUrl,
+  normalizeTrackTags,
+  parseTrackUrl,
+} from "./providers";
 
 describe("track URL providers", () => {
   describe("YouTube", () => {
@@ -59,6 +64,51 @@ describe("track URL providers", () => {
       ).toBeNull();
       expect(parseTrackUrl("https://soundcloud.com/calm-artist")).toBeNull();
       expect(parseTrackUrl("https://soundcloud.com/discover/sets")).toBeNull();
+    });
+  });
+
+  describe("Direct Audio", () => {
+    it("parses direct .mp3 and .m4a audio URLs with query strings", () => {
+      const mp3 = parseTrackUrl(
+        "https://cdn.example.com/audio/evening-body-scan.mp3?token=abc"
+      );
+      expect(mp3).toEqual({
+        provider: "DIRECT_AUDIO",
+        externalId: "cdn.example.com/audio/evening-body-scan.mp3",
+        canonicalUrl:
+          "https://cdn.example.com/audio/evening-body-scan.mp3?token=abc",
+        defaultThumbnailUrl: null,
+        fallbackTitle: "Evening Body Scan",
+      });
+
+      const m4a = parseTrackUrl("https://media.example.org/meditation_01.m4a");
+      expect(m4a?.provider).toBe("DIRECT_AUDIO");
+      expect(m4a?.fallbackTitle).toBe("Meditation 01");
+    });
+
+    it("rejects non-audio direct links", () => {
+      expect(parseTrackUrl("https://example.com/page.html")).toBeNull();
+      expect(parseTrackUrl("https://example.com/cover.png")).toBeNull();
+    });
+  });
+
+  describe("normalizeTrackTags", () => {
+    it("trims, deduplicates case-insensitively, and enforces max count", () => {
+      expect(
+        normalizeTrackTags([
+          "  Morning  ",
+          "morning",
+          "Sleep",
+          "",
+          "Breath",
+          "Focus",
+          "Body Scan",
+          "ExtraTag",
+        ])
+      ).toEqual(["Morning", "Sleep", "Breath", "Focus", "Body Scan"]);
+      expect(
+        normalizeTrackTags(["a", "b", "c", "d", "e", "f"])
+      ).toHaveLength(MAX_TRACK_TAGS);
     });
   });
 

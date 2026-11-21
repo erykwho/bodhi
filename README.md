@@ -36,6 +36,11 @@ A serene, mobile-first meditation Progressive Web App (PWA) built with Next.js 1
 - **Manual Session Logging:** Record offline or away-from-phone meditations (`+ Log`) with date, duration, and optional reflection note (supports offline queueing).
 - **CSV & JSON Export:** Download your meditation history as RFC-4180 CSV or JSON backup in one tap.
 
+### V7 — Direct Audio Guided Tracks, Track Organization & Guided Zen Dim
+- **Direct Audio & Lock-Screen Controls:** Paste direct `.mp3`/`.m4a`/`.ogg`/`.wav` links to play via native HTML5 `<audio>` with **Media Session API** lock-screen controls.
+- **Tags & Inline Editing:** Organize favorite tracks with custom or suggested tags (`Morning`, `Sleep`, `Breath`, `Focus`, `Body Scan`), filter by tag in one tap, and edit track titles and tags inline.
+- **Synced Closing Bell & Zen Dim Mode:** Guided sessions automatically use your configured Timer closing bell and include one-tap **Zen Dim Mode** for glare-free OLED listening.
+
 ## Environment Variables (V2+)
 
 Copy `.env.example` to `.env.local` for local development with cloud-synced Favorites, Presets, and Meditation History:

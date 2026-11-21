@@ -8,7 +8,25 @@ export interface ParsedTrackUrl {
   fallbackTitle: string;
 }
 
+export const SUGGESTED_TRACK_TAGS = [
+  "Morning",
+  "Sleep",
+  "Breath",
+  "Focus",
+  "Body Scan",
+] as const;
+
+export const MAX_TRACK_TAGS = 5;
+export const MAX_TRACK_TAG_LENGTH = 24;
+
+export const TRACK_PROVIDER_LABELS: Record<TrackProviderType, string> = {
+  YOUTUBE: "YouTube",
+  SOUNDCLOUD: "SoundCloud",
+  DIRECT_AUDIO: "Audio",
+};
+
 const YOUTUBE_ID_REGEX = /^[A-Za-z0-9_-]{11}$/;
+const DIRECT_AUDIO_EXT_REGEX = /\.(mp3|m4a|ogg|wav|aac|opus)$/i;
 
 const YOUTUBE_HOSTS = new Set([
   "youtube.com",
@@ -40,16 +58,44 @@ const SOUNDCLOUD_RESERVED_SEGMENTS = new Set([
 ]);
 
 function humanizeSlug(slug: string): string {
-  const cleaned = decodeURIComponent(slug)
-    .replace(/[-_]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  if (!cleaned) return "Guided Meditation";
-  return cleaned.replace(/\b\w/g, (char) => char.toUpperCase());
+  try {
+    const cleaned = decodeURIComponent(slug)
+      .replace(DIRECT_AUDIO_EXT_REGEX, "")
+      .replace(/[-_]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!cleaned) return "Guided Meditation";
+    return cleaned.replace(/\b\w/g, (char) => char.toUpperCase());
+  } catch {
+    return "Guided Meditation";
+  }
 }
 
 /**
- * Parses and validates a YouTube or SoundCloud track URL.
+ * Sanitizes and deduplicates an array of track tags (case-insensitive).
+ */
+export function normalizeTrackTags(rawTags: ReadonlyArray<string>): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+
+  for (const raw of rawTags) {
+    const cleaned = raw
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, MAX_TRACK_TAG_LENGTH);
+    if (!cleaned) continue;
+    const key = cleaned.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(cleaned);
+    if (result.length >= MAX_TRACK_TAGS) break;
+  }
+
+  return result;
+}
+
+/**
+ * Parses and validates a YouTube, SoundCloud, or direct audio (.mp3/.m4a/.ogg/.wav/.aac/.opus) URL.
  * Returns null if the URL is invalid or from an unsupported provider.
  */
 export function parseTrackUrl(rawInput: string): ParsedTrackUrl | null {
@@ -115,7 +161,7 @@ export function parseTrackUrl(rawInput: string): ParsedTrackUrl | null {
       return null;
     }
 
-    // Reject SoundCloud playlists (/artist/sets/playlist) for V2 single-track sessions
+    // Reject SoundCloud playlists (/artist/sets/playlist) for single-track sessions
     if (segments[1].toLowerCase() === "sets") {
       return null;
     }
@@ -130,6 +176,24 @@ export function parseTrackUrl(rawInput: string): ParsedTrackUrl | null {
       canonicalUrl,
       defaultThumbnailUrl: null,
       fallbackTitle: humanizeSlug(trackSlug),
+    };
+  }
+
+  // Direct Audio URL (.mp3, .m4a, .ogg, .wav, .aac, .opus)
+  if (DIRECT_AUDIO_EXT_REGEX.test(parsed.pathname)) {
+    const cleanUrl = `${parsed.origin}${parsed.pathname}${parsed.search}`;
+    const segments = parsed.pathname.split("/").filter(Boolean);
+    const filename = segments[segments.length - 1] ?? "Guided Meditation";
+
+    return {
+      provider: "DIRECT_AUDIO",
+      externalId: `${parsed.hostname.toLowerCase()}${parsed.pathname}`.slice(
+        0,
+        360
+      ),
+      canonicalUrl: cleanUrl,
+      defaultThumbnailUrl: null,
+      fallbackTitle: humanizeSlug(filename),
     };
   }
 

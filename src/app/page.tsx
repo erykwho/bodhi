@@ -50,6 +50,7 @@ export default async function HomePage(props: {
         title: track.title,
         author: track.author,
         thumbnailUrl: track.thumbnailUrl,
+        tags: track.tags,
         createdAt: track.createdAt.toISOString(),
       }));
 

@@ -34,13 +34,14 @@ Mobile-first meditation web application (**PWA**) designed for calm, distraction
 5. **V5 — Practice Presets & Zen Dim Mode (Completed):**
    - Named Practice Presets (`TimerPreset` Prisma model + `/api/presets`, `/api/presets/[id]`, local fallback via `src/lib/timer/presets.ts`, and compact single-row `src/components/preset-strip.tsx`) capturing full timer settings.
    - OLED-friendly **Zen Dim Mode** during active timer sessions (`Dim screen` pill + tap-anywhere-to-wake overlay).
-6. **V6 — Visual History, Manual Logging & Export (Current):**
+6. **V6 — Visual History, Manual Logging & Export (Completed):**
    - Minimalist monthly practice calendar/heatmap (`src/components/history-calendar.tsx`, `buildMonthlyCalendar`) with tap-to-filter day inspection.
    - Longest streak display (`Best Xd`), period filters (`7d | 30d | All`), inline manual/offline session logging (`+ Log`), and RFC-4180 CSV / JSON export (`src/lib/history/export.ts` + `export.test.ts`).
-7. **V7 — Direct Audio Guided Tracks & Track Organization (Planned):**
-   - Direct `.mp3`/`.m4a` audio URL support with HTML5 `<audio>` + Media Session API (lock-screen playback), inline title editing, tags/category filtering, and syncing the configured timer end bell into guided sessions.
+7. **V7 — Direct Audio Guided Tracks, Track Organization & Guided Zen Dim (Current):**
+   - Direct `.mp3`/`.m4a`/`.ogg`/`.wav`/`.aac`/`.opus` audio URL support (`TrackProvider.DIRECT_AUDIO`) with native HTML5 `<audio>` + **Media Session API** for lock-screen playback and controls.
+   - Track tags (`FavoriteTrack.tags`), single-row tag filter bar, inline title & tag editing (`PATCH /api/tracks/[id]`), syncing the configured timer end bell into guided sessions, and **Zen Dim Mode** inside `GuidedSessionPlayer`.
 
-## Directory Structure (V6)
+## Directory Structure (V7)
 
 - `public/sw.js` — Offline PWA Service Worker (served with `Cache-Control: no-cache` via `next.config.ts` and excluded from `src/proxy.ts`).
 - `prisma/schema.prisma` — `User`, `FavoriteTrack`, `MeditationSession`, and `TimerPreset` models.

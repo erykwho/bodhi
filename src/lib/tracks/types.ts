@@ -1,4 +1,4 @@
-export type TrackProviderType = "YOUTUBE" | "SOUNDCLOUD";
+export type TrackProviderType = "YOUTUBE" | "SOUNDCLOUD" | "DIRECT_AUDIO";
 
 export interface FavoriteTrackItem {
   id: string;
@@ -8,6 +8,7 @@ export interface FavoriteTrackItem {
   title: string;
   author: string | null;
   thumbnailUrl: string | null;
+  tags: string[];
   createdAt: string;
 }
 

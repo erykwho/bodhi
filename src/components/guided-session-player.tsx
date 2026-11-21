@@ -1,17 +1,30 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import {
   ArrowLeft,
   Bell,
   BellOff,
   Check,
   ExternalLink,
+  EyeOff,
+  Headphones,
   Loader2,
   RotateCcw,
 } from "lucide-react";
 import { BodhiLogo } from "@/components/bodhi-logo";
 import { MeditationAudioEngine } from "@/lib/audio/engine";
+import {
+  DEFAULT_END_BELL_ID,
+  getBellSoundOption,
+  type BellSoundId,
+} from "@/lib/audio/sounds";
 import {
   saveMeditationSession,
   updateMeditationSessionNote,
@@ -21,7 +34,15 @@ import {
   formatSessionDuration,
 } from "@/lib/history/stats";
 import type { MeditationSessionItem } from "@/lib/history/types";
-import { buildSoundCloudEmbedUrl } from "@/lib/tracks/providers";
+import {
+  getTimerPreferencesServerSnapshot,
+  getTimerPreferencesSnapshot,
+  subscribeTimerPreferences,
+} from "@/lib/timer/preferences";
+import {
+  TRACK_PROVIDER_LABELS,
+  buildSoundCloudEmbedUrl,
+} from "@/lib/tracks/providers";
 import type { FavoriteTrackItem } from "@/lib/tracks/types";
 import { useWakeLock } from "@/lib/wake-lock";
 
@@ -163,10 +184,24 @@ export function GuidedSessionPlayer({
   onSessionSaved,
   onSessionUpdated,
 }: GuidedSessionPlayerProps) {
-  const [playbackState, setPlaybackState] = useState<PlaybackState>("loading");
-  const [playerError, setPlayerError] = useState<string | null>(null);
+  const timerPrefs = useSyncExternalStore(
+    subscribeTimerPreferences,
+    getTimerPreferencesSnapshot,
+    getTimerPreferencesServerSnapshot
+  );
 
-  // V3 History logging state
+  // Sync the closing bell sound with the user's configured Timer end bell
+  const closingBellSoundId: BellSoundId =
+    timerPrefs.endBell === "none" ? DEFAULT_END_BELL_ID : timerPrefs.endBell;
+  const closingBellMeta = getBellSoundOption(closingBellSoundId);
+
+  const [playbackState, setPlaybackState] = useState<PlaybackState>(
+    track.provider === "DIRECT_AUDIO" ? "ready" : "loading"
+  );
+  const [playerError, setPlayerError] = useState<string | null>(null);
+  const [isDimmed, setIsDimmed] = useState<boolean>(false);
+
+  // History logging state
   const [savedSessionId, setSavedSessionId] = useState<string | null>(null);
   const [completedDurationSec, setCompletedDurationSec] = useState<number>(0);
   const [noteInput, setNoteInput] = useState<string>("");
@@ -181,8 +216,10 @@ export function GuidedSessionPlayer({
   const ytPlayerRef = useRef<YouTubePlayerInstance | null>(null);
   const scIframeRef = useRef<HTMLIFrameElement | null>(null);
   const scWidgetRef = useRef<SoundCloudWidgetInstance | null>(null);
+  const directAudioRef = useRef<HTMLAudioElement | null>(null);
   const audioRef = useRef<MeditationAudioEngine | null>(null);
   const closingBellRef = useRef(closingBellEnabled);
+  const closingBellSoundRef = useRef<BellSoundId>(closingBellSoundId);
 
   // Accurate active-listening duration tracking (excludes paused intervals)
   const sessionStartedAtRef = useRef<string | null>(null);
@@ -192,6 +229,10 @@ export function GuidedSessionPlayer({
   useEffect(() => {
     closingBellRef.current = closingBellEnabled;
   }, [closingBellEnabled]);
+
+  useEffect(() => {
+    closingBellSoundRef.current = closingBellSoundId;
+  }, [closingBellSoundId]);
 
   const getAudioEngine = useCallback(() => {
     if (!audioRef.current) {
@@ -228,18 +269,19 @@ export function GuidedSessionPlayer({
   }, []);
 
   const { isActive: isWakeLockActive } = useWakeLock(
-    playbackState === "playing"
+    playbackState === "playing" && track.provider !== "DIRECT_AUDIO"
   );
 
   const handleTrackCompleted = useCallback(() => {
     const elapsedSec = Math.max(1, Math.round(flushListeningMs() / 1000));
     setCompletedDurationSec(elapsedSec);
+    setIsDimmed(false);
     setPlaybackState("completed");
 
     if (closingBellRef.current) {
       const audio = getAudioEngine();
       audio.unlock();
-      audio.playBell("end");
+      audio.playBellSound(closingBellSoundRef.current);
     }
 
     if (isAuthenticated) {
@@ -268,6 +310,92 @@ export function GuidedSessionPlayer({
     track.provider,
     track.title,
   ]);
+
+  // Configure Media Session API for lock-screen controls on Direct Audio tracks
+  useEffect(() => {
+    if (track.provider !== "DIRECT_AUDIO") return;
+    if (typeof navigator === "undefined" || !("mediaSession" in navigator)) {
+      return;
+    }
+
+    const mediaSession = navigator.mediaSession;
+    try {
+      mediaSession.metadata = new MediaMetadata({
+        title: track.title,
+        artist: track.author ?? "Bodhi Guided Practice",
+        album: "Bodhi",
+        artwork: [
+          {
+            src: "/icons/icon-192.png",
+            sizes: "192x192",
+            type: "image/png",
+          },
+          {
+            src: "/icons/icon-512.png",
+            sizes: "512x512",
+            type: "image/png",
+          },
+        ],
+      });
+
+      mediaSession.setActionHandler("play", () => {
+        void directAudioRef.current?.play();
+      });
+      mediaSession.setActionHandler("pause", () => {
+        directAudioRef.current?.pause();
+      });
+      mediaSession.setActionHandler("seekbackward", (details) => {
+        const el = directAudioRef.current;
+        if (!el) return;
+        const offset = details.seekOffset ?? 15;
+        el.currentTime = Math.max(0, el.currentTime - offset);
+      });
+      mediaSession.setActionHandler("seekforward", (details) => {
+        const el = directAudioRef.current;
+        if (!el) return;
+        const offset = details.seekOffset ?? 15;
+        const max = Number.isFinite(el.duration)
+          ? el.duration
+          : el.currentTime + offset;
+        el.currentTime = Math.min(max, el.currentTime + offset);
+      });
+      mediaSession.setActionHandler("stop", () => {
+        const el = directAudioRef.current;
+        if (!el) return;
+        el.pause();
+        el.currentTime = 0;
+      });
+    } catch {
+      // Ignore unsupported Media Session handlers on older browsers
+    }
+
+    return () => {
+      try {
+        mediaSession.metadata = null;
+        mediaSession.setActionHandler("play", null);
+        mediaSession.setActionHandler("pause", null);
+        mediaSession.setActionHandler("seekbackward", null);
+        mediaSession.setActionHandler("seekforward", null);
+        mediaSession.setActionHandler("stop", null);
+      } catch {
+        // Ignore cleanup errors
+      }
+    };
+  }, [track.author, track.provider, track.title]);
+
+  // Sync Media Session playbackState
+  useEffect(() => {
+    if (track.provider !== "DIRECT_AUDIO") return;
+    if (typeof navigator === "undefined" || !("mediaSession" in navigator)) {
+      return;
+    }
+    navigator.mediaSession.playbackState =
+      playbackState === "playing"
+        ? "playing"
+        : playbackState === "paused"
+          ? "paused"
+          : "none";
+  }, [playbackState, track.provider]);
 
   // Mount YouTube IFrame Player API into an unmanaged child node so YouTube's
   // in-place iframe replacement never conflicts with React's unmount reconciliation.
@@ -420,8 +548,10 @@ export function GuidedSessionPlayer({
     try {
       if (track.provider === "YOUTUBE") {
         ytPlayerRef.current?.pauseVideo();
-      } else {
+      } else if (track.provider === "SOUNDCLOUD") {
         scWidgetRef.current?.pause();
+      } else {
+        directAudioRef.current?.pause();
       }
     } catch {
       // Ignore pause errors
@@ -507,6 +637,9 @@ export function GuidedSessionPlayer({
     } else if (track.provider === "SOUNDCLOUD" && scWidgetRef.current) {
       scWidgetRef.current.seekTo(0);
       scWidgetRef.current.play();
+    } else if (track.provider === "DIRECT_AUDIO" && directAudioRef.current) {
+      directAudioRef.current.currentTime = 0;
+      void directAudioRef.current.play();
     }
   }, [getAudioEngine, track.provider]);
 
@@ -627,7 +760,7 @@ export function GuidedSessionPlayer({
           {/* Track Heading */}
           <div className="text-center">
             <span className="inline-block rounded-full bg-[var(--surface-muted)] px-2.5 py-0.5 text-[11px] font-medium text-[var(--foreground-muted)]">
-              {track.provider === "YOUTUBE" ? "YouTube" : "SoundCloud"}
+              {TRACK_PROVIDER_LABELS[track.provider]}
             </span>
             <h2 className="mt-2 line-clamp-2 text-lg font-semibold tracking-tight text-[var(--foreground)]">
               {track.title}
@@ -639,7 +772,7 @@ export function GuidedSessionPlayer({
             )}
           </div>
 
-          {/* Embedded Provider Player (kept visible for YouTube Terms compliance) */}
+          {/* Embedded Provider Player (YouTube / SoundCloud / Direct Audio HTML5) */}
           <div className="overflow-hidden rounded-2xl border border-black/8 bg-[var(--surface)] shadow-xs dark:border-white/10">
             {playerError ? (
               <div className="flex flex-col items-center gap-3 p-6 text-center">
@@ -660,7 +793,7 @@ export function GuidedSessionPlayer({
               <div className="relative aspect-video w-full bg-black">
                 <div ref={ytHostRef} className="h-full w-full" />
               </div>
-            ) : (
+            ) : track.provider === "SOUNDCLOUD" ? (
               <iframe
                 ref={scIframeRef}
                 title={track.title}
@@ -668,6 +801,37 @@ export function GuidedSessionPlayer({
                 allow="autoplay"
                 className="h-72 w-full border-0"
               />
+            ) : (
+              <div className="flex flex-col items-center gap-4 p-6">
+                <div className="flex h-20 w-20 items-center justify-center rounded-full bg-[var(--accent-soft)] text-[var(--accent)]">
+                  <Headphones className="h-9 w-9" />
+                </div>
+                <audio
+                  ref={directAudioRef}
+                  src={track.url}
+                  controls
+                  preload="metadata"
+                  onPlay={() => {
+                    getAudioEngine().unlock();
+                    markPlayingStart();
+                    setEarlyStopElapsedSec(null);
+                    setPlaybackState("playing");
+                  }}
+                  onPause={() => {
+                    flushListeningMs();
+                    setPlaybackState((prev) =>
+                      prev === "completed" ? prev : "paused"
+                    );
+                  }}
+                  onEnded={() => handleTrackCompleted()}
+                  onError={() =>
+                    setPlayerError(
+                      "Unable to stream this audio file. Verify the direct link is publicly accessible."
+                    )
+                  }
+                  className="w-full"
+                />
+              </div>
             )}
           </div>
 
@@ -714,42 +878,74 @@ export function GuidedSessionPlayer({
             </div>
           ) : (
             <p className="text-center text-xs text-[var(--foreground-muted)]">
-              {isWakeLockActive
-                ? "Screen awake — plays full track from start to finish."
-                : "Press play in the player above to begin your full-track session."}
+              {track.provider === "DIRECT_AUDIO"
+                ? "Supports lock-screen playback and media controls."
+                : isWakeLockActive
+                  ? "Screen awake — plays full track from start to finish."
+                  : "Press play in the player above to begin your full-track session."}
             </p>
           )}
         </div>
       )}
 
+      {/* OLED-friendly Zen Dim Mode Overlay */}
+      {isDimmed && playbackState !== "completed" && (
+        <button
+          type="button"
+          onClick={() => setIsDimmed(false)}
+          aria-label="Wake dimmed screen"
+          className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-3 bg-[#050605] px-8 text-center focus:outline-none"
+        >
+          <span className="line-clamp-2 max-w-xs text-sm font-medium text-white/25">
+            {track.title}
+          </span>
+          <span className="text-[11px] tracking-wide text-white/15">
+            Tap anywhere to wake
+          </span>
+        </button>
+      )}
+
       {/* Bottom Controls */}
       {playbackState !== "completed" && earlyStopElapsedSec === null && (
-        <div className="flex items-center justify-between gap-3 rounded-2xl border border-black/6 bg-[var(--surface)] px-4 py-3 dark:border-white/10">
+        <div className="flex items-center justify-between gap-2 rounded-2xl border border-black/6 bg-[var(--surface)] px-4 py-3 dark:border-white/10">
           <button
             type="button"
             onClick={() => {
               getAudioEngine().unlock();
               onToggleClosingBell();
             }}
-            className="flex items-center gap-2 text-xs font-medium text-[var(--foreground)]"
+            className="flex min-w-0 items-center gap-2 text-xs font-medium text-[var(--foreground)]"
           >
             {closingBellEnabled ? (
-              <Bell className="h-4 w-4 text-[var(--accent)]" />
+              <Bell className="h-4 w-4 shrink-0 text-[var(--accent)]" />
             ) : (
-              <BellOff className="h-4 w-4 text-[var(--foreground-muted)]" />
+              <BellOff className="h-4 w-4 shrink-0 text-[var(--foreground-muted)]" />
             )}
-            <span>Closing bell: {closingBellEnabled ? "On" : "Off"}</span>
+            <span className="truncate">
+              Bell: {closingBellEnabled ? closingBellMeta.name : "Off"}
+            </span>
           </button>
 
-          <a
-            href={track.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 text-xs font-medium text-[var(--foreground-muted)] transition-colors hover:text-[var(--foreground)]"
-          >
-            Source
-            <ExternalLink className="h-3 w-3" />
-          </a>
+          <div className="flex shrink-0 items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setIsDimmed(true)}
+              className="inline-flex items-center gap-1 text-xs font-medium text-[var(--foreground-muted)] transition-colors hover:text-[var(--foreground)]"
+            >
+              <EyeOff className="h-3.5 w-3.5" />
+              Dim
+            </button>
+
+            <a
+              href={track.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 text-xs font-medium text-[var(--foreground-muted)] transition-colors hover:text-[var(--foreground)]"
+            >
+              Source
+              <ExternalLink className="h-3 w-3" />
+            </a>
+          </div>
         </div>
       )}
     </div>
