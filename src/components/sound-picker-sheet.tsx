@@ -161,7 +161,7 @@ export function SoundPickerSheet({
         </div>
 
         {/* Scrollable content */}
-        <div className="flex-1 overflow-y-auto px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))]">
+        <div className="flex-1 overflow-x-hidden overflow-y-auto px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))]">
           {(slot === "start" || slot === "end") && (
             <div className="flex flex-col gap-2">
               {BELL_SOUNDS.map((sound) => {
@@ -187,7 +187,7 @@ export function SoundPickerSheet({
                     <button
                       type="button"
                       onClick={handleSelect}
-                      className="flex flex-1 items-center gap-2.5 text-left"
+                      className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
                     >
                       <span
                         className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition-colors ${
@@ -198,13 +198,8 @@ export function SoundPickerSheet({
                       >
                         {isSelected && <Check className="h-3 w-3" />}
                       </span>
-                      <span className="min-w-0">
-                        <span className="block text-sm font-medium text-[var(--foreground)]">
-                          {sound.name}
-                        </span>
-                        <span className="block truncate text-xs text-[var(--foreground-muted)]">
-                          {sound.description}
-                        </span>
+                      <span className="truncate text-sm font-medium text-[var(--foreground)]">
+                        {sound.name}
                       </span>
                     </button>
 
@@ -229,7 +224,7 @@ export function SoundPickerSheet({
             <div className="flex flex-col gap-4">
               {/* Enable / Disable Toggle */}
               <div className="flex items-center justify-between gap-3 rounded-xl border border-black/6 bg-[var(--background)]/60 px-3.5 py-3 dark:border-white/8">
-                <div>
+                <div className="min-w-0">
                   <p className="text-sm font-medium text-[var(--foreground)]">
                     Repeat interval cue
                   </p>
@@ -339,7 +334,7 @@ export function SoundPickerSheet({
                           <button
                             type="button"
                             onClick={() => onSelectIntervalBell(sound.id)}
-                            className="flex flex-1 items-center gap-2.5 text-left"
+                            className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
                           >
                             <span
                               className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition-colors ${
@@ -350,13 +345,8 @@ export function SoundPickerSheet({
                             >
                               {isSelected && <Check className="h-3 w-3" />}
                             </span>
-                            <span className="min-w-0">
-                              <span className="block text-sm font-medium text-[var(--foreground)]">
-                                {sound.name}
-                              </span>
-                              <span className="block truncate text-xs text-[var(--foreground-muted)]">
-                                {sound.description}
-                              </span>
+                            <span className="truncate text-sm font-medium text-[var(--foreground)]">
+                              {sound.name}
                             </span>
                           </button>
 
@@ -397,7 +387,7 @@ export function SoundPickerSheet({
                       <button
                         type="button"
                         onClick={() => onSelectAmbientSound(sound.id)}
-                        className="flex flex-1 items-center gap-2.5 text-left"
+                        className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
                       >
                         <span
                           className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition-colors ${
@@ -408,13 +398,8 @@ export function SoundPickerSheet({
                         >
                           {isSelected && <Check className="h-3 w-3" />}
                         </span>
-                        <span className="min-w-0">
-                          <span className="block text-sm font-medium text-[var(--foreground)]">
-                            {sound.name}
-                          </span>
-                          <span className="block truncate text-xs text-[var(--foreground-muted)]">
-                            {sound.description}
-                          </span>
+                        <span className="truncate text-sm font-medium text-[var(--foreground)]">
+                          {sound.name}
                         </span>
                       </button>
 
