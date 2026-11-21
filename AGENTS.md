@@ -31,15 +31,16 @@ Mobile-first meditation web application (**PWA**) designed for calm, distraction
 4. **V4 — Offline PWA / Airplane Mode & Configurable Sounds (Completed):**
    - Zero-dependency Service Worker (`public/sw.js`) with silent updates, offline session queue & local history cache (`src/lib/offline/`), and automatic sync to Neon when back online.
    - Configurable start/interval/end bells, 7 ambient soundscapes with bottom-sheet preview (`src/components/sound-picker-sheet.tsx`), and persisted timer preferences (`src/lib/timer/preferences.ts`).
-5. **V5 — Practice Presets & Zen Dim Mode (Current):**
+5. **V5 — Practice Presets & Zen Dim Mode (Completed):**
    - Named Practice Presets (`TimerPreset` Prisma model + `/api/presets`, `/api/presets/[id]`, local fallback via `src/lib/timer/presets.ts`, and compact single-row `src/components/preset-strip.tsx`) capturing full timer settings.
    - OLED-friendly **Zen Dim Mode** during active timer sessions (`Dim screen` pill + tap-anywhere-to-wake overlay).
-6. **V6 — Visual History, Manual Logging & Export (Planned):**
-   - Monthly practice calendar/heatmap, longest streak display, period filters, manual session logging, and CSV/JSON export.
+6. **V6 — Visual History, Manual Logging & Export (Current):**
+   - Minimalist monthly practice calendar/heatmap (`src/components/history-calendar.tsx`, `buildMonthlyCalendar`) with tap-to-filter day inspection.
+   - Longest streak display (`Best Xd`), period filters (`7d | 30d | All`), inline manual/offline session logging (`+ Log`), and RFC-4180 CSV / JSON export (`src/lib/history/export.ts` + `export.test.ts`).
 7. **V7 — Direct Audio Guided Tracks & Track Organization (Planned):**
    - Direct `.mp3`/`.m4a` audio URL support with HTML5 `<audio>` + Media Session API (lock-screen playback), inline title editing, tags/category filtering, and syncing the configured timer end bell into guided sessions.
 
-## Directory Structure (V5)
+## Directory Structure (V6)
 
 - `public/sw.js` — Offline PWA Service Worker (served with `Cache-Control: no-cache` via `next.config.ts` and excluded from `src/proxy.ts`).
 - `prisma/schema.prisma` — `User`, `FavoriteTrack`, `MeditationSession`, and `TimerPreset` models.
@@ -48,11 +49,11 @@ Mobile-first meditation web application (**PWA**) designed for calm, distraction
 - `src/lib/timer/` — Timestamp-based timer engine (`engine.ts` + `engine.test.ts`), persisted preferences (`preferences.ts` + `preferences.test.ts`), named presets (`presets.ts` + `presets.test.ts`), and types (`types.ts`).
 - `src/lib/audio/` — Extensible bell & ambient sound catalog (`sounds.ts`) and Web Audio API synthesis engine (`engine.ts`).
 - `src/lib/tracks/` — YouTube/SoundCloud URL parser (`providers.ts` + `providers.test.ts`), oEmbed resolver (`oembed.ts`), drag-reorder helpers (`reorder.ts` + `reorder.test.ts`), and types (`types.ts`).
-- `src/lib/history/` — History statistics & daily streak engine (`stats.ts` + `stats.test.ts`), client helpers with offline fallback (`client.ts`), and types (`types.ts`).
+- `src/lib/history/` — History statistics, period filter & monthly calendar engine (`stats.ts` + `stats.test.ts`), CSV/JSON export (`export.ts` + `export.test.ts`), client helpers with offline fallback (`client.ts`), and types (`types.ts`).
 - `src/lib/offline/` — Offline session queue & history cache (`queue.ts` + `queue.test.ts`) and reactive online status hook (`use-network-status.ts`).
 - `src/lib/pull-to-refresh.ts` + `pull-to-refresh.test.ts` — Pure rubber-band pull-to-refresh physics and tests.
 - `src/lib/wake-lock.ts` — Screen Wake Lock hook.
-- `src/components/` — `BodhiShell`, `BodhiLogo`, `ThemeProvider`, `ServiceWorkerRegister`, `PullToRefresh`, `MeditationTimer`, `PresetStrip`, `SoundPickerSheet`, `GuidedTracks`, `GuidedSessionPlayer`, and `MeditationHistory`.
+- `src/components/` — `BodhiShell`, `BodhiLogo`, `ThemeProvider`, `ServiceWorkerRegister`, `PullToRefresh`, `MeditationTimer`, `PresetStrip`, `SoundPickerSheet`, `GuidedTracks`, `GuidedSessionPlayer`, `MeditationHistory`, and `HistoryCalendar`.
 - `public/icons/` — Official Bodhi leaf SVG, transparent PNG favicon, and PWA PNG icons.
 
 ## Commands & Conventions

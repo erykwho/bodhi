@@ -415,6 +415,7 @@ export function BodhiShell({
               authConfigured={authConfigured}
               isOnline={isOnline}
               sessions={sessions}
+              onSessionSaved={handleSessionSaved}
               onSessionUpdated={handleSessionUpdated}
               onSessionDeleted={handleSessionDeleted}
             />

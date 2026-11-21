@@ -30,6 +30,12 @@ A serene, mobile-first meditation Progressive Web App (PWA) built with Next.js 1
 - **Named Practice Presets:** Save, apply, and manage named timer rituals (duration, warm-up, bells, interval, and background sound) synced to Neon PostgreSQL when signed in or stored locally offline.
 - **Zen Dim Mode:** One-tap OLED-friendly dark overlay during active timer sessions to eliminate screen glare while keeping Wake Lock active.
 
+### V6 — Visual History, Manual Logging & Export
+- **Monthly Practice Calendar:** Minimalist sage-green heatmap calendar with month navigation and tap-to-filter day inspection.
+- **Period Filters & Longest Streak:** Filter totals and logs by `7d`, `30d`, or `All`, with your all-time longest streak (`Best Xd`) displayed alongside your current streak.
+- **Manual Session Logging:** Record offline or away-from-phone meditations (`+ Log`) with date, duration, and optional reflection note (supports offline queueing).
+- **CSV & JSON Export:** Download your meditation history as RFC-4180 CSV or JSON backup in one tap.
+
 ## Environment Variables (V2+)
 
 Copy `.env.example` to `.env.local` for local development with cloud-synced Favorites, Presets, and Meditation History:

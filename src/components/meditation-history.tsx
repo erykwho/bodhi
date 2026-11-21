@@ -6,21 +6,33 @@ import {
   Check,
   Clock,
   CloudOff,
+  Download,
   Flame,
   Headphones,
   Loader2,
   LogIn,
   Pencil,
+  Plus,
   Timer,
   Trash2,
   X,
 } from "lucide-react";
 import { signInWithGoogle } from "@/app/actions";
+import { HistoryCalendar } from "@/components/history-calendar";
 import type { SessionUserSummary } from "@/lib/auth";
+import { saveMeditationSession } from "@/lib/history/client";
+import {
+  sessionsToCsv,
+  sessionsToJson,
+  triggerFileDownload,
+} from "@/lib/history/export";
 import {
   computeHistoryStats,
+  filterSessionsByPeriod,
   formatSessionDuration,
   formatTotalTime,
+  toLocalDateKey,
+  type HistoryPeriod,
 } from "@/lib/history/stats";
 import type { MeditationSessionItem } from "@/lib/history/types";
 import {
@@ -28,12 +40,21 @@ import {
   removePendingSession,
   updatePendingSessionNote,
 } from "@/lib/offline/queue";
+import { clampDurationMinutes } from "@/lib/timer/engine";
+import { MAX_DURATION_MINUTES, MIN_DURATION_MINUTES } from "@/lib/timer/types";
+
+const PERIOD_OPTIONS: ReadonlyArray<{ id: HistoryPeriod; label: string }> = [
+  { id: "7d", label: "7d" },
+  { id: "30d", label: "30d" },
+  { id: "all", label: "All" },
+] as const;
 
 interface MeditationHistoryProps {
   user: SessionUserSummary | null;
   authConfigured: boolean;
   isOnline?: boolean;
   sessions: MeditationSessionItem[];
+  onSessionSaved: (session: MeditationSessionItem) => void;
   onSessionUpdated: (session: MeditationSessionItem) => void;
   onSessionDeleted: (id: string) => void;
 }
@@ -54,16 +75,57 @@ export function MeditationHistory({
   authConfigured,
   isOnline = true,
   sessions,
+  onSessionSaved,
   onSessionUpdated,
   onSessionDeleted,
 }: MeditationHistoryProps) {
+  const [period, setPeriod] = useState<HistoryPeriod>("all");
+  const [selectedDateKey, setSelectedDateKey] = useState<string | null>(null);
+
+  // Manual session log form state
+  const [isLoggingManual, setIsLoggingManual] = useState<boolean>(false);
+  const [manualDate, setManualDate] = useState<string>(() =>
+    toLocalDateKey(new Date())
+  );
+  const [manualMinutes, setManualMinutes] = useState<string>("15");
+  const [manualNote, setManualNote] = useState<string>("");
+  const [isSavingManual, setIsSavingManual] = useState<boolean>(false);
+
+  // Export panel state
+  const [showExportMenu, setShowExportMenu] = useState<boolean>(false);
+
+  // Existing row edit/delete state
   const [editingId, setEditingId] = useState<string | null>(null);
   const [noteDraft, setNoteDraft] = useState<string>("");
   const [savingId, setSavingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const stats = useMemo(() => computeHistoryStats(sessions), [sessions]);
+  const userId = user?.id ?? null;
+
+  // All-time stats for streaks; period-filtered sessions for Total, Sessions, and list
+  const allTimeStats = useMemo(() => computeHistoryStats(sessions), [sessions]);
+  const periodSessions = useMemo(
+    () => filterSessionsByPeriod(sessions, period),
+    [period, sessions]
+  );
+  const periodStats = useMemo(
+    () => computeHistoryStats(periodSessions),
+    [periodSessions]
+  );
+
+  const displayedSessions = useMemo(() => {
+    if (selectedDateKey) {
+      return sessions.filter((s) => {
+        const parsed = new Date(s.endedAt);
+        return (
+          !Number.isNaN(parsed.getTime()) &&
+          toLocalDateKey(parsed) === selectedDateKey
+        );
+      });
+    }
+    return periodSessions;
+  }, [periodSessions, selectedDateKey, sessions]);
 
   const startEditingNote = useCallback((session: MeditationSessionItem) => {
     setEditingId(session.id);
@@ -76,7 +138,83 @@ export function MeditationHistory({
     setNoteDraft("");
   }, []);
 
-  const userId = user?.id ?? null;
+  const handleManualSubmit = useCallback(
+    async (event: React.FormEvent) => {
+      event.preventDefault();
+      if (!userId) return;
+
+      const parsedMinutes = clampDurationMinutes(Number(manualMinutes));
+      const durationSec = parsedMinutes * 60;
+
+      // Build local date timestamp (noon local time for past dates, current time for today)
+      const todayKey = toLocalDateKey(new Date());
+      let endedAt: Date;
+      if (!manualDate || manualDate === todayKey) {
+        endedAt = new Date();
+      } else {
+        const [y, m, d] = manualDate.split("-").map(Number);
+        endedAt = new Date(y, m - 1, d, 12, 0, 0);
+      }
+
+      if (Number.isNaN(endedAt.getTime())) {
+        setErrorMessage("Please choose a valid date.");
+        return;
+      }
+
+      const startedAt = new Date(endedAt.getTime() - durationSec * 1000);
+      setIsSavingManual(true);
+      setErrorMessage(null);
+
+      try {
+        const saved = await saveMeditationSession(
+          {
+            mode: "TIMER",
+            plannedDurationSec: durationSec,
+            actualDurationSec: durationSec,
+            completed: true,
+            note: manualNote.trim() || null,
+            startedAt: startedAt.toISOString(),
+            endedAt: endedAt.toISOString(),
+          },
+          userId
+        );
+
+        if (!saved) {
+          setErrorMessage("Failed to save manual session.");
+          return;
+        }
+
+        onSessionSaved(saved);
+        setManualNote("");
+        setIsLoggingManual(false);
+      } catch {
+        setErrorMessage("Failed to save manual session.");
+      } finally {
+        setIsSavingManual(false);
+      }
+    },
+    [manualDate, manualMinutes, manualNote, onSessionSaved, userId]
+  );
+
+  const handleExportCsv = useCallback(() => {
+    const dateStamp = toLocalDateKey(new Date());
+    triggerFileDownload(
+      sessionsToCsv(displayedSessions),
+      `bodhi-history-${dateStamp}.csv`,
+      "text/csv;charset=utf-8"
+    );
+    setShowExportMenu(false);
+  }, [displayedSessions]);
+
+  const handleExportJson = useCallback(() => {
+    const dateStamp = toLocalDateKey(new Date());
+    triggerFileDownload(
+      sessionsToJson(displayedSessions),
+      `bodhi-history-${dateStamp}.json`,
+      "application/json;charset=utf-8"
+    );
+    setShowExportMenu(false);
+  }, [displayedSessions]);
 
   const handleSaveNote = useCallback(
     async (id: string) => {
@@ -205,7 +343,157 @@ export function MeditationHistory({
   }
 
   return (
-    <section className="flex flex-1 flex-col gap-4 py-1">
+    <section className="flex flex-1 flex-col gap-3.5 py-1">
+      {/* Single-row Period Filter & Manual Log / Export Actions */}
+      <div className="flex items-center justify-between gap-2">
+        <div className="grid grid-cols-3 gap-0.5 rounded-xl bg-[var(--surface-muted)] p-0.5">
+          {PERIOD_OPTIONS.map((opt) => {
+            const isActive = period === opt.id && !selectedDateKey;
+            return (
+              <button
+                key={opt.id}
+                type="button"
+                onClick={() => {
+                  setSelectedDateKey(null);
+                  setPeriod(opt.id);
+                }}
+                className={`rounded-lg px-2.5 py-1 text-xs font-medium whitespace-nowrap transition-colors ${
+                  isActive
+                    ? "bg-[var(--surface)] text-[var(--foreground)] shadow-2xs"
+                    : "text-[var(--foreground-muted)] hover:text-[var(--foreground)]"
+                }`}
+              >
+                {opt.label}
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => {
+              setShowExportMenu(false);
+              setIsLoggingManual((prev) => !prev);
+            }}
+            className="inline-flex h-8 items-center gap-1 rounded-full bg-[var(--accent)] px-3 text-xs font-semibold text-[#fcfaf6] whitespace-nowrap transition-colors hover:bg-[var(--accent-strong)] dark:text-[#151917]"
+          >
+            {isLoggingManual ? (
+              <>
+                <X className="h-3.5 w-3.5" />
+                Cancel
+              </>
+            ) : (
+              <>
+                <Plus className="h-3.5 w-3.5" />
+                Log
+              </>
+            )}
+          </button>
+
+          {sessions.length > 0 && (
+            <button
+              type="button"
+              onClick={() => {
+                setIsLoggingManual(false);
+                setShowExportMenu((prev) => !prev);
+              }}
+              aria-label="Export history"
+              className="flex h-8 w-8 items-center justify-center rounded-full border border-black/6 bg-[var(--surface)] text-[var(--foreground-muted)] transition-colors hover:text-[var(--foreground)] dark:border-white/10"
+            >
+              <Download className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Compact Export Row */}
+      {showExportMenu && (
+        <div className="flex items-center justify-between gap-2 rounded-2xl border border-black/6 bg-[var(--surface)] px-3.5 py-2.5 text-xs dark:border-white/10">
+          <span className="font-medium text-[var(--foreground-muted)]">
+            Export {displayedSessions.length}{" "}
+            {displayedSessions.length === 1 ? "session" : "sessions"}
+          </span>
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={handleExportCsv}
+              className="rounded-lg bg-[var(--surface-muted)] px-2.5 py-1 font-semibold text-[var(--foreground)] transition-colors hover:bg-[var(--accent-soft)] hover:text-[var(--accent)]"
+            >
+              CSV
+            </button>
+            <button
+              type="button"
+              onClick={handleExportJson}
+              className="rounded-lg bg-[var(--surface-muted)] px-2.5 py-1 font-semibold text-[var(--foreground)] transition-colors hover:bg-[var(--accent-soft)] hover:text-[var(--accent)]"
+            >
+              JSON
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Manual Session Logging Form */}
+      {isLoggingManual && (
+        <form
+          onSubmit={handleManualSubmit}
+          className="flex flex-col gap-3 rounded-2xl border border-black/6 bg-[var(--surface)] p-4 shadow-xs dark:border-white/10"
+        >
+          <p className="text-xs font-semibold text-[var(--foreground)]">
+            Log offline or manual practice
+          </p>
+
+          <div className="grid grid-cols-2 gap-2.5">
+            <label className="flex flex-col gap-1 text-[11px] font-medium text-[var(--foreground-muted)]">
+              Date
+              <input
+                type="date"
+                required
+                max={toLocalDateKey(new Date())}
+                value={manualDate}
+                onChange={(event) => setManualDate(event.target.value)}
+                className="h-9 rounded-xl border border-black/10 bg-[var(--background)] px-2.5 text-xs text-[var(--foreground)] outline-none focus:border-[var(--accent)] dark:border-white/12"
+              />
+            </label>
+
+            <label className="flex flex-col gap-1 text-[11px] font-medium text-[var(--foreground-muted)]">
+              Minutes
+              <input
+                type="number"
+                required
+                min={MIN_DURATION_MINUTES}
+                max={MAX_DURATION_MINUTES}
+                value={manualMinutes}
+                onChange={(event) => setManualMinutes(event.target.value)}
+                className="h-9 rounded-xl border border-black/10 bg-[var(--background)] px-2.5 text-xs text-[var(--foreground)] tabular-nums outline-none focus:border-[var(--accent)] dark:border-white/12"
+              />
+            </label>
+          </div>
+
+          <textarea
+            rows={2}
+            maxLength={500}
+            placeholder="Optional reflection note..."
+            value={manualNote}
+            onChange={(event) => setManualNote(event.target.value)}
+            className="w-full resize-none rounded-xl border border-black/10 bg-[var(--background)] px-3 py-2 text-xs text-[var(--foreground)] outline-none placeholder:text-[var(--foreground-muted)]/70 focus:border-[var(--accent)] dark:border-white/12"
+          />
+
+          <button
+            type="submit"
+            disabled={isSavingManual}
+            className="flex h-10 w-full items-center justify-center gap-1.5 rounded-xl bg-[var(--accent)] text-xs font-semibold text-[#fcfaf6] transition-colors hover:bg-[var(--accent-strong)] disabled:opacity-50 dark:text-[#151917]"
+          >
+            {isSavingManual ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Check className="h-3.5 w-3.5" />
+            )}
+            Save Session
+          </button>
+        </form>
+      )}
+
       {/* Compact 3-Column KPI Strip */}
       <div className="grid grid-cols-3 gap-2">
         <div className="rounded-2xl border border-black/6 bg-[var(--surface)] px-3 py-3 text-center shadow-xs dark:border-white/10">
@@ -214,7 +502,7 @@ export function MeditationHistory({
             <span>Total</span>
           </div>
           <p className="mt-1 text-base font-semibold tracking-tight text-[var(--foreground)] tabular-nums">
-            {formatTotalTime(stats.totalSeconds)}
+            {formatTotalTime(periodStats.totalSeconds)}
           </p>
         </div>
 
@@ -224,11 +512,16 @@ export function MeditationHistory({
             <span>Streak</span>
           </div>
           <p className="mt-1 text-base font-semibold tracking-tight text-[var(--foreground)] tabular-nums">
-            {stats.currentStreakDays}{" "}
+            {allTimeStats.currentStreakDays}{" "}
             <span className="text-xs font-medium text-[var(--foreground-muted)]">
-              {stats.currentStreakDays === 1 ? "day" : "days"}
+              {allTimeStats.currentStreakDays === 1 ? "day" : "days"}
             </span>
           </p>
+          {allTimeStats.longestStreakDays > 0 && (
+            <p className="mt-0.5 text-[10px] text-[var(--foreground-muted)] tabular-nums">
+              Best {allTimeStats.longestStreakDays}d
+            </p>
+          )}
         </div>
 
         <div className="rounded-2xl border border-black/6 bg-[var(--surface)] px-3 py-3 text-center shadow-xs dark:border-white/10">
@@ -237,10 +530,17 @@ export function MeditationHistory({
             <span>Sessions</span>
           </div>
           <p className="mt-1 text-base font-semibold tracking-tight text-[var(--foreground)] tabular-nums">
-            {stats.totalSessions}
+            {periodStats.totalSessions}
           </p>
         </div>
       </div>
+
+      {/* Minimalist Monthly Practice Calendar / Heatmap */}
+      <HistoryCalendar
+        sessions={sessions}
+        selectedDateKey={selectedDateKey}
+        onSelectDateKey={setSelectedDateKey}
+      />
 
       {errorMessage && (
         <p className="rounded-xl bg-red-500/10 px-3 py-2 text-xs text-red-600 dark:text-red-400">
@@ -249,19 +549,23 @@ export function MeditationHistory({
       )}
 
       {/* Chronological Session Log */}
-      {sessions.length === 0 ? (
-        <div className="flex flex-1 flex-col items-center justify-center rounded-3xl border border-dashed border-black/12 bg-[var(--surface)]/60 px-6 py-12 text-center dark:border-white/12">
+      {displayedSessions.length === 0 ? (
+        <div className="flex flex-1 flex-col items-center justify-center rounded-3xl border border-dashed border-black/12 bg-[var(--surface)]/60 px-6 py-10 text-center dark:border-white/12">
           <Clock className="h-7 w-7 text-[var(--foreground-muted)]" />
           <p className="mt-3 text-sm font-medium text-[var(--foreground)]">
-            No sessions recorded yet
+            {sessions.length === 0
+              ? "No sessions recorded yet"
+              : "No sessions in this range"}
           </p>
           <p className="mt-1 max-w-xs text-xs text-[var(--foreground-muted)]">
-            Complete a Timer or Guided meditation to automatically log it here.
+            {sessions.length === 0
+              ? "Complete a Timer or Guided meditation, or tap Log to record offline practice."
+              : "Switch the period filter above or select another day on the calendar."}
           </p>
         </div>
       ) : (
         <ul className="flex flex-col gap-2.5">
-          {sessions.map((session) => {
+          {displayedSessions.map((session) => {
             const isEditing = editingId === session.id;
             const isPending = Boolean(
               session.pendingSync || isPendingSessionId(session.id)
