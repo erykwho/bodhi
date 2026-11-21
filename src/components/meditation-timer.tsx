@@ -1,26 +1,38 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import {
   Bell,
+  BellRing,
   Check,
+  ChevronRight,
   Loader2,
   Minus,
   Pause,
   Play,
   Plus,
+  Repeat,
   RotateCcw,
-  Square,
   Volume2,
   VolumeX,
 } from "lucide-react";
 import { BodhiLogo } from "@/components/bodhi-logo";
+import {
+  SoundPickerSheet,
+  type SoundSheetSlot,
+} from "@/components/sound-picker-sheet";
 import { MeditationAudioEngine } from "@/lib/audio/engine";
 import {
-  AMBIENT_SOUNDS,
-  DEFAULT_AMBIENT_SOUND_ID,
-  DEFAULT_AMBIENT_VOLUME,
+  getAmbientSoundOption,
+  getBellSoundOption,
   type AmbientSoundId,
+  type BellSoundId,
 } from "@/lib/audio/sounds";
 import {
   saveMeditationSession,
@@ -33,21 +45,26 @@ import {
 import type { MeditationSessionItem } from "@/lib/history/types";
 import {
   clampDurationMinutes,
+  clampIntervalMinutes,
   computeElapsedMs,
+  computeIntervalBellIndex,
   computeProgress,
   computeRemainingMs,
   formatDurationLabel,
   formatTimerDisplay,
 } from "@/lib/timer/engine";
 import {
-  DEFAULT_DURATION_MINUTES,
-  DEFAULT_WARMUP_SECONDS,
+  getTimerPreferencesServerSnapshot,
+  getTimerPreferencesSnapshot,
+  subscribeTimerPreferences,
+  updateTimerPreferences,
+} from "@/lib/timer/preferences";
+import {
   DURATION_PRESETS_MINUTES,
   MAX_DURATION_MINUTES,
   MIN_DURATION_MINUTES,
   WARMUP_OPTIONS_SECONDS,
   type TimerPhase,
-  type WarmupSeconds,
 } from "@/lib/timer/types";
 import { useWakeLock } from "@/lib/wake-lock";
 
@@ -69,22 +86,29 @@ export function MeditationTimer({
   onSessionSaved,
   onSessionUpdated,
 }: MeditationTimerProps) {
-  // Setup state
-  const [durationMinutes, setDurationMinutes] = useState<number>(
-    DEFAULT_DURATION_MINUTES
+  // Persisted setup preferences (SSR-safe via useSyncExternalStore)
+  const prefs = useSyncExternalStore(
+    subscribeTimerPreferences,
+    getTimerPreferencesSnapshot,
+    getTimerPreferencesServerSnapshot
   );
-  const [warmupSeconds, setWarmupSeconds] = useState<WarmupSeconds>(
-    DEFAULT_WARMUP_SECONDS
-  );
-  const [selectedSound, setSelectedSound] = useState<AmbientSoundId>(
-    DEFAULT_AMBIENT_SOUND_ID
-  );
-  const [ambientVolume, setAmbientVolume] = useState<number>(
-    DEFAULT_AMBIENT_VOLUME
-  );
+  const {
+    durationMinutes,
+    warmupSeconds,
+    startBell,
+    endBell,
+    intervalEnabled,
+    intervalMinutes,
+    intervalBell,
+    ambientSound: selectedSound,
+    ambientVolume,
+  } = prefs;
+
   const [isAmbientMuted, setIsAmbientMuted] = useState<boolean>(false);
   const [previewingSoundId, setPreviewingSoundId] =
     useState<AmbientSoundId | null>(null);
+  const [activeSoundSheet, setActiveSoundSheet] =
+    useState<SoundSheetSlot | null>(null);
 
   // Active session state
   const [phase, setPhase] = useState<TimerPhase>("idle");
@@ -92,10 +116,11 @@ export function MeditationTimer({
     "running"
   );
   const [remainingMs, setRemainingMs] = useState<number>(
-    DEFAULT_DURATION_MINUTES * 60 * 1000
+    durationMinutes * 60 * 1000
   );
 
   const endTimeRef = useRef<number | null>(null);
+  const lastIntervalIndexRef = useRef<number>(0);
   const sessionStartedAtRef = useRef<string | null>(null);
   const audioRef = useRef<MeditationAudioEngine | null>(null);
 
@@ -150,10 +175,11 @@ export function MeditationTimer({
         if (phase === "warmup") {
           const nextEnd = Date.now() + totalSessionMs;
           endTimeRef.current = nextEnd;
+          lastIntervalIndexRef.current = 0;
           sessionStartedAtRef.current = new Date().toISOString();
           setRemainingMs(totalSessionMs);
           setPhase("running");
-          audio.playBell("start");
+          audio.playBellSound(startBell);
           if (selectedSound !== "silence" && !isAmbientMuted) {
             audio.startAmbient(selectedSound, ambientVolume);
           }
@@ -162,7 +188,7 @@ export function MeditationTimer({
           setRemainingMs(0);
           setPhase("completed");
           audio.stopAmbient(1.2);
-          audio.playBell("end");
+          audio.playBellSound(endBell);
 
           if (isAuthenticated) {
             const endedAt = new Date().toISOString();
@@ -185,6 +211,19 @@ export function MeditationTimer({
         return;
       }
 
+      if (phase === "running" && intervalEnabled && intervalBell !== "none") {
+        const elapsedMs = computeElapsedMs(totalSessionMs, nextRemaining);
+        const nextIntervalIndex = computeIntervalBellIndex(
+          elapsedMs,
+          totalSessionMs,
+          intervalMinutes * 60 * 1000
+        );
+        if (nextIntervalIndex > lastIntervalIndexRef.current) {
+          lastIntervalIndexRef.current = nextIntervalIndex;
+          getAudioEngine().playBellSound(intervalBell);
+        }
+      }
+
       setRemainingMs(nextRemaining);
     };
 
@@ -192,12 +231,17 @@ export function MeditationTimer({
     return () => window.clearInterval(intervalId);
   }, [
     ambientVolume,
+    endBell,
     getAudioEngine,
+    intervalBell,
+    intervalEnabled,
+    intervalMinutes,
     isAmbientMuted,
     isAuthenticated,
     onSessionSaved,
     phase,
     selectedSound,
+    startBell,
     totalSessionMs,
   ]);
 
@@ -206,11 +250,31 @@ export function MeditationTimer({
     setPreviewingSoundId(null);
   }, []);
 
+  const handleCloseSoundSheet = useCallback(() => {
+    stopPreview();
+    setActiveSoundSheet(null);
+  }, [stopPreview]);
+
   const handleDurationChange = useCallback((nextMinutes: number) => {
     const clamped = clampDurationMinutes(nextMinutes);
-    setDurationMinutes(clamped);
+    updateTimerPreferences({ durationMinutes: clamped });
     setRemainingMs(clamped * 60 * 1000);
   }, []);
+
+  const handleIntervalMinutesChange = useCallback((nextMinutes: number) => {
+    updateTimerPreferences({
+      intervalMinutes: clampIntervalMinutes(nextMinutes),
+    });
+  }, []);
+
+  const handlePreviewBell = useCallback(
+    (soundId: BellSoundId) => {
+      const audio = getAudioEngine();
+      audio.unlock();
+      audio.playBellSound(soundId);
+    },
+    [getAudioEngine]
+  );
 
   const handleTogglePreview = useCallback(
     (soundId: AmbientSoundId) => {
@@ -233,7 +297,7 @@ export function MeditationTimer({
 
   const handleSelectSound = useCallback(
     (soundId: AmbientSoundId) => {
-      setSelectedSound(soundId);
+      updateTimerPreferences({ ambientSound: soundId });
       if (previewingSoundId && previewingSoundId !== soundId) {
         stopPreview();
       }
@@ -246,7 +310,7 @@ export function MeditationTimer({
 
   const handleVolumeChange = useCallback(
     (nextVolume: number) => {
-      setAmbientVolume(nextVolume);
+      updateTimerPreferences({ ambientVolume: nextVolume });
       setIsAmbientMuted(nextVolume === 0);
       if (previewingSoundId || phase === "running") {
         audioRef.current?.setAmbientVolume(nextVolume);
@@ -270,21 +334,17 @@ export function MeditationTimer({
     }
   }, [ambientVolume, getAudioEngine, isAmbientMuted, phase, selectedSound]);
 
-  const handleTestBell = useCallback(() => {
-    const audio = getAudioEngine();
-    audio.unlock();
-    audio.playBell("start");
-  }, [getAudioEngine]);
-
   const handleStart = useCallback(() => {
     const audio = getAudioEngine();
     audio.unlock();
     stopPreview();
+    setActiveSoundSheet(null);
     setIsAmbientMuted(false);
     setSavedSessionId(null);
     setNoteInput("");
     setNoteSaved(false);
     setEarlyStopElapsedSec(null);
+    lastIntervalIndexRef.current = 0;
 
     if (warmupSeconds > 0) {
       const warmupMs = warmupSeconds * 1000;
@@ -297,7 +357,7 @@ export function MeditationTimer({
       sessionStartedAtRef.current = new Date().toISOString();
       setRemainingMs(totalSessionMs);
       setPhase("running");
-      audio.playBell("start");
+      audio.playBellSound(startBell);
       if (selectedSound !== "silence") {
         audio.startAmbient(selectedSound, ambientVolume);
       }
@@ -306,6 +366,7 @@ export function MeditationTimer({
     ambientVolume,
     getAudioEngine,
     selectedSound,
+    startBell,
     stopPreview,
     totalSessionMs,
     warmupSeconds,
@@ -354,6 +415,7 @@ export function MeditationTimer({
 
   const resetToIdle = useCallback(() => {
     endTimeRef.current = null;
+    lastIntervalIndexRef.current = 0;
     sessionStartedAtRef.current = null;
     audioRef.current?.stopAmbient(0.4);
     stopPreview();
@@ -453,7 +515,64 @@ export function MeditationTimer({
         : computeProgress(activeTotalMs, remainingMs);
   const strokeDashoffset = RING_CIRCUMFERENCE * (1 - progress);
 
-  const selectedSoundMeta = AMBIENT_SOUNDS.find((s) => s.id === selectedSound);
+  const startBellMeta = getBellSoundOption(startBell);
+  const endBellMeta = getBellSoundOption(endBell);
+  const intervalBellMeta = getBellSoundOption(intervalBell);
+  const selectedSoundMeta = getAmbientSoundOption(selectedSound);
+
+  const activeSessionSubtitleParts: string[] = [];
+  if (selectedSound !== "silence") {
+    activeSessionSubtitleParts.push(selectedSoundMeta.name);
+  }
+  if (intervalEnabled) {
+    activeSessionSubtitleParts.push(`Every ${intervalMinutes}m`);
+  }
+  const activeSessionSubtitle =
+    activeSessionSubtitleParts.length > 0
+      ? activeSessionSubtitleParts.join(" · ")
+      : formatDurationLabel(durationMinutes);
+
+  const soundSummaryRows: Array<{
+    slot: SoundSheetSlot;
+    label: string;
+    value: string;
+    isMutedValue?: boolean;
+    icon: typeof Bell;
+  }> = [
+    {
+      slot: "start",
+      label: "Start",
+      value: startBellMeta.name,
+      isMutedValue: startBell === "none",
+      icon: Bell,
+    },
+    {
+      slot: "interval",
+      label: "Interval",
+      value: intervalEnabled
+        ? `${intervalBellMeta.name} · ${intervalMinutes}m`
+        : "Off",
+      isMutedValue: !intervalEnabled,
+      icon: Repeat,
+    },
+    {
+      slot: "end",
+      label: "End",
+      value: endBellMeta.name,
+      isMutedValue: endBell === "none",
+      icon: BellRing,
+    },
+    {
+      slot: "background",
+      label: "Background",
+      value:
+        selectedSound === "silence"
+          ? "Silence"
+          : `${selectedSoundMeta.name} · ${Math.round(ambientVolume * 100)}%`,
+      isMutedValue: selectedSound === "silence",
+      icon: Volume2,
+    },
+  ];
 
   return (
     <>
@@ -516,7 +635,7 @@ export function MeditationTimer({
             </section>
 
             {/* Warm-up & Sound Controls */}
-            <section className="flex flex-col gap-3.5">
+            <section className="flex flex-col gap-3">
               {/* Warm-up Selector */}
               <div className="flex items-center justify-between gap-3 rounded-2xl border border-black/6 bg-[var(--surface)] px-4 py-3 dark:border-white/10">
                 <div>
@@ -535,7 +654,9 @@ export function MeditationTimer({
                       <button
                         key={seconds}
                         type="button"
-                        onClick={() => setWarmupSeconds(seconds)}
+                        onClick={() =>
+                          updateTimerPreferences({ warmupSeconds: seconds })
+                        }
                         className={`rounded-lg px-2.5 py-1.5 text-xs font-medium whitespace-nowrap tabular-nums transition-colors ${
                           isSelected
                             ? "bg-[var(--surface)] text-[var(--foreground)] shadow-xs"
@@ -549,114 +670,38 @@ export function MeditationTimer({
                 </div>
               </div>
 
-              {/* Background Sound Card */}
-              <div className="rounded-2xl border border-black/6 bg-[var(--surface)] p-4 dark:border-white/10">
-                <div className="mb-3 flex items-center justify-between">
-                  <p className="text-sm font-medium text-[var(--foreground)]">
-                    Background Sound
-                  </p>
-                  <button
-                    type="button"
-                    onClick={handleTestBell}
-                    className="inline-flex items-center gap-1.5 rounded-full bg-[var(--surface-muted)] px-2.5 py-1 text-xs font-medium text-[var(--foreground-muted)] transition-colors hover:text-[var(--foreground)]"
-                  >
-                    <Bell className="h-3 w-3" />
-                    Test bell
-                  </button>
-                </div>
-
-                <div className="flex flex-col gap-2">
-                  {AMBIENT_SOUNDS.map((sound) => {
-                    const isSelected = selectedSound === sound.id;
-                    const isPreviewing = previewingSoundId === sound.id;
-
+              {/* Compact Sounds Summary Card */}
+              <div className="overflow-hidden rounded-2xl border border-black/6 bg-[var(--surface)] dark:border-white/10">
+                <div className="divide-y divide-black/5 dark:divide-white/8">
+                  {soundSummaryRows.map((row) => {
+                    const Icon = row.icon;
                     return (
-                      <div
-                        key={sound.id}
-                        className={`flex items-center justify-between gap-2 rounded-xl border px-3 py-2.5 transition-colors ${
-                          isSelected
-                            ? "border-[var(--accent)]/40 bg-[var(--accent-soft)]"
-                            : "border-black/5 bg-[var(--background)]/60 dark:border-white/8"
-                        }`}
+                      <button
+                        key={row.slot}
+                        type="button"
+                        onClick={() => setActiveSoundSheet(row.slot)}
+                        className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-[var(--surface-muted)]/60 active:bg-[var(--surface-muted)]"
                       >
-                        <button
-                          type="button"
-                          onClick={() => handleSelectSound(sound.id)}
-                          className="flex flex-1 items-center gap-2.5 text-left"
-                        >
+                        <span className="flex items-center gap-2.5 text-sm font-medium text-[var(--foreground)]">
+                          <Icon className="h-4 w-4 shrink-0 text-[var(--foreground-muted)]" />
+                          {row.label}
+                        </span>
+                        <span className="flex min-w-0 items-center gap-1.5">
                           <span
-                            className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition-colors ${
-                              isSelected
-                                ? "border-[var(--accent)] bg-[var(--accent)] text-[#fcfaf6] dark:text-[#151917]"
-                                : "border-black/20 dark:border-white/25"
+                            className={`truncate text-xs font-medium tabular-nums ${
+                              row.isMutedValue
+                                ? "text-[var(--foreground-muted)]"
+                                : "text-[var(--accent)]"
                             }`}
                           >
-                            {isSelected && <Check className="h-3 w-3" />}
+                            {row.value}
                           </span>
-                          <span className="min-w-0">
-                            <span className="block text-sm font-medium text-[var(--foreground)]">
-                              {sound.name}
-                            </span>
-                            <span className="block truncate text-xs text-[var(--foreground-muted)]">
-                              {sound.description}
-                            </span>
-                          </span>
-                        </button>
-
-                        {sound.kind !== "none" && (
-                          <button
-                            type="button"
-                            onClick={() => handleTogglePreview(sound.id)}
-                            aria-label={
-                              isPreviewing
-                                ? `Stop ${sound.name} preview`
-                                : `Preview ${sound.name}`
-                            }
-                            className={`inline-flex h-8 shrink-0 items-center gap-1 rounded-lg px-2.5 text-xs font-medium transition-colors ${
-                              isPreviewing
-                                ? "bg-[var(--accent)] text-[#fcfaf6] dark:text-[#151917]"
-                                : "bg-[var(--surface)] text-[var(--foreground-muted)] hover:text-[var(--foreground)]"
-                            }`}
-                          >
-                            {isPreviewing ? (
-                              <>
-                                <Square className="h-3 w-3 fill-current" />
-                                Stop
-                              </>
-                            ) : (
-                              <>
-                                <Play className="h-3 w-3 fill-current" />
-                                Preview
-                              </>
-                            )}
-                          </button>
-                        )}
-                      </div>
+                          <ChevronRight className="h-4 w-4 shrink-0 text-[var(--foreground-muted)]/70" />
+                        </span>
+                      </button>
                     );
                   })}
                 </div>
-
-                {/* Volume Slider when an ambient sound is selected */}
-                {selectedSound !== "silence" && (
-                  <div className="mt-3 flex items-center gap-3 pt-1">
-                    <Volume2 className="h-4 w-4 shrink-0 text-[var(--foreground-muted)]" />
-                    <input
-                      type="range"
-                      min={0}
-                      max={1}
-                      step={0.05}
-                      value={ambientVolume}
-                      onChange={(event) =>
-                        handleVolumeChange(Number(event.target.value))
-                      }
-                      aria-label="Background sound volume"
-                      className="h-1.5 w-full cursor-pointer accent-[var(--accent)]"
-                    />
-                    <span className="w-9 text-right text-xs font-medium text-[var(--foreground-muted)] tabular-nums">
-                      {Math.round(ambientVolume * 100)}%
-                    </span>
-                  </div>
-                )}
               </div>
             </section>
 
@@ -748,9 +793,7 @@ export function MeditationTimer({
                 <span className="mt-2 text-xs text-[var(--foreground-muted)]">
                   {phase === "warmup"
                     ? "Take a comfortable seat"
-                    : selectedSoundMeta && selectedSound !== "silence"
-                      ? selectedSoundMeta.name
-                      : formatDurationLabel(durationMinutes)}
+                    : activeSessionSubtitle}
                 </span>
               </div>
             </div>
@@ -931,6 +974,32 @@ export function MeditationTimer({
             </div>
           </div>
         )}
+        <SoundPickerSheet
+          slot={phase === "idle" ? activeSoundSheet : null}
+          durationMinutes={durationMinutes}
+          startBell={startBell}
+          endBell={endBell}
+          intervalEnabled={intervalEnabled}
+          intervalMinutes={intervalMinutes}
+          intervalBell={intervalBell}
+          ambientSound={selectedSound}
+          ambientVolume={ambientVolume}
+          previewingAmbientId={previewingSoundId}
+          onClose={handleCloseSoundSheet}
+          onSelectStartBell={(id) => updateTimerPreferences({ startBell: id })}
+          onSelectEndBell={(id) => updateTimerPreferences({ endBell: id })}
+          onToggleIntervalEnabled={(enabled) =>
+            updateTimerPreferences({ intervalEnabled: enabled })
+          }
+          onChangeIntervalMinutes={handleIntervalMinutesChange}
+          onSelectIntervalBell={(id) =>
+            updateTimerPreferences({ intervalBell: id })
+          }
+          onSelectAmbientSound={handleSelectSound}
+          onChangeAmbientVolume={handleVolumeChange}
+          onPreviewBell={handlePreviewBell}
+          onTogglePreviewAmbient={handleTogglePreview}
+        />
     </>
   );
 }

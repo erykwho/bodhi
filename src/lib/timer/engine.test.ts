@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   clampDurationMinutes,
+  clampIntervalMinutes,
   computeElapsedMs,
+  computeIntervalBellIndex,
+  computeIntervalCount,
   computeProgress,
   computeRemainingMs,
   formatDurationLabel,
@@ -23,6 +26,71 @@ describe("timer engine", () => {
     it("rounds valid decimals to nearest integer", () => {
       expect(clampDurationMinutes(12.4)).toBe(12);
       expect(clampDurationMinutes(12.6)).toBe(13);
+    });
+  });
+
+  describe("clampIntervalMinutes", () => {
+    it("clamps values to [1, 60]", () => {
+      expect(clampIntervalMinutes(0)).toBe(1);
+      expect(clampIntervalMinutes(-3)).toBe(1);
+      expect(clampIntervalMinutes(Number.NaN)).toBe(1);
+      expect(clampIntervalMinutes(90)).toBe(60);
+      expect(clampIntervalMinutes(4.6)).toBe(5);
+    });
+  });
+
+  describe("computeIntervalCount", () => {
+    it("excludes both session start (0) and completion", () => {
+      expect(computeIntervalCount(10, 5)).toBe(1);
+      expect(computeIntervalCount(15, 5)).toBe(2);
+      expect(computeIntervalCount(5, 5)).toBe(0);
+      expect(computeIntervalCount(4, 5)).toBe(0);
+    });
+
+    it("handles non-divisible durations accurately", () => {
+      expect(computeIntervalCount(7, 5)).toBe(1);
+      expect(computeIntervalCount(11, 5)).toBe(2);
+      expect(computeIntervalCount(10, 3)).toBe(3);
+    });
+
+    it("returns 0 for invalid or non-positive inputs", () => {
+      expect(computeIntervalCount(0, 5)).toBe(0);
+      expect(computeIntervalCount(10, 0)).toBe(0);
+      expect(computeIntervalCount(10, -2)).toBe(0);
+      expect(computeIntervalCount(Number.NaN, 5)).toBe(0);
+    });
+  });
+
+  describe("computeIntervalBellIndex", () => {
+    const tenMin = 10 * 60_000;
+    const fifteenMin = 15 * 60_000;
+    const fiveMin = 5 * 60_000;
+
+    it("returns 0 at start and before the first interval mark", () => {
+      expect(computeIntervalBellIndex(0, tenMin, fiveMin)).toBe(0);
+      expect(computeIntervalBellIndex(fiveMin - 1, tenMin, fiveMin)).toBe(0);
+    });
+
+    it("advances index once each interval mark is crossed", () => {
+      expect(computeIntervalBellIndex(fiveMin, fifteenMin, fiveMin)).toBe(1);
+      expect(computeIntervalBellIndex(fiveMin + 500, fifteenMin, fiveMin)).toBe(
+        1
+      );
+      expect(computeIntervalBellIndex(2 * fiveMin, fifteenMin, fiveMin)).toBe(
+        2
+      );
+    });
+
+    it("returns 0 at or past session completion so closing bell takes over", () => {
+      expect(computeIntervalBellIndex(tenMin, tenMin, fiveMin)).toBe(0);
+      expect(computeIntervalBellIndex(tenMin + 1000, tenMin, fiveMin)).toBe(0);
+    });
+
+    it("returns 0 when interval is greater than or equal to total duration", () => {
+      expect(computeIntervalBellIndex(fiveMin - 1000, fiveMin, fiveMin)).toBe(
+        0
+      );
+      expect(computeIntervalBellIndex(2 * 60_000, 4 * 60_000, fiveMin)).toBe(0);
     });
   });
 
