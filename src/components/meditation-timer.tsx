@@ -12,6 +12,7 @@ import {
   BellRing,
   Check,
   ChevronRight,
+  EyeOff,
   Loader2,
   Minus,
   Pause,
@@ -23,6 +24,7 @@ import {
   VolumeX,
 } from "lucide-react";
 import { BodhiLogo } from "@/components/bodhi-logo";
+import { PresetStrip } from "@/components/preset-strip";
 import {
   SoundPickerSheet,
   type SoundSheetSlot,
@@ -60,6 +62,11 @@ import {
   updateTimerPreferences,
 } from "@/lib/timer/preferences";
 import {
+  readLocalPresets,
+  writeLocalPresets,
+  type TimerPresetItem,
+} from "@/lib/timer/presets";
+import {
   DURATION_PRESETS_MINUTES,
   MAX_DURATION_MINUTES,
   MIN_DURATION_MINUTES,
@@ -76,6 +83,8 @@ const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
 interface MeditationTimerProps {
   isAuthenticated?: boolean;
   userId?: string | null;
+  isOnline?: boolean;
+  initialPresets?: TimerPresetItem[];
   onSessionActiveChange?: (active: boolean) => void;
   onSessionSaved?: (session: MeditationSessionItem) => void;
   onSessionUpdated?: (session: MeditationSessionItem) => void;
@@ -84,6 +93,8 @@ interface MeditationTimerProps {
 export function MeditationTimer({
   isAuthenticated = false,
   userId = null,
+  isOnline = true,
+  initialPresets = [],
   onSessionActiveChange,
   onSessionSaved,
   onSessionUpdated,
@@ -111,6 +122,31 @@ export function MeditationTimer({
     useState<AmbientSoundId | null>(null);
   const [activeSoundSheet, setActiveSoundSheet] =
     useState<SoundSheetSlot | null>(null);
+
+  // V5 Practice Presets & Zen Dim Mode
+  const [presets, setPresets] = useState<TimerPresetItem[]>(initialPresets);
+  const [isSavingPreset, setIsSavingPreset] = useState<boolean>(false);
+  const [isDimmed, setIsDimmed] = useState<boolean>(false);
+
+  // Hydrate local presets when signed out or offline, and cache cloud presets locally
+  useEffect(() => {
+    let cancelled = false;
+    if (isAuthenticated && initialPresets.length > 0) {
+      writeLocalPresets(initialPresets);
+      return;
+    }
+    const local = readLocalPresets();
+    if (local.length > 0 && initialPresets.length === 0) {
+      queueMicrotask(() => {
+        if (!cancelled) {
+          setPresets(local);
+        }
+      });
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [initialPresets, isAuthenticated]);
 
   // Active session state
   const [phase, setPhase] = useState<TimerPhase>("idle");
@@ -190,6 +226,7 @@ export function MeditationTimer({
         } else {
           endTimeRef.current = null;
           setRemainingMs(0);
+          setIsDimmed(false);
           setPhase("completed");
           audio.stopAmbient(1.2);
           audio.playBellSound(endBell);
@@ -392,6 +429,7 @@ export function MeditationTimer({
     endTimeRef.current = null;
     setRemainingMs(currentRemaining);
     setPausedFromPhase(phase);
+    setIsDimmed(false);
     setPhase("paused");
     audioRef.current?.stopAmbient(0.5);
   }, [phase, remainingMs]);
@@ -429,6 +467,7 @@ export function MeditationTimer({
     audioRef.current?.stopAmbient(0.4);
     stopPreview();
     setIsAmbientMuted(false);
+    setIsDimmed(false);
     setEarlyStopElapsedSec(null);
     setSavedSessionId(null);
     setSavedSessionPending(false);
@@ -589,6 +628,81 @@ export function MeditationTimer({
     },
   ];
 
+  const handleApplyPreset = useCallback(
+    (preset: TimerPresetItem) => {
+      stopPreview();
+      updateTimerPreferences(preset.preferences);
+      setRemainingMs(preset.preferences.durationMinutes * 60 * 1000);
+    },
+    [stopPreview]
+  );
+
+  const handleCreatePreset = useCallback(
+    async (name: string): Promise<boolean> => {
+      setIsSavingPreset(true);
+      try {
+        if (isAuthenticated && isOnline) {
+          const response = await fetch("/api/presets", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name, preferences: prefs }),
+          });
+          if (response.ok) {
+            const data = (await response.json()) as {
+              preset?: TimerPresetItem;
+            };
+            if (data.preset) {
+              const created = data.preset;
+              setPresets((prev) => {
+                const next = [...prev, created];
+                writeLocalPresets(next);
+                return next;
+              });
+              return true;
+            }
+          }
+        }
+
+        // Local fallback when signed out or offline
+        const localPreset: TimerPresetItem = {
+          id: `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          name,
+          preferences: { ...prefs },
+          createdAt: new Date().toISOString(),
+        };
+        setPresets((prev) => {
+          const next = [...prev, localPreset];
+          writeLocalPresets(next);
+          return next;
+        });
+        return true;
+      } catch {
+        return false;
+      } finally {
+        setIsSavingPreset(false);
+      }
+    },
+    [isAuthenticated, isOnline, prefs]
+  );
+
+  const handleDeletePreset = useCallback(
+    async (id: string) => {
+      if (isAuthenticated && isOnline && !id.startsWith("local-")) {
+        try {
+          await fetch(`/api/presets/${id}`, { method: "DELETE" });
+        } catch {
+          // Ignore network failures and still update local view cleanly
+        }
+      }
+      setPresets((prev) => {
+        const next = prev.filter((item) => item.id !== id);
+        writeLocalPresets(next);
+        return next;
+      });
+    },
+    [isAuthenticated, isOnline]
+  );
+
   return (
     <>
       {phase === "idle" && (
@@ -646,6 +760,18 @@ export function MeditationTimer({
                     </button>
                   );
                 })}
+              </div>
+
+              {/* Saved Practice Presets Strip */}
+              <div className="mt-3 w-full">
+                <PresetStrip
+                  presets={presets}
+                  currentPreferences={prefs}
+                  isSaving={isSavingPreset}
+                  onApply={handleApplyPreset}
+                  onCreate={handleCreatePreset}
+                  onDelete={handleDeletePreset}
+                />
               </div>
             </section>
 
@@ -815,23 +941,55 @@ export function MeditationTimer({
 
             {/* Active Session Controls */}
             <div className="flex w-full flex-col items-center gap-3">
-              {selectedSound !== "silence" && (
+              {earlyStopElapsedSec === null && (
+                <div className="flex flex-wrap items-center justify-center gap-2">
+                  {selectedSound !== "silence" && (
+                    <button
+                      type="button"
+                      onClick={handleToggleSessionMute}
+                      className="inline-flex items-center gap-2 rounded-full border border-black/6 bg-[var(--surface)] px-3.5 py-1.5 text-xs font-medium text-[var(--foreground-muted)] transition-colors hover:text-[var(--foreground)] dark:border-white/10"
+                    >
+                      {isAmbientMuted ? (
+                        <>
+                          <VolumeX className="h-3.5 w-3.5" />
+                          Sound muted
+                        </>
+                      ) : (
+                        <>
+                          <Volume2 className="h-3.5 w-3.5" />
+                          {selectedSoundMeta?.name} on
+                        </>
+                      )}
+                    </button>
+                  )}
+
+                  {(phase === "warmup" || phase === "running") && (
+                    <button
+                      type="button"
+                      onClick={() => setIsDimmed(true)}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-black/6 bg-[var(--surface)] px-3.5 py-1.5 text-xs font-medium text-[var(--foreground-muted)] transition-colors hover:text-[var(--foreground)] dark:border-white/10"
+                    >
+                      <EyeOff className="h-3.5 w-3.5" />
+                      Dim screen
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {/* OLED-friendly Zen Dim Mode Overlay */}
+              {isDimmed && (phase === "warmup" || phase === "running") && (
                 <button
                   type="button"
-                  onClick={handleToggleSessionMute}
-                  className="inline-flex items-center gap-2 rounded-full border border-black/6 bg-[var(--surface)] px-3.5 py-1.5 text-xs font-medium text-[var(--foreground-muted)] transition-colors hover:text-[var(--foreground)] dark:border-white/10"
+                  onClick={() => setIsDimmed(false)}
+                  aria-label="Wake dimmed screen"
+                  className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-3 bg-[#050605] text-center focus:outline-none"
                 >
-                  {isAmbientMuted ? (
-                    <>
-                      <VolumeX className="h-3.5 w-3.5" />
-                      Sound muted
-                    </>
-                  ) : (
-                    <>
-                      <Volume2 className="h-3.5 w-3.5" />
-                      {selectedSoundMeta?.name} on
-                    </>
-                  )}
+                  <span className="font-mono text-4xl font-normal tracking-tight text-white/25 tabular-nums">
+                    {formatTimerDisplay(remainingMs)}
+                  </span>
+                  <span className="text-[11px] tracking-wide text-white/15">
+                    Tap anywhere to wake
+                  </span>
                 </button>
               )}
 
