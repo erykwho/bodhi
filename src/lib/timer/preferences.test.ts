@@ -15,7 +15,7 @@ describe("timer preferences", () => {
     const parsed = parseTimerPreferences({
       durationMinutes: 20,
       warmupSeconds: 10,
-      startBell: "crystal-bowl",
+      startBell: "tibetan-healing-bowl",
       endBell: "none",
       intervalEnabled: true,
       intervalMinutes: 5,
@@ -27,7 +27,7 @@ describe("timer preferences", () => {
     expect(parsed).toEqual({
       durationMinutes: 20,
       warmupSeconds: 10,
-      startBell: "crystal-bowl",
+      startBell: "tibetan-healing-bowl",
       endBell: "none",
       intervalEnabled: true,
       intervalMinutes: 5,
