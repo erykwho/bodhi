@@ -1,14 +1,16 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   CalendarDays,
   Headphones,
   LogIn,
   LogOut,
   Moon,
+  RefreshCw,
   Sun,
   Timer,
+  WifiOff,
   X,
 } from "lucide-react";
 import { signInWithGoogle, signOutUser } from "@/app/actions";
@@ -19,7 +21,18 @@ import { MeditationTimer } from "@/components/meditation-timer";
 import { PullToRefresh } from "@/components/pull-to-refresh";
 import { useTheme } from "@/components/theme-provider";
 import type { SessionUserSummary } from "@/lib/auth";
+import { saveMeditationSession } from "@/lib/history/client";
 import type { MeditationSessionItem } from "@/lib/history/types";
+import {
+  isPendingSessionId,
+  mergeSessionsWithPending,
+  pendingSessionToPayload,
+  readCachedHistory,
+  readPendingSessions,
+  removePendingSession,
+  writeCachedHistory,
+} from "@/lib/offline/queue";
+import { useOnlineStatus } from "@/lib/offline/use-network-status";
 import type { FavoriteTrackItem } from "@/lib/tracks/types";
 
 type AppMode = "timer" | "guided" | "history";
@@ -40,12 +53,18 @@ export function BodhiShell({
   authError = null,
 }: BodhiShellProps) {
   const { theme, toggleTheme } = useTheme();
+  const isOnline = useOnlineStatus();
+
   const [mode, setMode] = useState<AppMode>("timer");
   const [isSessionActive, setIsSessionActive] = useState<boolean>(false);
   const [dismissedError, setDismissedError] = useState<boolean>(false);
+  const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [sessions, setSessions] =
     useState<MeditationSessionItem[]>(initialSessions);
 
+  const syncingRef = useRef<boolean>(false);
+
+  // Clean ?error= query parameter after rendering any auth notice
   useEffect(() => {
     if (!authError) return;
     const url = new URL(window.location.href);
@@ -54,6 +73,117 @@ export function BodhiShell({
       window.history.replaceState({}, "", `${url.pathname}${url.search}`);
     }
   }, [authError]);
+
+  // Hydrate locally queued pending sessions & offline history cache for the signed-in user
+  useEffect(() => {
+    const userId = user?.id;
+    if (!userId) return;
+
+    let cancelled = false;
+    const pending = readPendingSessions(userId);
+    const baseSessions =
+      initialSessions.length > 0 ? initialSessions : readCachedHistory(userId);
+
+    if (initialSessions.length > 0) {
+      writeCachedHistory(userId, initialSessions);
+    }
+
+    if (
+      pending.length > 0 ||
+      (initialSessions.length === 0 && baseSessions.length > 0)
+    ) {
+      queueMicrotask(() => {
+        if (!cancelled) {
+          setSessions(mergeSessionsWithPending(baseSessions, pending));
+        }
+      });
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, [initialSessions, user?.id]);
+
+  // Persist synced history to local cache whenever sessions change
+  useEffect(() => {
+    if (!user?.id) return;
+    writeCachedHistory(user.id, sessions);
+  }, [sessions, user?.id]);
+
+  const pendingCount = useMemo(
+    () =>
+      sessions.filter(
+        (item) => item.pendingSync || isPendingSessionId(item.id)
+      ).length,
+    [sessions]
+  );
+
+  // Automatically flush queued offline sessions when connection returns
+  useEffect(() => {
+    if (!isOnline || !user?.id || pendingCount === 0 || syncingRef.current) {
+      return;
+    }
+
+    const userId = user.id;
+    const pendingList = readPendingSessions(userId);
+    if (pendingList.length === 0) return;
+
+    let cancelled = false;
+    syncingRef.current = true;
+
+    const flushQueue = async () => {
+      await Promise.resolve();
+      if (cancelled) {
+        syncingRef.current = false;
+        return;
+      }
+      setIsSyncing(true);
+
+      try {
+        // Sync oldest first to preserve chronological order
+        const chronological = [...pendingList].reverse();
+        for (const pendingItem of chronological) {
+          if (cancelled || navigator.onLine === false) break;
+
+          const synced = await saveMeditationSession(
+            pendingSessionToPayload(pendingItem),
+            null
+          );
+          if (synced && !isPendingSessionId(synced.id)) {
+            removePendingSession(userId, pendingItem.id);
+            if (!cancelled) {
+              setSessions((prev) =>
+                mergeSessionsWithPending(
+                  [
+                    synced,
+                    ...prev.filter(
+                      (item) =>
+                        item.id !== pendingItem.id &&
+                        item.id !== synced.id &&
+                        !item.pendingSync &&
+                        !isPendingSessionId(item.id)
+                    ),
+                  ],
+                  readPendingSessions(userId)
+                )
+              );
+            }
+          }
+        }
+      } finally {
+        syncingRef.current = false;
+        if (!cancelled) {
+          setIsSyncing(false);
+        }
+      }
+    };
+
+    void flushQueue();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isOnline, pendingCount, user?.id]);
 
   const handleSessionSaved = useCallback((saved: MeditationSessionItem) => {
     setSessions((prev) => [
@@ -78,13 +208,16 @@ export function BodhiShell({
       ? "Access denied. Your Google account is not on the allowed emails list."
       : "Sign-in was interrupted or expired. Please try signing in again.";
 
+  const showNetworkStatus =
+    !isSessionActive && (!isOnline || isSyncing || pendingCount > 0);
+
   const userInitial = (user?.name ?? user?.email ?? "B")
     .trim()
     .charAt(0)
     .toUpperCase();
 
   return (
-    <PullToRefresh disabled={isSessionActive}>
+    <PullToRefresh disabled={isSessionActive || !isOnline}>
       <div className="mx-auto flex min-h-dvh w-full max-w-md flex-col px-5 pt-4 pb-safe">
         {/* Top Bar */}
         <header className="flex items-center justify-between gap-2 py-1">
@@ -100,8 +233,13 @@ export function BodhiShell({
               <form action={signOutUser}>
                 <button
                   type="submit"
-                  title={`Sign out (${user.email})`}
-                  className="inline-flex h-9 items-center gap-2 rounded-full border border-black/6 bg-[var(--surface)] pr-3 pl-1.5 text-xs font-medium text-[var(--foreground-muted)] transition-colors hover:text-[var(--foreground)] dark:border-white/10"
+                  disabled={!isOnline}
+                  title={
+                    isOnline
+                      ? `Sign out (${user.email})`
+                      : "Reconnect to sign out"
+                  }
+                  className="inline-flex h-9 items-center gap-2 rounded-full border border-black/6 bg-[var(--surface)] pr-3 pl-1.5 text-xs font-medium text-[var(--foreground-muted)] transition-colors hover:text-[var(--foreground)] disabled:opacity-50 dark:border-white/10"
                 >
                   {user.image ? (
                     // eslint-disable-next-line @next/next/no-img-element
@@ -120,7 +258,8 @@ export function BodhiShell({
                 </button>
               </form>
             ) : (
-              authConfigured && (
+              authConfigured &&
+              isOnline && (
                 <form action={signInWithGoogle}>
                   <button
                     type="submit"
@@ -151,6 +290,31 @@ export function BodhiShell({
             </button>
           </div>
         </header>
+
+        {/* Subtle Offline / Sync Status Pill (never shown during active sessions) */}
+        {showNetworkStatus && (
+          <div
+            role="status"
+            aria-live="polite"
+            className="mt-2.5 flex items-center justify-center"
+          >
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-black/6 bg-[var(--surface)] px-3 py-1 text-[11px] font-medium text-[var(--foreground-muted)] shadow-2xs dark:border-white/10">
+              {!isOnline ? (
+                <>
+                  <WifiOff className="h-3 w-3 text-[var(--warm-amber)]" />
+                  {pendingCount > 0
+                    ? `Offline · ${pendingCount} ${pendingCount === 1 ? "session" : "sessions"} pending sync`
+                    : "Offline · Timer ready"}
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="h-3 w-3 animate-spin text-[var(--accent)]" />
+                  {`Syncing ${pendingCount} ${pendingCount === 1 ? "session" : "sessions"}...`}
+                </>
+              )}
+            </span>
+          </div>
+        )}
 
         {/* Dismissible Auth Error Banner */}
         {showAuthError && (
@@ -220,6 +384,7 @@ export function BodhiShell({
           {mode === "timer" && (
             <MeditationTimer
               isAuthenticated={Boolean(user)}
+              userId={user?.id ?? null}
               onSessionActiveChange={setIsSessionActive}
               onSessionSaved={handleSessionSaved}
               onSessionUpdated={handleSessionUpdated}
@@ -230,6 +395,8 @@ export function BodhiShell({
               user={user}
               authConfigured={authConfigured}
               initialTracks={initialTracks}
+              isOnline={isOnline}
+              onSwitchToTimer={() => setMode("timer")}
               onSessionActiveChange={setIsSessionActive}
               onSessionSaved={handleSessionSaved}
               onSessionUpdated={handleSessionUpdated}
@@ -239,6 +406,7 @@ export function BodhiShell({
             <MeditationHistory
               user={user}
               authConfigured={authConfigured}
+              isOnline={isOnline}
               sessions={sessions}
               onSessionUpdated={handleSessionUpdated}
               onSessionDeleted={handleSessionDeleted}

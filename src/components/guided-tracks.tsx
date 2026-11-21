@@ -11,7 +11,9 @@ import {
   Music2,
   Play,
   Plus,
+  Timer,
   Trash2,
+  WifiOff,
   X,
 } from "lucide-react";
 import { signInWithGoogle } from "@/app/actions";
@@ -28,6 +30,8 @@ interface GuidedTracksProps {
   user: SessionUserSummary | null;
   authConfigured: boolean;
   initialTracks: FavoriteTrackItem[];
+  isOnline?: boolean;
+  onSwitchToTimer?: () => void;
   onSessionActiveChange: (active: boolean) => void;
   onSessionSaved?: (session: MeditationSessionItem) => void;
   onSessionUpdated?: (session: MeditationSessionItem) => void;
@@ -37,6 +41,8 @@ export function GuidedTracks({
   user,
   authConfigured,
   initialTracks,
+  isOnline = true,
+  onSwitchToTimer,
   onSessionActiveChange,
   onSessionSaved,
   onSessionUpdated,
@@ -209,6 +215,37 @@ export function GuidedTracks({
         onSessionSaved={onSessionSaved}
         onSessionUpdated={onSessionUpdated}
       />
+    );
+  }
+
+  if (!isOnline) {
+    return (
+      <section className="flex flex-1 flex-col items-center justify-center py-6 text-center">
+        <div className="w-full rounded-3xl border border-black/6 bg-[var(--surface)] p-6 shadow-xs dark:border-white/10">
+          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-[var(--surface-muted)] text-[var(--warm-amber)]">
+            <WifiOff className="h-6 w-6" />
+          </div>
+
+          <h2 className="mt-4 text-lg font-semibold tracking-tight text-[var(--foreground)]">
+            You&apos;re Offline
+          </h2>
+          <p className="mt-2 text-sm leading-relaxed text-[var(--foreground-muted)]">
+            Guided tracks from YouTube and SoundCloud require an internet
+            connection. Your Meditation Timer works completely offline.
+          </p>
+
+          {onSwitchToTimer && (
+            <button
+              type="button"
+              onClick={onSwitchToTimer}
+              className="mt-5 flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-[var(--accent)] text-sm font-semibold text-[#fcfaf6] transition-colors hover:bg-[var(--accent-strong)] dark:text-[#151917]"
+            >
+              <Timer className="h-4 w-4" />
+              Open Meditation Timer
+            </button>
+          )}
+        </div>
+      </section>
     );
   }
 

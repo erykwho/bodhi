@@ -58,6 +58,7 @@ const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
 
 interface MeditationTimerProps {
   isAuthenticated?: boolean;
+  userId?: string | null;
   onSessionActiveChange?: (active: boolean) => void;
   onSessionSaved?: (session: MeditationSessionItem) => void;
   onSessionUpdated?: (session: MeditationSessionItem) => void;
@@ -65,6 +66,7 @@ interface MeditationTimerProps {
 
 export function MeditationTimer({
   isAuthenticated = false,
+  userId = null,
   onSessionActiveChange,
   onSessionSaved,
   onSessionUpdated,
@@ -99,8 +101,10 @@ export function MeditationTimer({
   const sessionStartedAtRef = useRef<string | null>(null);
   const audioRef = useRef<MeditationAudioEngine | null>(null);
 
-  // V3 History logging state
+  // V3/V4 History logging state
   const [savedSessionId, setSavedSessionId] = useState<string | null>(null);
+  const [savedSessionPending, setSavedSessionPending] =
+    useState<boolean>(false);
   const [noteInput, setNoteInput] = useState<string>("");
   const [isSavingNote, setIsSavingNote] = useState<boolean>(false);
   const [noteSaved, setNoteSaved] = useState<boolean>(false);
@@ -167,16 +171,20 @@ export function MeditationTimer({
           if (isAuthenticated) {
             const endedAt = new Date().toISOString();
             const plannedSec = Math.round(totalSessionMs / 1000);
-            void saveMeditationSession({
-              mode: "TIMER",
-              plannedDurationSec: plannedSec,
-              actualDurationSec: plannedSec,
-              completed: true,
-              startedAt: sessionStartedAtRef.current ?? undefined,
-              endedAt,
-            }).then((saved) => {
+            void saveMeditationSession(
+              {
+                mode: "TIMER",
+                plannedDurationSec: plannedSec,
+                actualDurationSec: plannedSec,
+                completed: true,
+                startedAt: sessionStartedAtRef.current ?? undefined,
+                endedAt,
+              },
+              userId
+            ).then((saved) => {
               if (saved) {
                 setSavedSessionId(saved.id);
+                setSavedSessionPending(Boolean(saved.pendingSync));
                 onSessionSaved?.(saved);
               }
             });
@@ -199,6 +207,7 @@ export function MeditationTimer({
     phase,
     selectedSound,
     totalSessionMs,
+    userId,
   ]);
 
   const stopPreview = useCallback(() => {
@@ -360,6 +369,7 @@ export function MeditationTimer({
     setIsAmbientMuted(false);
     setEarlyStopElapsedSec(null);
     setSavedSessionId(null);
+    setSavedSessionPending(false);
     setNoteInput("");
     setNoteSaved(false);
     setRemainingMs(totalSessionMs);
@@ -404,15 +414,18 @@ export function MeditationTimer({
   const handleSaveEarlyStop = useCallback(async () => {
     if (earlyStopElapsedSec === null) return;
     setIsSavingEarlyStop(true);
-    const saved = await saveMeditationSession({
-      mode: "TIMER",
-      plannedDurationSec: Math.round(totalSessionMs / 1000),
-      actualDurationSec: earlyStopElapsedSec,
-      completed: false,
-      note: noteInput.trim() || null,
-      startedAt: sessionStartedAtRef.current ?? undefined,
-      endedAt: new Date().toISOString(),
-    });
+    const saved = await saveMeditationSession(
+      {
+        mode: "TIMER",
+        plannedDurationSec: Math.round(totalSessionMs / 1000),
+        actualDurationSec: earlyStopElapsedSec,
+        completed: false,
+        note: noteInput.trim() || null,
+        startedAt: sessionStartedAtRef.current ?? undefined,
+        endedAt: new Date().toISOString(),
+      },
+      userId
+    );
     setIsSavingEarlyStop(false);
     if (saved) {
       onSessionSaved?.(saved);
@@ -424,6 +437,7 @@ export function MeditationTimer({
     onSessionSaved,
     resetToIdle,
     totalSessionMs,
+    userId,
   ]);
 
   const handleSaveCompletedNote = useCallback(async () => {
@@ -431,14 +445,15 @@ export function MeditationTimer({
     setIsSavingNote(true);
     const updated = await updateMeditationSessionNote(
       savedSessionId,
-      noteInput.trim() || null
+      noteInput.trim() || null,
+      userId
     );
     setIsSavingNote(false);
     if (updated) {
       setNoteSaved(true);
       onSessionUpdated?.(updated);
     }
-  }, [noteInput, onSessionUpdated, savedSessionId]);
+  }, [noteInput, onSessionUpdated, savedSessionId, userId]);
 
   // Compute progress ring geometry
   const activeTotalMs =
@@ -872,7 +887,9 @@ export function MeditationTimer({
                 {savedSessionId && (
                   <p className="mt-1.5 inline-flex items-center gap-1 rounded-full bg-[var(--accent-soft)] px-2.5 py-0.5 text-[11px] font-medium text-[var(--accent)]">
                     <Check className="h-3 w-3" />
-                    Saved to history
+                    {savedSessionPending
+                      ? "Saved offline · will sync when online"
+                      : "Saved to history"}
                   </p>
                 )}
               </div>

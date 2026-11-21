@@ -14,6 +14,8 @@ export interface MeditationSessionItem {
   note: string | null;
   startedAt: string;
   endedAt: string;
+  /** True when the session was recorded offline and is awaiting cloud sync. */
+  pendingSync?: boolean;
 }
 
 export interface HistoryStats {

@@ -5,6 +5,7 @@ import {
   CalendarDays,
   Check,
   Clock,
+  CloudOff,
   Flame,
   Headphones,
   Loader2,
@@ -22,10 +23,16 @@ import {
   formatTotalTime,
 } from "@/lib/history/stats";
 import type { MeditationSessionItem } from "@/lib/history/types";
+import {
+  isPendingSessionId,
+  removePendingSession,
+  updatePendingSessionNote,
+} from "@/lib/offline/queue";
 
 interface MeditationHistoryProps {
   user: SessionUserSummary | null;
   authConfigured: boolean;
+  isOnline?: boolean;
   sessions: MeditationSessionItem[];
   onSessionUpdated: (session: MeditationSessionItem) => void;
   onSessionDeleted: (id: string) => void;
@@ -45,6 +52,7 @@ function formatSessionTimestamp(iso: string): string {
 export function MeditationHistory({
   user,
   authConfigured,
+  isOnline = true,
   sessions,
   onSessionUpdated,
   onSessionDeleted,
@@ -68,10 +76,30 @@ export function MeditationHistory({
     setNoteDraft("");
   }, []);
 
+  const userId = user?.id ?? null;
+
   const handleSaveNote = useCallback(
     async (id: string) => {
       setSavingId(id);
       setErrorMessage(null);
+
+      if (isPendingSessionId(id)) {
+        if (userId) {
+          const updated = updatePendingSessionNote(
+            userId,
+            id,
+            noteDraft.trim() || null
+          );
+          if (updated) {
+            onSessionUpdated(updated);
+          }
+        }
+        setSavingId(null);
+        setEditingId(null);
+        setNoteDraft("");
+        return;
+      }
+
       try {
         const response = await fetch(`/api/sessions/${id}`, {
           method: "PATCH",
@@ -98,13 +126,23 @@ export function MeditationHistory({
         setSavingId(null);
       }
     },
-    [noteDraft, onSessionUpdated]
+    [noteDraft, onSessionUpdated, userId]
   );
 
   const handleDeleteSession = useCallback(
     async (id: string) => {
       setDeletingId(id);
       setErrorMessage(null);
+
+      if (isPendingSessionId(id)) {
+        if (userId) {
+          removePendingSession(userId, id);
+        }
+        onSessionDeleted(id);
+        setDeletingId(null);
+        return;
+      }
+
       try {
         const response = await fetch(`/api/sessions/${id}`, {
           method: "DELETE",
@@ -123,7 +161,7 @@ export function MeditationHistory({
         setDeletingId(null);
       }
     },
-    [onSessionDeleted]
+    [onSessionDeleted, userId]
   );
 
   if (!user) {
@@ -146,10 +184,13 @@ export function MeditationHistory({
             <form action={signInWithGoogle} className="mt-5">
               <button
                 type="submit"
-                className="flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-[var(--accent)] text-sm font-semibold text-[#fcfaf6] transition-colors hover:bg-[var(--accent-strong)] dark:text-[#151917]"
+                disabled={!isOnline}
+                className="flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-[var(--accent)] text-sm font-semibold text-[#fcfaf6] transition-colors hover:bg-[var(--accent-strong)] disabled:opacity-50 dark:text-[#151917]"
               >
                 <LogIn className="h-4 w-4" />
-                Continue with Google
+                {isOnline
+                  ? "Continue with Google"
+                  : "Sign in available when online"}
               </button>
             </form>
           ) : (
@@ -222,6 +263,10 @@ export function MeditationHistory({
         <ul className="flex flex-col gap-2.5">
           {sessions.map((session) => {
             const isEditing = editingId === session.id;
+            const isPending = Boolean(
+              session.pendingSync || isPendingSessionId(session.id)
+            );
+            const canMutate = isOnline || isPending;
             const title =
               session.mode === "TRACK"
                 ? (session.trackTitle ?? "Guided Meditation")
@@ -257,6 +302,12 @@ export function MeditationHistory({
                             Partial
                           </span>
                         )}
+                        {isPending && (
+                          <span className="inline-flex items-center gap-1 rounded-md bg-[var(--surface-muted)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--foreground-muted)]">
+                            <CloudOff className="h-2.5 w-2.5" />
+                            Pending sync
+                          </span>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -267,10 +318,16 @@ export function MeditationHistory({
                       onClick={() =>
                         isEditing ? cancelEditing() : startEditingNote(session)
                       }
+                      disabled={!canMutate}
+                      title={
+                        canMutate
+                          ? undefined
+                          : "Reconnect to edit synced sessions"
+                      }
                       aria-label={
                         session.note ? "Edit session note" : "Add session note"
                       }
-                      className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--foreground-muted)] transition-colors hover:bg-[var(--surface-muted)] hover:text-[var(--foreground)]"
+                      className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--foreground-muted)] transition-colors hover:bg-[var(--surface-muted)] hover:text-[var(--foreground)] disabled:opacity-35"
                     >
                       {isEditing ? (
                         <X className="h-3.5 w-3.5" />
@@ -282,9 +339,14 @@ export function MeditationHistory({
                     <button
                       type="button"
                       onClick={() => void handleDeleteSession(session.id)}
-                      disabled={deletingId === session.id}
+                      disabled={deletingId === session.id || !canMutate}
+                      title={
+                        canMutate
+                          ? undefined
+                          : "Reconnect to delete synced sessions"
+                      }
                       aria-label="Delete session"
-                      className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--foreground-muted)] transition-colors hover:bg-red-500/10 hover:text-red-600 disabled:opacity-40 dark:hover:text-red-400"
+                      className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--foreground-muted)] transition-colors hover:bg-red-500/10 hover:text-red-600 disabled:opacity-35 dark:hover:text-red-400"
                     >
                       {deletingId === session.id ? (
                         <Loader2 className="h-3.5 w-3.5 animate-spin" />
