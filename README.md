@@ -22,6 +22,11 @@ A serene, mobile-first meditation Progressive Web App (PWA) built with Next.js 1
 - **Partial Session Prompt:** Stopping a session early after at least 1 minute prompts you to save or discard the partial practice.
 - **Streaks, Totals & Notes:** View total practice time, current daily streak, total sessions, and a chronological session log with optional reflection notes.
 
+### V4 — Offline PWA (Airplane Mode)
+- **Full Offline Timer:** Service Worker (`public/sw.js`) caches the app shell, assets, and icons so the Timer, singing bowl bells, and ambient sounds work 100% offline.
+- **Offline Queue & Auto-Sync:** Signed-in Timer sessions completed offline are saved locally with a subtle `Pending sync` badge and automatically synced to Neon PostgreSQL once reconnected.
+- **Offline History Access:** Cached meditation history remains viewable offline, while the Guided tab shows a calm offline notice with a one-tap shortcut back to the Timer.
+
 ## Environment Variables (V2+)
 
 Copy `.env.example` to `.env.local` for local development with Favorite Guided Tracks and Meditation History:
