@@ -3,13 +3,14 @@ import { z } from "zod";
 import { authErrorResponse, requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { resolveTrackMetadata } from "@/lib/tracks/oembed";
-import { parseTrackUrl } from "@/lib/tracks/providers";
+import { normalizeTrackTags, parseTrackUrl } from "@/lib/tracks/providers";
 
 const createTrackSchema = z.object({
   url: z.string().trim().min(1, "Track URL is required").max(500),
   title: z.string().trim().max(160).optional(),
   author: z.string().trim().max(120).optional().nullable(),
   thumbnailUrl: z.string().trim().max(500).optional().nullable(),
+  tags: z.array(z.string().max(40)).max(10).optional(),
 });
 
 export async function GET() {
@@ -29,6 +30,7 @@ export async function GET() {
         title: track.title,
         author: track.author,
         thumbnailUrl: track.thumbnailUrl,
+        tags: track.tags,
         createdAt: track.createdAt.toISOString(),
       })),
     });
@@ -56,19 +58,19 @@ export async function POST(request: Request) {
       );
     }
 
-    const { url, title, author, thumbnailUrl } = parsedBody.data;
+    const { url, title, author, thumbnailUrl, tags } = parsedBody.data;
     const parsedUrl = parseTrackUrl(url);
     if (!parsedUrl) {
       return NextResponse.json(
         {
           error:
-            "Unsupported URL. Paste a valid YouTube video or SoundCloud track link.",
+            "Unsupported URL. Paste a valid YouTube, SoundCloud, or direct audio (.mp3/.m4a) link.",
         },
         { status: 400 }
       );
     }
 
-    // Resolve oEmbed metadata when title or thumbnail was not provided by the client
+    // Resolve metadata when title or thumbnail was not provided by the client
     const resolved =
       !title || thumbnailUrl === undefined
         ? await resolveTrackMetadata(parsedUrl.canonicalUrl)
@@ -82,6 +84,7 @@ export async function POST(request: Request) {
       thumbnailUrl !== undefined
         ? thumbnailUrl
         : (resolved?.thumbnailUrl ?? parsedUrl.defaultThumbnailUrl);
+    const normalizedTags = normalizeTrackTags(tags ?? []);
 
     const lastPosition = await prisma.favoriteTrack.aggregate({
       where: { userId: user.id },
@@ -103,6 +106,7 @@ export async function POST(request: Request) {
         title: finalTitle,
         author: finalAuthor,
         thumbnailUrl: finalThumbnail,
+        ...(tags !== undefined ? { tags: normalizedTags } : {}),
       },
       create: {
         userId: user.id,
@@ -112,6 +116,7 @@ export async function POST(request: Request) {
         title: finalTitle,
         author: finalAuthor,
         thumbnailUrl: finalThumbnail,
+        tags: normalizedTags,
         position: nextPosition,
       },
     });
@@ -126,6 +131,7 @@ export async function POST(request: Request) {
           title: saved.title,
           author: saved.author,
           thumbnailUrl: saved.thumbnailUrl,
+          tags: saved.tags,
           createdAt: saved.createdAt.toISOString(),
         },
       },

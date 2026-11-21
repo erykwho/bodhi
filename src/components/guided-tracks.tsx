@@ -1,16 +1,19 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Bell,
   BellOff,
+  Check,
   Headphones,
   Link2,
   Loader2,
   LogIn,
   Music2,
+  Pencil,
   Play,
   Plus,
+  Tag,
   Timer,
   Trash2,
   WifiOff,
@@ -20,7 +23,12 @@ import { signInWithGoogle } from "@/app/actions";
 import { GuidedSessionPlayer } from "@/components/guided-session-player";
 import type { SessionUserSummary } from "@/lib/auth";
 import type { MeditationSessionItem } from "@/lib/history/types";
-import { parseTrackUrl } from "@/lib/tracks/providers";
+import {
+  SUGGESTED_TRACK_TAGS,
+  TRACK_PROVIDER_LABELS,
+  normalizeTrackTags,
+  parseTrackUrl,
+} from "@/lib/tracks/providers";
 import {
   computeTargetIndex,
   hasOrderChanged,
@@ -77,17 +85,29 @@ export function GuidedTracks({
     null
   );
   const [closingBellEnabled, setClosingBellEnabled] = useState<boolean>(true);
+  const [selectedTagFilter, setSelectedTagFilter] = useState<string | null>(
+    null
+  );
 
   // Add track form state
   const [isAdding, setIsAdding] = useState<boolean>(false);
   const [urlInput, setUrlInput] = useState<string>("");
   const [titleInput, setTitleInput] = useState<string>("");
+  const [tagsInput, setTagsInput] = useState<string[]>([]);
+  const [customTagInput, setCustomTagInput] = useState<string>("");
   const [resolvedMeta, setResolvedMeta] =
     useState<ResolvedTrackMetadata | null>(null);
   const [isResolving, setIsResolving] = useState<boolean>(false);
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // Inline track edit state
+  const [editingTrackId, setEditingTrackId] = useState<string | null>(null);
+  const [editTitleDraft, setEditTitleDraft] = useState<string>("");
+  const [editTagsDraft, setEditTagsDraft] = useState<string[]>([]);
+  const [editCustomTagDraft, setEditCustomTagDraft] = useState<string>("");
+  const [isSavingEdit, setIsSavingEdit] = useState<boolean>(false);
 
   // Drag-to-reorder state
   const [draggingId, setDraggingId] = useState<string | null>(null);
@@ -113,9 +133,32 @@ export function GuidedTracks({
 
   const detectedProvider = parseTrackUrl(urlInput)?.provider ?? null;
 
+  const availableTags = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const track of tracks) {
+      for (const tag of track.tags ?? []) {
+        const key = tag.toLowerCase();
+        if (!seen.has(key)) {
+          seen.set(key, tag);
+        }
+      }
+    }
+    return Array.from(seen.values());
+  }, [tracks]);
+
+  const displayedTracks = useMemo(() => {
+    if (!selectedTagFilter) return tracks;
+    const target = selectedTagFilter.toLowerCase();
+    return tracks.filter((track) =>
+      (track.tags ?? []).some((tag) => tag.toLowerCase() === target)
+    );
+  }, [selectedTagFilter, tracks]);
+
   const resetForm = useCallback(() => {
     setUrlInput("");
     setTitleInput("");
+    setTagsInput([]);
+    setCustomTagInput("");
     setResolvedMeta(null);
     setErrorMessage(null);
     setIsAdding(false);
@@ -182,10 +225,14 @@ export function GuidedTracks({
 
       if (!parseTrackUrl(urlInput)) {
         setErrorMessage(
-          "Paste a valid YouTube video or SoundCloud track URL."
+          "Paste a valid YouTube, SoundCloud, or direct audio (.mp3/.m4a) URL."
         );
         return;
       }
+
+      const finalTags = normalizeTrackTags(
+        customTagInput.trim() ? [...tagsInput, customTagInput] : tagsInput
+      );
 
       setIsSaving(true);
       try {
@@ -197,6 +244,7 @@ export function GuidedTracks({
             title: titleInput.trim() || undefined,
             author: resolvedMeta?.author,
             thumbnailUrl: resolvedMeta?.thumbnailUrl,
+            tags: finalTags,
           }),
         });
 
@@ -227,7 +275,72 @@ export function GuidedTracks({
         setIsSaving(false);
       }
     },
-    [resetForm, resolvedMeta, titleInput, urlInput]
+    [customTagInput, resetForm, resolvedMeta, tagsInput, titleInput, urlInput]
+  );
+
+  const startEditingTrack = useCallback((track: FavoriteTrackItem) => {
+    setEditingTrackId(track.id);
+    setEditTitleDraft(track.title);
+    setEditTagsDraft(track.tags ?? []);
+    setEditCustomTagDraft("");
+    setErrorMessage(null);
+  }, []);
+
+  const cancelEditingTrack = useCallback(() => {
+    setEditingTrackId(null);
+    setEditTitleDraft("");
+    setEditTagsDraft([]);
+    setEditCustomTagDraft("");
+  }, []);
+
+  const handleSaveTrackEdit = useCallback(
+    async (id: string) => {
+      const trimmedTitle = editTitleDraft.trim();
+      if (!trimmedTitle) {
+        setErrorMessage("Track title cannot be empty.");
+        return;
+      }
+
+      const nextTags = normalizeTrackTags(
+        editCustomTagDraft.trim()
+          ? [...editTagsDraft, editCustomTagDraft]
+          : editTagsDraft
+      );
+
+      setIsSavingEdit(true);
+      setErrorMessage(null);
+      try {
+        const response = await fetch(`/api/tracks/${id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title: trimmedTitle,
+            tags: nextTags,
+          }),
+        });
+
+        const data = (await response.json()) as {
+          track?: FavoriteTrackItem;
+          error?: string;
+        };
+
+        if (!response.ok || !data.track) {
+          setErrorMessage(data.error ?? "Failed to update track.");
+          return;
+        }
+
+        const updatedTrack = data.track;
+        setTracks((prev) =>
+          prev.map((item) => (item.id === updatedTrack.id ? updatedTrack : item))
+        );
+        cancelEditingTrack();
+      } catch {
+        setErrorMessage("Failed to update track.");
+      } finally {
+        setIsSavingEdit(false);
+      }
+    },
+    [cancelEditingTrack, editCustomTagDraft, editTagsDraft, editTitleDraft]
   );
 
   const handleDeleteTrack = useCallback(async (id: string) => {
@@ -662,11 +775,11 @@ export function GuidedTracks({
               htmlFor="track-url-input"
               className="text-xs font-medium text-[var(--foreground)]"
             >
-              YouTube or SoundCloud URL
+              YouTube, SoundCloud, or Audio URL
             </label>
             {detectedProvider && (
               <span className="rounded-full bg-[var(--accent-soft)] px-2 py-0.5 text-[11px] font-medium text-[var(--accent)]">
-                {detectedProvider === "YOUTUBE" ? "YouTube" : "SoundCloud"}
+                {TRACK_PROVIDER_LABELS[detectedProvider]}
               </span>
             )}
           </div>
@@ -677,7 +790,7 @@ export function GuidedTracks({
               id="track-url-input"
               type="url"
               required
-              placeholder="https://youtube.com/watch?v=... or soundcloud.com/..."
+              placeholder="YouTube, SoundCloud, or direct .mp3 / .m4a link"
               value={urlInput}
               onChange={(event) => handleUrlChange(event.target.value)}
               className="h-11 w-full rounded-xl border border-black/10 bg-[var(--background)] pr-9 pl-9 text-sm text-[var(--foreground)] outline-none placeholder:text-[var(--foreground-muted)]/70 focus:border-[var(--accent)] dark:border-white/12"
@@ -701,6 +814,50 @@ export function GuidedTracks({
               value={titleInput}
               onChange={(event) => setTitleInput(event.target.value)}
               className="h-10 w-full rounded-xl border border-black/10 bg-[var(--background)] px-3 text-sm text-[var(--foreground)] outline-none placeholder:text-[var(--foreground-muted)]/70 focus:border-[var(--accent)] dark:border-white/12"
+            />
+          </div>
+
+          {/* Optional Tags Picker */}
+          <div className="flex flex-col gap-1.5">
+            <span className="text-xs font-medium text-[var(--foreground)]">
+              Tags (optional)
+            </span>
+            <div className="flex flex-wrap gap-1.5">
+              {SUGGESTED_TRACK_TAGS.map((tag) => {
+                const isSelected = tagsInput.some(
+                  (t) => t.toLowerCase() === tag.toLowerCase()
+                );
+                return (
+                  <button
+                    key={tag}
+                    type="button"
+                    onClick={() =>
+                      setTagsInput((prev) =>
+                        isSelected
+                          ? prev.filter(
+                              (t) => t.toLowerCase() !== tag.toLowerCase()
+                            )
+                          : normalizeTrackTags([...prev, tag])
+                      )
+                    }
+                    className={`rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                      isSelected
+                        ? "bg-[var(--accent)] text-[#fcfaf6] dark:text-[#151917]"
+                        : "bg-[var(--surface-muted)] text-[var(--foreground-muted)] hover:text-[var(--foreground)]"
+                    }`}
+                  >
+                    {tag}
+                  </button>
+                );
+              })}
+            </div>
+            <input
+              type="text"
+              maxLength={24}
+              placeholder="Add custom tag..."
+              value={customTagInput}
+              onChange={(event) => setCustomTagInput(event.target.value)}
+              className="h-9 w-full rounded-xl border border-black/10 bg-[var(--background)] px-3 text-xs text-[var(--foreground)] outline-none placeholder:text-[var(--foreground-muted)]/70 focus:border-[var(--accent)] dark:border-white/12"
             />
           </div>
 
@@ -733,32 +890,78 @@ export function GuidedTracks({
         </p>
       )}
 
+      {/* Single-row Tag Filter Bar (only when tags exist) */}
+      {availableTags.length > 0 && (
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <button
+            type="button"
+            onClick={() => setSelectedTagFilter(null)}
+            className={`shrink-0 rounded-full px-3 py-1 text-xs font-medium whitespace-nowrap transition-colors ${
+              selectedTagFilter === null
+                ? "bg-[var(--accent)] text-[#fcfaf6] dark:text-[#151917]"
+                : "border border-black/6 bg-[var(--surface)] text-[var(--foreground-muted)] hover:text-[var(--foreground)] dark:border-white/10"
+            }`}
+          >
+            All
+          </button>
+          {availableTags.map((tag) => {
+            const isSelected =
+              selectedTagFilter?.toLowerCase() === tag.toLowerCase();
+            return (
+              <button
+                key={tag}
+                type="button"
+                onClick={() => setSelectedTagFilter(isSelected ? null : tag)}
+                className={`inline-flex shrink-0 items-center gap-1 rounded-full px-3 py-1 text-xs font-medium whitespace-nowrap transition-colors ${
+                  isSelected
+                    ? "bg-[var(--accent)] text-[#fcfaf6] dark:text-[#151917]"
+                    : "border border-black/6 bg-[var(--surface)] text-[var(--foreground-muted)] hover:text-[var(--foreground)] dark:border-white/10"
+                }`}
+              >
+                <Tag className="h-2.5 w-2.5 opacity-75" />
+                {tag}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       {/* Favorite Tracks List */}
-      {tracks.length === 0 ? (
+      {displayedTracks.length === 0 ? (
         <div className="flex flex-1 flex-col items-center justify-center rounded-3xl border border-dashed border-black/12 bg-[var(--surface)]/60 px-6 py-12 text-center dark:border-white/12">
           <Music2 className="h-7 w-7 text-[var(--foreground-muted)]" />
           <p className="mt-3 text-sm font-medium text-[var(--foreground)]">
-            No favorite tracks yet
+            {tracks.length === 0
+              ? "No favorite tracks yet"
+              : "No tracks match this tag"}
           </p>
           <p className="mt-1 max-w-xs text-xs text-[var(--foreground-muted)]">
-            Tap &ldquo;Add Track&rdquo; to save a YouTube or SoundCloud guided
-            meditation.
+            {tracks.length === 0
+              ? 'Tap "Add Track" to save a YouTube, SoundCloud, or direct audio (.mp3/.m4a) guided meditation.'
+              : "Choose another tag or tap All to see all favorites."}
           </p>
         </div>
       ) : (
         <div className="flex flex-col gap-2">
           <ul className="flex flex-col gap-2.5">
-            {tracks.map((track) => {
+            {displayedTracks.map((track) => {
               const isDragged = draggingId === track.id;
+              const isEditing = editingTrackId === track.id;
+              const canDrag =
+                selectedTagFilter === null &&
+                editingTrackId === null &&
+                tracks.length >= 2;
+
               return (
                 <li
                   key={track.id}
                   ref={(node) => setTrackItemRef(track.id, node)}
-                  onPointerDown={(event) =>
-                    handleTrackPointerDown(track.id, event)
-                  }
+                  onPointerDown={(event) => {
+                    if (!canDrag) return;
+                    handleTrackPointerDown(track.id, event);
+                  }}
                   onContextMenu={(event) => {
-                    if (tracks.length >= 2) {
+                    if (canDrag) {
                       event.preventDefault();
                     }
                   }}
@@ -770,79 +973,200 @@ export function GuidedTracks({
                       : undefined
                   }
                   className={cn(
-                    "relative flex select-none items-center gap-3 rounded-2xl border border-black/6 bg-[var(--surface)] p-3 shadow-xs transition-colors dark:border-white/10",
+                    "relative flex flex-col gap-2.5 rounded-2xl border border-black/6 bg-[var(--surface)] p-3 shadow-xs transition-colors dark:border-white/10",
+                    !isEditing && "select-none",
                     isDragged
                       ? "z-20 cursor-grabbing border-[var(--accent)]/50 shadow-lg ring-2 ring-[var(--accent)]/30"
                       : "hover:border-[var(--accent)]/35",
                     draggingId !== null && !isDragged && "opacity-85"
                   )}
                 >
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (suppressClickRef.current) return;
-                      setActiveTrack(track);
-                    }}
-                    className={cn(
-                      "flex min-w-0 flex-1 items-center gap-3 text-left",
-                      isDragged && "cursor-grabbing"
-                    )}
-                  >
-                    <div className="relative flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-[var(--accent-soft)] text-[var(--accent)]">
-                      {track.thumbnailUrl ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={track.thumbnailUrl}
-                          alt=""
-                          draggable={false}
-                          referrerPolicy="no-referrer"
-                          className="pointer-events-none h-full w-full object-cover"
-                        />
-                      ) : (
-                        <Music2 className="h-5 w-5" />
+                  <div className="flex items-center gap-2.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (suppressClickRef.current || isEditing) return;
+                        setActiveTrack(track);
+                      }}
+                      className={cn(
+                        "flex min-w-0 flex-1 items-center gap-3 text-left",
+                        isDragged && "cursor-grabbing"
                       )}
-                      <span className="absolute inset-0 flex items-center justify-center bg-black/25 text-white">
-                        <Play className="h-4 w-4 fill-current" />
-                      </span>
-                    </div>
-
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium text-[var(--foreground)]">
-                        {track.title}
-                      </p>
-                      <div className="mt-0.5 flex items-center gap-1.5 text-xs text-[var(--foreground-muted)]">
-                        <span className="shrink-0 rounded-md bg-[var(--surface-muted)] px-1.5 py-0.5 text-[10px] font-medium">
-                          {track.provider === "YOUTUBE"
-                            ? "YouTube"
-                            : "SoundCloud"}
+                    >
+                      <div className="relative flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-[var(--accent-soft)] text-[var(--accent)]">
+                        {track.thumbnailUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={track.thumbnailUrl}
+                            alt=""
+                            draggable={false}
+                            referrerPolicy="no-referrer"
+                            className="pointer-events-none h-full w-full object-cover"
+                          />
+                        ) : (
+                          <Music2 className="h-5 w-5" />
+                        )}
+                        <span className="absolute inset-0 flex items-center justify-center bg-black/25 text-white">
+                          <Play className="h-4 w-4 fill-current" />
                         </span>
-                        {track.author && (
-                          <span className="truncate">{track.author}</span>
+                      </div>
+
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium text-[var(--foreground)]">
+                          {track.title}
+                        </p>
+                        <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-[var(--foreground-muted)]">
+                          <span className="shrink-0 rounded-md bg-[var(--surface-muted)] px-1.5 py-0.5 text-[10px] font-medium">
+                            {TRACK_PROVIDER_LABELS[track.provider]}
+                          </span>
+                          {track.author && (
+                            <span className="truncate">{track.author}</span>
+                          )}
+                        </div>
+                        {track.tags && track.tags.length > 0 && !isEditing && (
+                          <div className="mt-1.5 flex flex-wrap gap-1">
+                            {track.tags.map((tag) => (
+                              <span
+                                key={tag}
+                                className="rounded-full bg-[var(--accent-soft)] px-2 py-0.5 text-[10px] font-medium text-[var(--accent)]"
+                              >
+                                {tag}
+                              </span>
+                            ))}
+                          </div>
                         )}
                       </div>
-                    </div>
-                  </button>
+                    </button>
 
-                  <button
-                    type="button"
-                    data-no-drag="true"
-                    onClick={() => void handleDeleteTrack(track.id)}
-                    disabled={deletingId === track.id}
-                    aria-label={`Remove ${track.title}`}
-                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-[var(--foreground-muted)] transition-colors hover:bg-red-500/10 hover:text-red-600 disabled:opacity-40 dark:hover:text-red-400"
-                  >
-                    {deletingId === track.id ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <Trash2 className="h-4 w-4" />
-                    )}
-                  </button>
+                    <div
+                      data-no-drag="true"
+                      className="flex shrink-0 items-center gap-0.5"
+                    >
+                      <button
+                        type="button"
+                        data-no-drag="true"
+                        onClick={() =>
+                          isEditing
+                            ? cancelEditingTrack()
+                            : startEditingTrack(track)
+                        }
+                        aria-label={`Edit ${track.title}`}
+                        className="flex h-8 w-8 items-center justify-center rounded-xl text-[var(--foreground-muted)] transition-colors hover:bg-[var(--surface-muted)] hover:text-[var(--foreground)]"
+                      >
+                        {isEditing ? (
+                          <X className="h-3.5 w-3.5" />
+                        ) : (
+                          <Pencil className="h-3.5 w-3.5" />
+                        )}
+                      </button>
+
+                      <button
+                        type="button"
+                        data-no-drag="true"
+                        onClick={() => void handleDeleteTrack(track.id)}
+                        disabled={deletingId === track.id}
+                        aria-label={`Remove ${track.title}`}
+                        className="flex h-8 w-8 items-center justify-center rounded-xl text-[var(--foreground-muted)] transition-colors hover:bg-red-500/10 hover:text-red-600 disabled:opacity-40 dark:hover:text-red-400"
+                      >
+                        {deletingId === track.id ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Trash2 className="h-3.5 w-3.5" />
+                        )}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Inline Title & Tags Editor */}
+                  {isEditing && (
+                    <div
+                      data-no-drag="true"
+                      className="flex flex-col gap-2.5 border-t border-black/6 pt-2.5 dark:border-white/10"
+                    >
+                      <input
+                        type="text"
+                        maxLength={160}
+                        value={editTitleDraft}
+                        onChange={(event) =>
+                          setEditTitleDraft(event.target.value)
+                        }
+                        placeholder="Track title"
+                        className="h-9 w-full rounded-xl border border-black/10 bg-[var(--background)] px-3 text-xs text-[var(--foreground)] outline-none focus:border-[var(--accent)] dark:border-white/12"
+                      />
+
+                      <div className="flex flex-wrap gap-1.5">
+                        {Array.from(
+                          new Set([...SUGGESTED_TRACK_TAGS, ...editTagsDraft])
+                        ).map((tag) => {
+                          const isSelected = editTagsDraft.some(
+                            (t) => t.toLowerCase() === tag.toLowerCase()
+                          );
+                          return (
+                            <button
+                              key={tag}
+                              type="button"
+                              onClick={() =>
+                                setEditTagsDraft((prev) =>
+                                  isSelected
+                                    ? prev.filter(
+                                        (t) =>
+                                          t.toLowerCase() !== tag.toLowerCase()
+                                      )
+                                    : normalizeTrackTags([...prev, tag])
+                                )
+                              }
+                              className={`rounded-full px-2.5 py-0.5 text-[11px] font-medium transition-colors ${
+                                isSelected
+                                  ? "bg-[var(--accent)] text-[#fcfaf6] dark:text-[#151917]"
+                                  : "bg-[var(--surface-muted)] text-[var(--foreground-muted)] hover:text-[var(--foreground)]"
+                              }`}
+                            >
+                              {tag}
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          maxLength={24}
+                          placeholder="Add custom tag..."
+                          value={editCustomTagDraft}
+                          onChange={(event) =>
+                            setEditCustomTagDraft(event.target.value)
+                          }
+                          className="h-8 min-w-0 flex-1 rounded-xl border border-black/10 bg-[var(--background)] px-2.5 text-xs text-[var(--foreground)] outline-none focus:border-[var(--accent)] dark:border-white/12"
+                        />
+                        <button
+                          type="button"
+                          onClick={cancelEditingTrack}
+                          className="rounded-lg px-2.5 py-1 text-xs font-medium text-[var(--foreground-muted)] hover:text-[var(--foreground)]"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void handleSaveTrackEdit(track.id)}
+                          disabled={isSavingEdit || !editTitleDraft.trim()}
+                          className="inline-flex items-center gap-1 rounded-lg bg-[var(--accent)] px-3 py-1 text-xs font-semibold text-[#fcfaf6] disabled:opacity-50 dark:text-[#151917]"
+                        >
+                          {isSavingEdit ? (
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                          ) : (
+                            <Check className="h-3 w-3" />
+                          )}
+                          Save
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </li>
               );
             })}
           </ul>
 
-          {tracks.length >= 2 && (
+          {selectedTagFilter === null && tracks.length >= 2 && (
             <p className="pt-1 text-center text-[11px] text-[var(--foreground-muted)]/75">
               Hold and drag to reorder
             </p>

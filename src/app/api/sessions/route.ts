@@ -7,7 +7,10 @@ const createSessionSchema = z.object({
   mode: z.enum(["TIMER", "TRACK"]),
   trackId: z.string().trim().min(1).max(100).optional().nullable(),
   trackTitle: z.string().trim().max(160).optional().nullable(),
-  trackProvider: z.enum(["YOUTUBE", "SOUNDCLOUD"]).optional().nullable(),
+  trackProvider: z
+    .enum(["YOUTUBE", "SOUNDCLOUD", "DIRECT_AUDIO"])
+    .optional()
+    .nullable(),
   plannedDurationSec: z
     .number()
     .int()
@@ -31,7 +34,7 @@ function serializeSession(session: {
   mode: "TIMER" | "TRACK";
   trackId: string | null;
   trackTitle: string | null;
-  trackProvider: "YOUTUBE" | "SOUNDCLOUD" | null;
+  trackProvider: "YOUTUBE" | "SOUNDCLOUD" | "DIRECT_AUDIO" | null;
   plannedDurationSec: number | null;
   actualDurationSec: number;
   completed: boolean;

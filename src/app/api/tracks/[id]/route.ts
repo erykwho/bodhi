@@ -2,10 +2,16 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { authErrorResponse, requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { normalizeTrackTags } from "@/lib/tracks/providers";
 
-const updateTrackSchema = z.object({
-  title: z.string().trim().min(1, "Title cannot be empty").max(160),
-});
+const updateTrackSchema = z
+  .object({
+    title: z.string().trim().min(1, "Title cannot be empty").max(160).optional(),
+    tags: z.array(z.string().max(40)).max(10).optional(),
+  })
+  .refine((data) => data.title !== undefined || data.tags !== undefined, {
+    message: "Provide a title or tags to update",
+  });
 
 export async function PATCH(
   request: Request,
@@ -19,7 +25,7 @@ export async function PATCH(
 
     if (!parsed.success) {
       return NextResponse.json(
-        { error: parsed.error.issues[0]?.message ?? "Invalid title" },
+        { error: parsed.error.issues[0]?.message ?? "Invalid payload" },
         { status: 400 }
       );
     }
@@ -34,7 +40,12 @@ export async function PATCH(
 
     const updated = await prisma.favoriteTrack.update({
       where: { id: existing.id },
-      data: { title: parsed.data.title },
+      data: {
+        ...(parsed.data.title !== undefined ? { title: parsed.data.title } : {}),
+        ...(parsed.data.tags !== undefined
+          ? { tags: normalizeTrackTags(parsed.data.tags) }
+          : {}),
+      },
     });
 
     return NextResponse.json({
@@ -46,6 +57,7 @@ export async function PATCH(
         title: updated.title,
         author: updated.author,
         thumbnailUrl: updated.thumbnailUrl,
+        tags: updated.tags,
         createdAt: updated.createdAt.toISOString(),
       },
     });

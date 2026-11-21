@@ -8,14 +8,32 @@ interface OEmbedResponse {
 }
 
 /**
- * Resolves track metadata via official YouTube / SoundCloud oEmbed endpoints.
- * Falls back gracefully to parsed URL defaults if oEmbed is unreachable.
+ * Resolves track metadata via official YouTube / SoundCloud oEmbed endpoints,
+ * or returns parsed filename metadata directly for DIRECT_AUDIO URLs.
  */
 export async function resolveTrackMetadata(
   rawUrl: string
 ): Promise<ResolvedTrackMetadata | null> {
   const parsed = parseTrackUrl(rawUrl);
   if (!parsed) return null;
+
+  if (parsed.provider === "DIRECT_AUDIO") {
+    let hostAuthor: string | null = null;
+    try {
+      hostAuthor = new URL(parsed.canonicalUrl).hostname.replace(/^www\./, "");
+    } catch {
+      hostAuthor = null;
+    }
+
+    return {
+      provider: parsed.provider,
+      url: parsed.canonicalUrl,
+      externalId: parsed.externalId,
+      title: parsed.fallbackTitle,
+      author: hostAuthor,
+      thumbnailUrl: null,
+    };
+  }
 
   const oembedEndpoint =
     parsed.provider === "YOUTUBE"
