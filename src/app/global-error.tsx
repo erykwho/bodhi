@@ -1,5 +1,6 @@
 "use client";
 
+import * as Sentry from "@sentry/nextjs";
 import { useEffect } from "react";
 import { getMessages, resolveLocale } from "@/lib/i18n/locale";
 import { LOCALE_STORAGE_KEY } from "@/lib/i18n/types";
@@ -20,6 +21,7 @@ function readStoredLocaleSafe() {
 
 export default function GlobalError({ error, reset }: GlobalErrorProps) {
   useEffect(() => {
+    Sentry.captureException(error);
     console.error("[bodhi] Unhandled global error:", error);
   }, [error]);
 

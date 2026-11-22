@@ -62,12 +62,14 @@ Mobile-first meditation web application (**PWA**) designed for calm, distraction
 - **Framework:** Next.js 16 (App Router, TypeScript, Turbopack), React 19, Tailwind CSS v4, Lucide icons, Zod.
 - **Package Manager:** `pnpm` (v12, with `pnpm-workspace.yaml` enabling `allowBuilds` for Prisma and esbuild).
 - **Database:** Neon PostgreSQL + Prisma v6 (`prisma/schema.prisma`, versioned `prisma/migrations/`, synced automatically via `prisma migrate deploy` in `scripts/vercel-db-sync.mjs` on `VERCEL_ENV=production`).
+- **Observability:** Sentry (`@sentry/nextjs`, org `bodhi-09`, project `bodhi`), enabled automatically when `NEXT_PUBLIC_SENTRY_DSN` is set (no-op in dev/CI without DSN; `sendDefaultPii: false`; source maps uploaded on build when `SENTRY_AUTH_TOKEN` is configured).
 - **CI/CD & Hosting:** GitHub Actions (`.github/workflows/ci.yml` running `prisma validate`, `pnpm test`, `pnpm lint`, `pnpm build`, and `pnpm test:e2e`) + Vercel (continuous deployment from `master`, protected branch requiring PR + passing checks).
 
 ## Directory Structure (V8)
 
 - `.github/workflows/ci.yml` — GitHub Actions CI (`CI` job: Prisma validate, Vitest, ESLint, Next.js build, Playwright E2E smoke tests).
 - `e2e/smoke.spec.ts` & `playwright.config.ts` — Mobile PWA Playwright E2E smoke tests (Timer lifecycle, Zen Dim, Sound Picker, local Presets, i18n, theme persistence, navigation, `/api/health`, offline mode).
+- `sentry.server.config.ts`, `sentry.edge.config.ts`, `src/instrumentation.ts`, `src/instrumentation-client.ts` — Conditional Sentry SDK initialization and `onRequestError` / router transition hooks.
 - `public/sw.js` — Offline PWA Service Worker.
 - `prisma/schema.prisma` & `prisma/migrations/` — `User`, `FavoriteTrack`, `MeditationSession`, and `TimerPreset` models and versioned SQL migrations.
 - `scripts/vercel-db-sync.mjs` — Production-only `prisma migrate deploy` runner (with one-time `P3005` baseline transition and no `db push` fallback).
