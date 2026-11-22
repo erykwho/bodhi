@@ -70,7 +70,7 @@ Mobile-first meditation web application (**PWA**) designed for calm, distraction
 - `public/sw.js` — Offline PWA Service Worker.
 - `prisma/schema.prisma` & `prisma/migrations/` — `User`, `FavoriteTrack`, `MeditationSession`, and `TimerPreset` models and versioned SQL migrations.
 - `scripts/vercel-db-sync.mjs` — Production-only `prisma migrate deploy` runner (with one-time `P3005` baseline transition and no `db push` fallback).
-- `src/app/` — App Router layout, global styles, PWA `manifest.ts`, server actions (`actions.ts`), main page, and REST API routes (`/api/auth/[...nextauth]`, `/api/tracks`, `/api/tracks/resolve`, `/api/tracks/reorder`, `/api/tracks/[id]`, `/api/sessions`, `/api/sessions/[id]`, `/api/presets`, `/api/presets/[id]`).
+- `src/app/` — App Router layout, global styles, Error Boundaries (`error.tsx`, `global-error.tsx`), PWA `manifest.ts`, server actions (`actions.ts`), main page, and REST API routes (`/api/health` with optional `?db=1` Neon check, `/api/auth/[...nextauth]`, `/api/tracks`, `/api/tracks/resolve`, `/api/tracks/reorder`, `/api/tracks/[id]`, `/api/sessions`, `/api/sessions/[id]`, `/api/presets`, `/api/presets/[id]`, plus Vitest security & contract tests).
 - `src/lib/i18n/` — Locale types & metadata (`types.ts`), resolver & helpers (`locale.ts` + `locale.test.ts`), and typed message bundles (`messages/en.ts`, `messages/pt-br.ts`).
 - `src/lib/timer/` — Timestamp-based timer engine (`engine.ts` + `engine.test.ts`), persisted preferences (`preferences.ts` + `preferences.test.ts`), named presets (`presets.ts` + `presets.test.ts`), and types (`types.ts`).
 - `src/lib/audio/` — Extensible bell & ambient sound catalog (`sounds.ts`) and Web Audio API synthesis engine (`engine.ts`).

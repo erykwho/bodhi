@@ -254,6 +254,12 @@ export const enMessages = {
         `${count} ${count === 1 ? "session" : "sessions"}`,
     },
   },
+  errorBoundary: {
+    title: "Something went wrong",
+    body: "An unexpected interruption occurred. Your local timer preferences and saved sessions are safe.",
+    tryAgain: "Try again",
+    reloadApp: "Reload app",
+  },
 };
 
 export type Messages = typeof enMessages;

@@ -253,4 +253,10 @@ export const ptBrMessages: Messages = {
         `${count} ${count === 1 ? "sessão" : "sessões"}`,
     },
   },
+  errorBoundary: {
+    title: "Algo deu errado",
+    body: "Ocorreu uma interrupção inesperada. Suas preferências locais e sessões salvas estão seguras.",
+    tryAgain: "Tentar novamente",
+    reloadApp: "Recarregar app",
+  },
 };
