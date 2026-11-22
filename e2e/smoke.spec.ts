@@ -1,0 +1,204 @@
+import { expect, test, type Page } from "@playwright/test";
+
+function trackRuntimeErrors(page: Page) {
+  const errors: string[] = [];
+  page.on("pageerror", (err) => {
+    errors.push(`pageerror: ${err.message}`);
+  });
+  page.on("console", (msg) => {
+    if (msg.type() === "error") {
+      errors.push(`console.error: ${msg.text()}`);
+    }
+  });
+  return errors;
+}
+
+test.describe("Bodhi E2E Smoke Suite (Mobile PWA)", () => {
+  test("public timer runs without sign-in, supports pause/resume, Zen Dim, and reset", async ({
+    page,
+  }) => {
+    const errors = trackRuntimeErrors(page);
+
+    await page.goto("/");
+    await expect(page.getByText("Bodhi", { exact: true })).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Begin Session" })
+    ).toBeVisible();
+
+    // Select 5m preset and start session
+    await page.getByRole("button", { name: "5m", exact: true }).click();
+    await page.getByRole("button", { name: "Begin Session" }).click();
+
+    // Wait for running or warmup phase controls
+    await expect(page.getByRole("button", { name: "Pause" })).toBeVisible();
+
+    // Activate and wake Zen Dim Mode
+    await page.getByRole("button", { name: "Dim screen" }).click();
+    const wakeOverlay = page.getByRole("button", {
+      name: "Wake dimmed screen",
+    });
+    await expect(wakeOverlay).toBeVisible();
+    await expect(page.getByText("Tap anywhere to wake")).toBeVisible();
+    await wakeOverlay.click();
+    await expect(wakeOverlay).toBeHidden();
+
+    // Pause, resume, and reset
+    await page.getByRole("button", { name: "Pause" }).click();
+    await expect(page.getByText("Paused")).toBeVisible();
+    await page.getByRole("button", { name: "Resume" }).click();
+    await expect(page.getByRole("button", { name: "Pause" })).toBeVisible();
+
+    await page.getByRole("button", { name: "Reset" }).click();
+    await expect(
+      page.getByRole("button", { name: "Begin Session" })
+    ).toBeVisible();
+
+    expect(errors).toEqual([]);
+  });
+
+  test("sound picker updates background sound and local practice presets persist across reload", async ({
+    page,
+  }) => {
+    const errors = trackRuntimeErrors(page);
+
+    await page.goto("/");
+
+    // Open Background sound picker sheet and select Gentle Rain
+    await page.getByRole("button", { name: /Background/ }).click();
+    await expect(page.getByText("Background Sound")).toBeVisible();
+    await page.getByRole("button", { name: "Gentle Rain", exact: true }).click();
+    await page.getByRole("button", { name: "Close sound picker" }).click();
+    await expect(page.getByRole("button", { name: /Gentle Rain/ })).toBeVisible();
+
+    // Save a local practice preset
+    await page.getByRole("button", { name: "Save preset" }).click();
+    await page
+      .getByPlaceholder("Preset name (e.g. Morning, Deep Focus)")
+      .fill("Morning Calm");
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(
+      page.getByRole("button", { name: /^Morning Calm/ })
+    ).toBeVisible();
+
+    // Reload and verify persistence in localStorage
+    await page.reload();
+    await expect(
+      page.getByRole("button", { name: /^Morning Calm/ })
+    ).toBeVisible();
+    await expect(page.getByRole("button", { name: /Gentle Rain/ })).toBeVisible();
+
+    // Enter edit mode and delete the preset cleanly
+    await page.getByRole("button", { name: "Edit", exact: true }).click();
+    await page
+      .getByRole("button", { name: "Delete preset Morning Calm" })
+      .click();
+    await expect(
+      page.getByRole("button", { name: /^Morning Calm/ })
+    ).toBeHidden();
+
+    expect(errors).toEqual([]);
+  });
+
+  test("global language switcher (EN <-> PT-BR) and theme toggle persist across reload", async ({
+    page,
+  }) => {
+    const errors = trackRuntimeErrors(page);
+
+    await page.goto("/");
+    await expect(page.locator("html")).toHaveAttribute("lang", "en");
+
+    // Switch language to pt-BR
+    await page.getByRole("button", { name: "Switch language" }).click();
+    await expect(page.locator("html")).toHaveAttribute("lang", "pt-BR");
+    await expect(
+      page.getByRole("button", { name: "Iniciar Sessão" })
+    ).toBeVisible();
+    await expect(page.getByRole("button", { name: "Guiadas" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Histórico" })).toBeVisible();
+
+    // Toggle theme (default light -> dark)
+    const initialIsDark = await page
+      .locator("html")
+      .evaluate((el) => el.classList.contains("dark"));
+    await page
+      .getByRole("button", {
+        name: initialIsDark
+          ? "Mudar para tema claro"
+          : "Mudar para tema escuro",
+      })
+      .click();
+    await expect
+      .poll(() =>
+        page.locator("html").evaluate((el) => el.classList.contains("dark"))
+      )
+      .toBe(!initialIsDark);
+
+    // Reload and verify both locale and theme persist
+    await page.reload();
+    await expect(page.locator("html")).toHaveAttribute("lang", "pt-BR");
+    await expect(
+      page.getByRole("button", { name: "Iniciar Sessão" })
+    ).toBeVisible();
+    const afterReloadIsDark = await page
+      .locator("html")
+      .evaluate((el) => el.classList.contains("dark"));
+    expect(afterReloadIsDark).toBe(!initialIsDark);
+
+    expect(errors).toEqual([]);
+  });
+
+  test("navigation tabs render signed-out states cleanly and /api/health responds 200", async ({
+    page,
+    request,
+  }) => {
+    const errors = trackRuntimeErrors(page);
+
+    const healthRes = await request.get("/api/health");
+    expect(healthRes.status()).toBe(200);
+    const healthBody = (await healthRes.json()) as { status: string };
+    expect(healthBody.status).toBe("ok");
+
+    await page.goto("/");
+
+    await page.getByRole("button", { name: "Guided" }).click();
+    await expect(
+      page.getByRole("heading", { name: "Favorite Guided Tracks" })
+    ).toBeVisible();
+
+    await page.getByRole("button", { name: "History" }).click();
+    await expect(
+      page.getByRole("heading", { name: "Meditation History" })
+    ).toBeVisible();
+
+    await page.getByRole("button", { name: "Timer" }).click();
+    await expect(
+      page.getByRole("button", { name: "Begin Session" })
+    ).toBeVisible();
+
+    expect(errors).toEqual([]);
+  });
+
+  test("timer remains 100% usable in simulated offline mode", async ({
+    context,
+    page,
+  }) => {
+    await page.goto("/");
+    await expect(
+      page.getByRole("button", { name: "Begin Session" })
+    ).toBeVisible();
+
+    await context.setOffline(true);
+    await page.evaluate(() => {
+      window.dispatchEvent(new Event("offline"));
+    });
+
+    await expect(page.getByText("Offline · Timer ready")).toBeVisible();
+
+    await page.getByRole("button", { name: "Begin Session" }).click();
+    await expect(page.getByRole("button", { name: "Pause" })).toBeVisible();
+    await page.getByRole("button", { name: "Reset" }).click();
+    await expect(
+      page.getByRole("button", { name: "Begin Session" })
+    ).toBeVisible();
+  });
+});
