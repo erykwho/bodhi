@@ -1,5 +1,6 @@
 "use client";
 
+import * as Sentry from "@sentry/nextjs";
 import { useEffect } from "react";
 import { RotateCcw } from "lucide-react";
 import { BodhiLogo } from "@/components/bodhi-logo";
@@ -14,6 +15,7 @@ export default function AppError({ error, reset }: ErrorPageProps) {
   const { m } = useI18n();
 
   useEffect(() => {
+    Sentry.captureException(error);
     console.error("[bodhi] Unhandled route error:", error);
   }, [error]);
 
