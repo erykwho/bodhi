@@ -62,11 +62,12 @@ Mobile-first meditation web application (**PWA**) designed for calm, distraction
 - **Framework:** Next.js 16 (App Router, TypeScript, Turbopack), React 19, Tailwind CSS v4, Lucide icons, Zod.
 - **Package Manager:** `pnpm` (v12, with `pnpm-workspace.yaml` enabling `allowBuilds` for Prisma and esbuild).
 - **Database:** Neon PostgreSQL + Prisma v6 (`prisma/schema.prisma`, versioned `prisma/migrations/`, synced automatically via `prisma migrate deploy` in `scripts/vercel-db-sync.mjs` on `VERCEL_ENV=production`).
-- **CI/CD & Hosting:** GitHub Actions (`.github/workflows/ci.yml` running `prisma validate`, `pnpm test`, `pnpm lint`, `pnpm build`) + Vercel (continuous deployment from `master`, protected branch requiring PR + passing checks).
+- **CI/CD & Hosting:** GitHub Actions (`.github/workflows/ci.yml` running `prisma validate`, `pnpm test`, `pnpm lint`, `pnpm build`, and `pnpm test:e2e`) + Vercel (continuous deployment from `master`, protected branch requiring PR + passing checks).
 
 ## Directory Structure (V8)
 
-- `.github/workflows/ci.yml` — GitHub Actions CI (`CI` job: Prisma validate, Vitest, ESLint, Next.js build).
+- `.github/workflows/ci.yml` — GitHub Actions CI (`CI` job: Prisma validate, Vitest, ESLint, Next.js build, Playwright E2E smoke tests).
+- `e2e/smoke.spec.ts` & `playwright.config.ts` — Mobile PWA Playwright E2E smoke tests (Timer lifecycle, Zen Dim, Sound Picker, local Presets, i18n, theme persistence, navigation, `/api/health`, offline mode).
 - `public/sw.js` — Offline PWA Service Worker.
 - `prisma/schema.prisma` & `prisma/migrations/` — `User`, `FavoriteTrack`, `MeditationSession`, and `TimerPreset` models and versioned SQL migrations.
 - `scripts/vercel-db-sync.mjs` — Production-only `prisma migrate deploy` runner (with one-time `P3005` baseline transition and no `db push` fallback).
@@ -85,11 +86,12 @@ Mobile-first meditation web application (**PWA**) designed for calm, distraction
 ## Commands & Conventions
 
 - `pnpm test` — Run unit tests (Vitest). Always add or update tests when changing pure domain logic in `src/lib/`.
+- `pnpm test:e2e` — Run Playwright mobile PWA E2E smoke tests (`e2e/smoke.spec.ts`) against the production Next.js server (`pnpm build` first).
 - `pnpm lint` — Run ESLint checks.
 - `pnpm build` — Run `prisma generate && node scripts/vercel-db-sync.mjs && next build`.
 - `pnpm db:migrate` — Create and apply a new Prisma migration locally (`prisma migrate dev`). Always commit generated files in `prisma/migrations/`.
 - `pnpm db:migrate:deploy` — Apply pending migrations in production/staging environments.
-- **Pre-PR Verification:** Always validate `prisma validate`, `pnpm test`, `pnpm lint`, and `pnpm build` before opening a PR.
+- **Pre-PR Verification:** Always validate `prisma validate`, `pnpm test`, `pnpm lint`, `pnpm build`, and `pnpm test:e2e` before opening a PR.
 - **Git Commit Author (required for Vercel Hobby):** Before creating any commit, ensure:
   - `git config user.name "Eryk Humberto Oliveira Alves"`
   - `git config user.email "erykwho@gmail.com"`
