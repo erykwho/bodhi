@@ -63,9 +63,18 @@ test.describe("Bodhi E2E Smoke Suite (Mobile PWA)", () => {
 
     await page.goto("/");
 
-    // Switch to Open-Ended mode and start/finish cleanly
+    // Capture Timer dial Y-position for vertical alignment consistency
+    const timerDial = page.locator("section > div.rounded-full").first();
+    const timerBox = await timerDial.boundingBox();
+    expect(timerBox).not.toBeNull();
+
+    // Switch to Open-Ended mode and verify dial stays vertically aligned
     await page.getByRole("tab", { name: "Open", exact: true }).click();
     await expect(page.getByText("Open session")).toBeVisible();
+    const openBox = await timerDial.boundingBox();
+    expect(openBox).not.toBeNull();
+    expect(Math.abs((openBox?.y ?? 0) - (timerBox?.y ?? 0))).toBeLessThanOrEqual(2);
+
     await page.getByRole("button", { name: "Begin Session" }).click();
     await expect(page.getByRole("button", { name: "Pause" })).toBeVisible();
     await page.getByRole("button", { name: "Finish" }).click();
@@ -79,11 +88,20 @@ test.describe("Bodhi E2E Smoke Suite (Mobile PWA)", () => {
     await page.getByRole("button", { name: "Close sound picker" }).click();
     await expect(page.getByRole("button", { name: /3×/ })).toBeVisible();
 
-    // Switch to Guided Breathing sub-mode, select 4-7-8, run, Zen Dim, and Finish
+    // Switch to Guided Breathing sub-mode and verify dial alignment + single-line Box rhythm
     await page.getByRole("tab", { name: "Breathe", exact: true }).click();
-    await expect(page.getByText("4 · 4 · 4 · 4")).toBeVisible();
+    const rhythmEl = page.getByLabel("4 · 4 · 4 · 4");
+    await expect(rhythmEl).toBeVisible();
+    const breatheBox = await timerDial.boundingBox();
+    const rhythmBox = await rhythmEl.boundingBox();
+    expect(breatheBox).not.toBeNull();
+    expect(rhythmBox).not.toBeNull();
+    expect(Math.abs((breatheBox?.y ?? 0) - (timerBox?.y ?? 0))).toBeLessThanOrEqual(2);
+    expect(rhythmBox!.height).toBeLessThan(38);
+    expect(rhythmBox!.width).toBeLessThan(breatheBox!.width - 24);
+
     await page.getByRole("button", { name: "4-7-8", exact: true }).click();
-    await expect(page.getByText("4 · 7 · 8")).toBeVisible();
+    await expect(page.getByLabel("4 · 7 · 8")).toBeVisible();
 
     await page.getByRole("button", { name: "Begin Breathing" }).click();
     await expect(page.getByRole("button", { name: "Pause" })).toBeVisible();

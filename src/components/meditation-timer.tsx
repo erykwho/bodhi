@@ -927,10 +927,10 @@ export function MeditationTimer({
       ) : (
         <>
           {phase === "idle" && (
-            <>
+            <div className="flex flex-1 flex-col gap-4">
               {/* Duration Preview & Fine Adjustment (or Open-Ended Dial) */}
               <section className="flex flex-col items-center pt-1">
-                <div className="relative flex h-44 w-44 flex-col items-center justify-center rounded-full border border-black/6 bg-[var(--surface)] px-4 text-center shadow-xs dark:border-white/10">
+                <div className="relative flex h-44 w-44 flex-col items-center justify-center rounded-full border border-black/6 bg-[var(--surface)] px-3 text-center shadow-xs dark:border-white/10">
                   {openEnded ? (
                     <>
                       <span className="text-[11px] font-medium tracking-[0.18em] text-[var(--foreground-muted)] uppercase">
@@ -949,7 +949,7 @@ export function MeditationTimer({
                       <span className="mt-1 font-mono text-4xl font-medium tracking-tight text-[var(--foreground)] tabular-nums">
                         {formatTimerDisplay(totalSessionMs)}
                       </span>
-                      <div className="mt-2.5 flex items-center gap-3">
+                      <div className="mt-2 flex items-center gap-2">
                         <button
                           type="button"
                           onClick={() =>
@@ -961,7 +961,7 @@ export function MeditationTimer({
                         >
                           <Minus className="h-3.5 w-3.5" />
                         </button>
-                        <span className="min-w-[3.5rem] text-center text-xs font-medium text-[var(--foreground-muted)] tabular-nums">
+                        <span className="min-w-[3rem] text-center text-xs font-medium text-[var(--foreground-muted)] tabular-nums">
                           {formatDurationLabel(durationMinutes)}
                         </span>
                         <button
@@ -1088,7 +1088,7 @@ export function MeditationTimer({
               </section>
 
               {/* Primary CTA */}
-              <div className="pt-1">
+              <div className="mt-auto pt-1">
                 <button
                   type="button"
                   onClick={handleStart}
@@ -1098,7 +1098,7 @@ export function MeditationTimer({
                   {m.timer.beginSession}
                 </button>
               </div>
-            </>
+            </div>
           )}
 
           {(phase === "warmup" || phase === "running" || phase === "paused") && (

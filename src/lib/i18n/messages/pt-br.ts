@@ -178,7 +178,7 @@ export const ptBrMessages: Messages = {
     slotCues: "Guias",
     slotBackground: "Fundo",
     cueModes: {
-      tone: "Tom suave",
+      tone: "Som de respiração",
       chime: "Sino suave",
       silent: "Apenas visual",
     },

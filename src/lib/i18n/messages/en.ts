@@ -179,7 +179,7 @@ export const enMessages = {
     slotCues: "Cues",
     slotBackground: "Background",
     cueModes: {
-      tone: "Soft tone",
+      tone: "Breath sound",
       chime: "Soft chime",
       silent: "Visual only",
     },

@@ -28,8 +28,8 @@ describe("breathing engine", () => {
     ).toEqual({
       inhaleSec: 1,
       holdInSec: 0,
-      exhaleSec: 20,
-      holdOutSec: 15,
+      exhaleSec: 8,
+      holdOutSec: 8,
     });
   });
 
@@ -45,6 +45,7 @@ describe("breathing engine", () => {
 
     const start = computeBreathingSnapshot(0, box);
     expect(start.phase).toBe("inhale");
+    expect(start.phaseDurationMs).toBe(4000);
     expect(start.cycleNumber).toBe(1);
     expect(start.phaseCountdownSec).toBe(4);
     expect(start.orbScale).toBeCloseTo(0, 3);
