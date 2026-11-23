@@ -1,4 +1,4 @@
-const CACHE_NAME = "bodhi-offline-v1";
+const CACHE_NAME = "bodhi-offline-v2";
 
 const PRECACHE_URLS = [
   "/",
@@ -7,7 +7,46 @@ const PRECACHE_URLS = [
   "/icons/favicon.png",
   "/icons/icon-192.png",
   "/icons/icon-512.png",
+  "/audio/breath-inhale.mp3",
+  "/audio/breath-exhale.mp3",
 ];
+
+async function respondWithRangeSupport(request, fullResponse) {
+  const rangeHeader = request.headers.get("range");
+  if (!rangeHeader) {
+    return fullResponse;
+  }
+
+  const buffer = await fullResponse.arrayBuffer();
+  const total = buffer.byteLength;
+  const match = /bytes=(\d+)-(\d*)/.exec(rangeHeader);
+  if (!match) {
+    return new Response(buffer, {
+      status: 200,
+      headers: {
+        "Content-Type": fullResponse.headers.get("Content-Type") || "audio/mpeg",
+        "Content-Length": String(total),
+        "Accept-Ranges": "bytes",
+      },
+    });
+  }
+
+  const start = Math.min(Number.parseInt(match[1], 10), Math.max(0, total - 1));
+  const rawEnd = match[2] ? Number.parseInt(match[2], 10) : total - 1;
+  const end = Math.min(Math.max(start, rawEnd), Math.max(0, total - 1));
+  const slice = buffer.slice(start, end + 1);
+
+  return new Response(slice, {
+    status: 206,
+    statusText: "Partial Content",
+    headers: {
+      "Content-Type": fullResponse.headers.get("Content-Type") || "audio/mpeg",
+      "Content-Range": `bytes ${start}-${end}/${total}`,
+      "Content-Length": String(slice.byteLength),
+      "Accept-Ranges": "bytes",
+    },
+  });
+}
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -69,6 +108,25 @@ self.addEventListener("fetch", (event) => {
             headers: { "Content-Type": "text/plain" },
           });
         })
+    );
+    return;
+  }
+
+  // Local audio samples: Cache-First with HTTP 206 Range support (required for iOS Safari offline <audio>)
+  if (url.origin === self.location.origin && url.pathname.startsWith("/audio/")) {
+    event.respondWith(
+      (async () => {
+        const cache = await caches.open(CACHE_NAME);
+        let fullResponse = await cache.match(url.pathname);
+        if (!fullResponse) {
+          const networkResponse = await fetch(url.pathname);
+          if (networkResponse.ok) {
+            await cache.put(url.pathname, networkResponse.clone());
+          }
+          fullResponse = networkResponse;
+        }
+        return respondWithRangeSupport(request, fullResponse.clone());
+      })()
     );
     return;
   }

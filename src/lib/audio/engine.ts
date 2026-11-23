@@ -5,6 +5,20 @@ type WebkitWindow = Window & {
   webkitAudioContext?: typeof AudioContext;
 };
 
+type NavigatorWithAudioSession = Navigator & {
+  audioSession?: {
+    type: string;
+  };
+};
+
+type PitchPreservingAudioElement = HTMLAudioElement & {
+  preservesPitch?: boolean;
+  mozPreservesPitch?: boolean;
+  webkitPreservesPitch?: boolean;
+};
+
+type BreathSampleKind = "inhale" | "exhale";
+
 interface ActiveAmbientGraph {
   sources: AudioScheduledSourceNode[];
   nodes: AudioNode[];
@@ -12,19 +26,68 @@ interface ActiveAmbientGraph {
   gainCeiling: number;
 }
 
-interface ActiveBreathCue {
-  source: AudioBufferSourceNode;
-  nodes: AudioNode[];
-  masterGain: GainNode;
-  cleanupTimer: ReturnType<typeof setTimeout> | null;
-}
-
 const MULTI_STRIKE_SPACING_MS = 2100;
 
 /**
- * Self-contained Web Audio API engine for meditation bells, breathing cues,
- * and ambient loops. Designed to stay 100% offline with smooth fade envelopes
- * and zero audio files required, while remaining extensible for file-backed tracks later.
+ * WebKit / iOS Safari guarantees pitch-preserved <audio> output within [0.5, 2.0].
+ * Our denoised breath samples are centered around ~3.6-4.0s so every phase duration
+ * from 2s to 8s (including 4s Box, 5.5s Coherent, and 8s 4-7-8 exhale) stays cleanly
+ * within this natural range.
+ */
+export const MIN_BREATH_PLAYBACK_RATE = 0.5;
+export const MAX_BREATH_PLAYBACK_RATE = 2.0;
+
+const BREATH_AUDIO_SOURCES: Record<
+  BreathSampleKind,
+  { src: string; nominalDurationSec: number }
+> = {
+  inhale: {
+    src: "/audio/breath-inhale.mp3",
+    nominalDurationSec: 3.61,
+  },
+  exhale: {
+    src: "/audio/breath-exhale.mp3",
+    nominalDurationSec: 3.98,
+  },
+};
+
+/**
+ * Valid 50ms silent 8kHz mono PCM WAV played once on user gesture to switch
+ * pre-iOS 16.4 Safari AVAudioSession from "ambient" to "playback" so Web Audio
+ * bells and ambient loops remain audible even with the hardware Silent switch ON.
+ */
+const SILENT_UNLOCK_WAV_DATA_URI =
+  "data:audio/wav;base64,UklGRrQBAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YZABAACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA";
+
+/**
+ * Computes the pitch-preserved playbackRate required to span a breath sample
+ * across `targetPhaseDurationSec`, safely clamped to WebKit's [0.5, 2.0] range.
+ */
+export function computeBreathPlaybackRate(
+  sampleDurationSec: number,
+  targetPhaseDurationSec: number
+): number {
+  if (
+    !Number.isFinite(sampleDurationSec) ||
+    sampleDurationSec <= 0 ||
+    !Number.isFinite(targetPhaseDurationSec) ||
+    targetPhaseDurationSec <= 0
+  ) {
+    return 1;
+  }
+
+  const rawRate = sampleDurationSec / targetPhaseDurationSec;
+  return Math.min(
+    MAX_BREATH_PLAYBACK_RATE,
+    Math.max(MIN_BREATH_PLAYBACK_RATE, rawRate)
+  );
+}
+
+/**
+ * Self-contained offline-first audio engine for meditation bells, ambient soundscapes
+ * (Web Audio API), and denoised CC0 human breath cues (pitch-preserving HTML5 Audio).
+ * Configures iOS "playback" audio session so practice audio plays even when the
+ * device's hardware Silent switch is enabled.
  */
 export class MeditationAudioEngine {
   private ctx: AudioContext | null = null;
@@ -32,15 +95,156 @@ export class MeditationAudioEngine {
   private pinkNoiseBuffer: AudioBuffer | null = null;
   private brownNoiseBuffer: AudioBuffer | null = null;
   private ambientGraph: ActiveAmbientGraph | null = null;
-  private activeBreathCue: ActiveBreathCue | null = null;
+  private breathAudioElements: Record<
+    BreathSampleKind,
+    PitchPreservingAudioElement | null
+  > = {
+    inhale: null,
+    exhale: null,
+  };
+  private breathAudioPrimed: Record<BreathSampleKind, boolean> = {
+    inhale: false,
+    exhale: false,
+  };
+  private breathPlayTokens: Record<BreathSampleKind, number> = {
+    inhale: 0,
+    exhale: 0,
+  };
+  private activeBreathKind: BreathSampleKind | null = null;
+  private breathPhaseEndTimer: ReturnType<typeof setTimeout> | null = null;
+  private breathFadeInterval: ReturnType<typeof setInterval> | null = null;
   private breathPreviewTimeout: ReturnType<typeof setTimeout> | null = null;
+  private silentUnlockAudio: HTMLAudioElement | null = null;
+  private silentSwitchUnlocked = false;
   private activeSoundId: AmbientSoundId = "silence";
   private isPreviewing = false;
   private previewTimeout: ReturnType<typeof setTimeout> | null = null;
   private bellStrikeTimeouts: Array<ReturnType<typeof setTimeout>> = [];
 
+  /**
+   * Requests the "playback" AudioSession category (iOS Safari 16.4+ / iOS 17-18+)
+   * so bells, ambient soundscapes, and breathing cues bypass the hardware Silent switch.
+   */
+  private configurePlaybackAudioSession(): void {
+    if (typeof navigator === "undefined") return;
+    const nav = navigator as NavigatorWithAudioSession;
+    if (nav.audioSession && nav.audioSession.type !== "playback") {
+      try {
+        nav.audioSession.type = "playback";
+      } catch {
+        // Ignore on platforms where audioSession.type is unsupported or read-only
+      }
+    }
+  }
+
+  /**
+   * Plays a 50ms silent HTML5 <audio> clip once during a user gesture to nudge
+   * older iOS Safari versions into the "playback" AVAudioSession category.
+   */
+  private unlockSilentSwitchBridge(): void {
+    if (this.silentSwitchUnlocked || typeof Audio === "undefined") return;
+    this.silentSwitchUnlocked = true;
+
+    try {
+      const el = new Audio(SILENT_UNLOCK_WAV_DATA_URI);
+      el.setAttribute("playsinline", "true");
+      el.preload = "auto";
+      el.volume = 0.01;
+      this.silentUnlockAudio = el;
+
+      const promise = el.play();
+      if (promise && typeof promise.catch === "function") {
+        void promise.catch(() => {
+          // Retry on next user gesture if blocked
+          this.silentSwitchUnlocked = false;
+        });
+      }
+    } catch {
+      this.silentSwitchUnlocked = false;
+    }
+  }
+
+  private getOrCreateBreathAudio(
+    kind: BreathSampleKind
+  ): PitchPreservingAudioElement | null {
+    if (typeof Audio === "undefined") return null;
+
+    const existing = this.breathAudioElements[kind];
+    if (existing) return existing;
+
+    const audio = new Audio(
+      BREATH_AUDIO_SOURCES[kind].src
+    ) as PitchPreservingAudioElement;
+    audio.preload = "auto";
+    audio.setAttribute("playsinline", "true");
+    this.applyPreservePitch(audio);
+    this.breathAudioElements[kind] = audio;
+    return audio;
+  }
+
+  private applyPreservePitch(audio: PitchPreservingAudioElement): void {
+    try {
+      if ("preservesPitch" in audio) audio.preservesPitch = true;
+      if ("mozPreservesPitch" in audio) audio.mozPreservesPitch = true;
+      if ("webkitPreservesPitch" in audio) audio.webkitPreservesPitch = true;
+    } catch {
+      // Ignore if browser disallows vendor pitch property
+    }
+  }
+
+  /**
+   * Primes reusable inhale/exhale <audio> elements during a direct user gesture so
+   * subsequent timer-driven phase transitions play without iOS autoplay restrictions.
+   */
+  private primeBreathAudioElements(): void {
+    if (typeof Audio === "undefined") return;
+
+    for (const kind of ["inhale", "exhale"] as const) {
+      if (this.breathAudioPrimed[kind] || this.activeBreathKind === kind) {
+        continue;
+      }
+
+      const audio = this.getOrCreateBreathAudio(kind);
+      if (!audio) continue;
+
+      const token = ++this.breathPlayTokens[kind];
+      audio.muted = true;
+      try {
+        const playPromise = audio.play();
+        if (playPromise && typeof playPromise.then === "function") {
+          void playPromise
+            .then(() => {
+              this.breathAudioPrimed[kind] = true;
+              // Guard against racing with an immediate playBreathingCue() in the same tap
+              if (this.breathPlayTokens[kind] === token) {
+                audio.pause();
+                try {
+                  audio.currentTime = 0;
+                } catch {
+                  // Ignore if metadata not loaded yet
+                }
+                audio.muted = false;
+              }
+            })
+            .catch(() => {
+              if (this.breathPlayTokens[kind] === token) {
+                audio.muted = false;
+              }
+            });
+        } else {
+          this.breathAudioPrimed[kind] = true;
+          audio.pause();
+          audio.muted = false;
+        }
+      } catch {
+        audio.muted = false;
+      }
+    }
+  }
+
   private ensureContext(): AudioContext | null {
     if (typeof window === "undefined") return null;
+    this.configurePlaybackAudioSession();
 
     if (!this.ctx) {
       const AudioCtx =
@@ -57,10 +261,14 @@ export class MeditationAudioEngine {
   }
 
   /**
-   * Unlocks the AudioContext on a direct user gesture (required on mobile Safari/Chrome).
+   * Unlocks the AudioContext, enables iOS "playback" audio session (Silent switch bypass),
+   * and primes breathing <audio> elements on a direct user gesture.
    */
   public unlock(): void {
+    this.configurePlaybackAudioSession();
     this.ensureContext();
+    this.unlockSilentSwitchBridge();
+    this.primeBreathAudioElements();
   }
 
   /**
@@ -149,51 +357,55 @@ export class MeditationAudioEngine {
       clearTimeout(this.breathPreviewTimeout);
       this.breathPreviewTimeout = null;
     }
+    this.clearBreathTimers();
 
-    const active = this.activeBreathCue;
-    if (!active) return;
-    this.activeBreathCue = null;
+    const kind = this.activeBreathKind;
+    if (!kind) return;
+    this.activeBreathKind = null;
 
-    if (active.cleanupTimer) {
-      clearTimeout(active.cleanupTimer);
-      active.cleanupTimer = null;
-    }
+    const audio = this.breathAudioElements[kind];
+    if (!audio) return;
 
-    const ctx = this.ctx;
-    if (!ctx || fadeSeconds <= 0) {
-      this.disposeBreathCueImmediate(active);
+    const token = ++this.breathPlayTokens[kind];
+    if (fadeSeconds <= 0 || audio.paused) {
+      this.stopBreathElementImmediate(audio);
       return;
     }
 
-    const now = ctx.currentTime;
-    try {
-      active.masterGain.gain.cancelScheduledValues(now);
-      active.masterGain.gain.setValueAtTime(
-        Math.max(0.0001, active.masterGain.gain.value),
-        now
-      );
-      active.masterGain.gain.exponentialRampToValueAtTime(
-        0.0001,
-        now + fadeSeconds
-      );
-    } catch {
-      // Ignore scheduling errors if context already closed
-    }
+    const startVolume = audio.volume;
+    const steps = Math.max(3, Math.round((fadeSeconds * 1000) / 20));
+    const stepMs = Math.max(12, Math.round((fadeSeconds * 1000) / steps));
+    let currentStep = 0;
 
-    setTimeout(
-      () => this.disposeBreathCueImmediate(active),
-      Math.ceil((fadeSeconds + 0.08) * 1000)
-    );
+    this.breathFadeInterval = setInterval(() => {
+      if (this.breathPlayTokens[kind] !== token) {
+        this.clearBreathFadeInterval();
+        return;
+      }
+
+      currentStep += 1;
+      const ratio = Math.max(0, 1 - currentStep / steps);
+      try {
+        audio.volume = startVolume * ratio;
+      } catch {
+        // Ignore on platforms where HTMLAudioElement.volume is read-only
+      }
+
+      if (currentStep >= steps) {
+        this.clearBreathFadeInterval();
+        this.stopBreathElementImmediate(audio);
+      }
+    }, stepMs);
   }
 
   /**
-   * Plays a short inhale + exhale preview in the Breathing Cues sheet.
+   * Plays a short real inhale + exhale preview in the Breathing Cues sheet.
    */
   public previewBreathingCue(
     cueMode: BreathingCueMode,
     volume: number = 0.85
   ): void {
-    this.stopBreathingCue(0.12);
+    this.stopBreathingCue(0.1);
     if (cueMode === "silent") return;
 
     if (cueMode === "chime") {
@@ -201,8 +413,8 @@ export class MeditationAudioEngine {
       return;
     }
 
-    const inhaleSec = 2.0;
-    const exhaleSec = 2.4;
+    const inhaleSec = 2.6;
+    const exhaleSec = 3.0;
     this.playBreathingCue("inhale", "tone", volume, inhaleSec);
     this.breathPreviewTimeout = setTimeout(() => {
       this.breathPreviewTimeout = null;
@@ -220,7 +432,7 @@ export class MeditationAudioEngine {
     volume: number = 0.85,
     durationSec: number = 4.0
   ): void {
-    this.stopBreathingCue(0.14);
+    this.stopBreathingCue(0.12);
 
     if (cueMode === "silent") return;
     if (phase === "holdIn" || phase === "holdOut") return;
@@ -228,133 +440,134 @@ export class MeditationAudioEngine {
     const clampedVolume = Math.min(1, Math.max(0, volume));
     if (clampedVolume <= 0.001) return;
 
-    const ctx = this.ensureContext();
-    if (!ctx) return;
+    this.configurePlaybackAudioSession();
 
     if (cueMode === "chime") {
       this.playBellSound("soft-chime", clampedVolume * 0.45);
       return;
     }
 
-    // "tone": realistic formant-filtered airflow breath spanning the full phase
-    const now = ctx.currentTime;
-    const d = Math.max(0.6, Math.min(12, durationSec));
-    const isInhale = phase === "inhale";
-    const gainCurve = Math.pow(clampedVolume, 1.3);
-    const peakGain = (isInhale ? 0.42 : 0.48) * gainCurve;
+    // "tone": denoised CC0 human breath sample scaled smoothly across the phase duration
+    const kind: BreathSampleKind = phase === "inhale" ? "inhale" : "exhale";
+    const audio = this.getOrCreateBreathAudio(kind);
+    if (!audio) return;
 
-    const source = ctx.createBufferSource();
-    source.buffer = this.getPinkNoiseBuffer(ctx);
-    source.loop = true;
-
-    const highpass = ctx.createBiquadFilter();
-    highpass.type = "highpass";
-    highpass.frequency.setValueAtTime(isInhale ? 180 : 120, now);
-
-    const lowpass = ctx.createBiquadFilter();
-    lowpass.type = "lowpass";
-    lowpass.Q.setValueAtTime(0.6, now);
-    lowpass.frequency.setValueAtTime(isInhale ? 2900 : 2100, now);
-
-    // Formant 1: warm throat / chest air resonance
-    const formant1 = ctx.createBiquadFilter();
-    formant1.type = "bandpass";
-    formant1.Q.setValueAtTime(isInhale ? 1.4 : 1.45, now);
-    formant1.frequency.setValueAtTime(isInhale ? 480 : 740, now);
-    formant1.frequency.exponentialRampToValueAtTime(
-      isInhale ? 840 : 340,
-      now + d * 0.94
+    const targetDurationSec = Math.max(0.6, Math.min(12, durationSec));
+    const sampleDurationSec =
+      Number.isFinite(audio.duration) && audio.duration > 0.5
+        ? audio.duration
+        : BREATH_AUDIO_SOURCES[kind].nominalDurationSec;
+    const playbackRate = computeBreathPlaybackRate(
+      sampleDurationSec,
+      targetDurationSec
     );
 
-    const formant1Gain = ctx.createGain();
-    formant1Gain.gain.setValueAtTime(isInhale ? 0.68 : 0.78, now);
+    const token = ++this.breathPlayTokens[kind];
+    this.activeBreathKind = kind;
+    this.clearBreathTimers();
 
-    // Formant 2: soft airy nasal / oral breath sheen
-    const formant2 = ctx.createBiquadFilter();
-    formant2.type = "bandpass";
-    formant2.Q.setValueAtTime(isInhale ? 2.0 : 1.85, now);
-    formant2.frequency.setValueAtTime(isInhale ? 1400 : 1500, now);
-    formant2.frequency.exponentialRampToValueAtTime(
-      isInhale ? 2150 : 780,
-      now + d * 0.94
-    );
-
-    const formant2Gain = ctx.createGain();
-    formant2Gain.gain.setValueAtTime(isInhale ? 0.42 : 0.36, now);
-
-    const masterGain = ctx.createGain();
-    masterGain.gain.setValueAtTime(0.0001, now);
-
-    if (isInhale) {
-      // Natural slow lung-filling swell across the full inhale duration
-      masterGain.gain.linearRampToValueAtTime(peakGain * 0.58, now + d * 0.18);
-      masterGain.gain.linearRampToValueAtTime(peakGain, now + d * 0.56);
-      masterGain.gain.linearRampToValueAtTime(peakGain * 0.48, now + d * 0.84);
-      masterGain.gain.exponentialRampToValueAtTime(0.0001, now + d * 0.98);
-    } else {
-      // Natural soft sighing release tapering peacefully across the full exhale
-      masterGain.gain.linearRampToValueAtTime(peakGain * 0.92, now + d * 0.14);
-      masterGain.gain.linearRampToValueAtTime(peakGain, now + d * 0.3);
-      masterGain.gain.linearRampToValueAtTime(peakGain * 0.3, now + d * 0.72);
-      masterGain.gain.exponentialRampToValueAtTime(0.0001, now + d * 0.98);
+    this.applyPreservePitch(audio);
+    audio.muted = false;
+    try {
+      audio.volume = clampedVolume;
+    } catch {
+      // iOS Safari exposes read-only HTMLAudioElement.volume (hardware volume controls output)
+    }
+    try {
+      audio.playbackRate = playbackRate;
+    } catch {
+      // Fallback to default 1x rate if browser rejects rate change before metadata loads
+    }
+    try {
+      audio.currentTime = 0;
+    } catch {
+      // Ignore if media is still initializing
     }
 
-    source.connect(highpass);
-    highpass.connect(formant1);
-    highpass.connect(formant2);
-    formant1.connect(formant1Gain);
-    formant2.connect(formant2Gain);
-    formant1Gain.connect(lowpass);
-    formant2Gain.connect(lowpass);
-    lowpass.connect(masterGain);
-    masterGain.connect(ctx.destination);
-
-    const randomOffset = Math.random() * Math.max(0.1, source.buffer.duration - 0.5);
-    source.start(now, randomOffset);
-    source.stop(now + d + 0.06);
-
-    const cue: ActiveBreathCue = {
-      source,
-      nodes: [
-        highpass,
-        formant1,
-        formant1Gain,
-        formant2,
-        formant2Gain,
-        lowpass,
-        masterGain,
-      ],
-      masterGain,
-      cleanupTimer: null,
-    };
-
-    cue.cleanupTimer = setTimeout(() => {
-      if (this.activeBreathCue === cue) {
-        this.activeBreathCue = null;
+    try {
+      const playPromise = audio.play();
+      if (playPromise && typeof playPromise.then === "function") {
+        void playPromise
+          .then(() => {
+            this.breathAudioPrimed[kind] = true;
+            if (this.breathPlayTokens[kind] !== token) return;
+            // Re-apply exact rate once real audio.duration metadata is guaranteed ready
+            if (Number.isFinite(audio.duration) && audio.duration > 0.5) {
+              const refinedRate = computeBreathPlaybackRate(
+                audio.duration,
+                targetDurationSec
+              );
+              if (Math.abs(audio.playbackRate - refinedRate) > 0.02) {
+                try {
+                  audio.playbackRate = refinedRate;
+                } catch {
+                  // Ignore
+                }
+              }
+            }
+          })
+          .catch(() => {
+            // Gracefully ignore autoplay or headless browser playback rejections
+            if (
+              this.activeBreathKind === kind &&
+              this.breathPlayTokens[kind] === token
+            ) {
+              this.activeBreathKind = null;
+            }
+          });
       }
-      this.disposeBreathCueImmediate(cue);
-    }, Math.ceil((d + 0.15) * 1000));
+    } catch {
+      this.activeBreathKind = null;
+      return;
+    }
 
-    this.activeBreathCue = cue;
+    // Ensure short phases (e.g. 1s custom where playbackRate caps at 2.0x) fade cleanly on time
+    const fadeOutSec = Math.min(0.16, targetDurationSec * 0.25);
+    const fadeStartMs = Math.max(
+      120,
+      Math.round((targetDurationSec - fadeOutSec) * 1000)
+    );
+    this.breathPhaseEndTimer = setTimeout(() => {
+      this.breathPhaseEndTimer = null;
+      if (
+        this.activeBreathKind === kind &&
+        this.breathPlayTokens[kind] === token
+      ) {
+        this.stopBreathingCue(fadeOutSec);
+      }
+    }, fadeStartMs);
   }
 
-  private disposeBreathCueImmediate(cue: ActiveBreathCue): void {
+  private clearBreathFadeInterval(): void {
+    if (this.breathFadeInterval) {
+      clearInterval(this.breathFadeInterval);
+      this.breathFadeInterval = null;
+    }
+  }
+
+  private clearBreathTimers(): void {
+    this.clearBreathFadeInterval();
+    if (this.breathPhaseEndTimer) {
+      clearTimeout(this.breathPhaseEndTimer);
+      this.breathPhaseEndTimer = null;
+    }
+  }
+
+  private stopBreathElementImmediate(audio: PitchPreservingAudioElement): void {
     try {
-      cue.source.stop();
+      audio.pause();
     } catch {
-      // Ignore if already stopped
+      // Ignore
     }
     try {
-      cue.source.disconnect();
+      audio.currentTime = 0;
     } catch {
-      // Ignore if already disconnected
+      // Ignore
     }
-    for (const node of cue.nodes) {
-      try {
-        node.disconnect();
-      } catch {
-        // Ignore if already disconnected
-      }
+    try {
+      audio.volume = 1;
+    } catch {
+      // Ignore
     }
   }
 
@@ -1141,6 +1354,23 @@ export class MeditationAudioEngine {
     this.clearPreviewTimer();
     this.cancelBellStrikes();
     this.stopBreathingCue(0);
+    for (const kind of ["inhale", "exhale"] as const) {
+      const audio = this.breathAudioElements[kind];
+      if (audio) {
+        this.stopBreathElementImmediate(audio);
+        this.breathAudioElements[kind] = null;
+      }
+      this.breathAudioPrimed[kind] = false;
+    }
+    if (this.silentUnlockAudio) {
+      try {
+        this.silentUnlockAudio.pause();
+      } catch {
+        // Ignore
+      }
+      this.silentUnlockAudio = null;
+    }
+    this.silentSwitchUnlocked = false;
     this.teardownAmbientImmediate();
     if (this.ctx) {
       void this.ctx.close();
