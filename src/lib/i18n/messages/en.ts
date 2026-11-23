@@ -214,7 +214,8 @@ export const enMessages = {
     } satisfies Record<TrackProviderType, string>,
     offlineTitle: "You're Offline",
     offlineBody:
-      "Guided tracks from YouTube and SoundCloud require an internet connection. Your Meditation Timer works completely offline.",
+      "Guided tracks from YouTube and SoundCloud require an internet connection. Save direct audio (.mp3/.m4a) tracks offline, or use the Meditation Timer anytime.",
+    offlineShowingSaved: "Offline · Showing tracks saved on this device",
     openTimer: "Open Meditation Timer",
     signedOutTitle: "Favorite Guided Tracks",
     signedOutBody:
@@ -238,6 +239,11 @@ export const enMessages = {
     noTagMatchBody: "Choose another tag or tap All to see all favorites.",
     holdAndDrag: "Hold and drag to reorder",
     editTrackTitlePlaceholder: "Track title",
+    saveOfflineAria: (title: string) => `Save ${title} for offline playback`,
+    removeOfflineAria: (title: string) => `Remove offline download for ${title}`,
+    savedOfflineBadge: (size: string) => `Offline · ${size}`,
+    downloadingOffline: "Downloading...",
+    errOfflineDownload: "Could not save this audio file offline.",
     errInvalidUrl:
       "Paste a valid YouTube, SoundCloud, or direct audio (.mp3/.m4a) URL.",
     errFetchMetadata: "Could not fetch track details.",
@@ -273,7 +279,16 @@ export const enMessages = {
       bellLabel: "Bell",
       dim: "Dim",
       source: "Source",
+      playingOffline: "Playing offline",
+      saveOffline: "Save offline",
+      savedOffline: "Saved offline",
     },
+  },
+  mediaSession: {
+    timerTitle: (durationLabel: string) => `Meditation · ${durationLabel}`,
+    openTimerTitle: "Open Meditation",
+    breathingTitle: (pattern: string) => `Guided Breathing · ${pattern}`,
+    artist: "Bodhi",
   },
   history: {
     signedOutTitle: "Meditation History",

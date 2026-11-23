@@ -12,6 +12,8 @@ import {
   Bell,
   BellOff,
   Check,
+  CheckCircle2,
+  Download,
   ExternalLink,
   EyeOff,
   Headphones,
@@ -34,6 +36,22 @@ import {
   formatSessionDuration,
 } from "@/lib/history/stats";
 import type { MeditationSessionItem } from "@/lib/history/types";
+import {
+  clearMediaSession,
+  setMediaSessionActionHandlers,
+  setMediaSessionMetadata,
+  setMediaSessionPlaybackState,
+  setMediaSessionPositionState,
+} from "@/lib/media-session";
+import {
+  formatBytesLabel,
+  getOfflineGuidedServerSnapshot,
+  getOfflineGuidedSnapshot,
+  getOfflineTrackAudioBlobUrl,
+  removeTrackAudioOffline,
+  saveTrackAudioOffline,
+  subscribeOfflineGuided,
+} from "@/lib/offline/audio-cache";
 import {
   getTimerPreferencesServerSnapshot,
   getTimerPreferencesSnapshot,
@@ -167,6 +185,8 @@ interface GuidedSessionPlayerProps {
   track: FavoriteTrackItem;
   closingBellEnabled: boolean;
   isAuthenticated?: boolean;
+  userId?: string | null;
+  isOnline?: boolean;
   onToggleClosingBell: () => void;
   onExit: () => void;
   onSessionSaved?: (session: MeditationSessionItem) => void;
@@ -177,6 +197,8 @@ export function GuidedSessionPlayer({
   track,
   closingBellEnabled,
   isAuthenticated = false,
+  userId = null,
+  isOnline = true,
   onToggleClosingBell,
   onExit,
   onSessionSaved,
@@ -188,6 +210,14 @@ export function GuidedSessionPlayer({
     getTimerPreferencesSnapshot,
     getTimerPreferencesServerSnapshot
   );
+  const offlineGuided = useSyncExternalStore(
+    subscribeOfflineGuided,
+    getOfflineGuidedSnapshot,
+    getOfflineGuidedServerSnapshot
+  );
+
+  const offlineMeta = offlineGuided.savedAudio[track.id] ?? null;
+  const isSavedOffline = Boolean(offlineMeta);
 
   // Sync the closing bell sound, strikes, and volume with the user's Timer settings
   const closingBellSoundId: BellSoundId =
@@ -203,6 +233,9 @@ export function GuidedSessionPlayer({
     "youtube" | "soundcloud" | "direct_audio" | null
   >(null);
   const [isDimmed, setIsDimmed] = useState<boolean>(false);
+  const [offlineBlobUrl, setOfflineBlobUrl] = useState<string | null>(null);
+  const [isTogglingOffline, setIsTogglingOffline] = useState<boolean>(false);
+  const [offlineError, setOfflineError] = useState<string | null>(null);
 
   // History logging state
   const [savedSessionId, setSavedSessionId] = useState<string | null>(null);
@@ -225,6 +258,7 @@ export function GuidedSessionPlayer({
   const closingBellSoundRef = useRef<BellSoundId>(closingBellSoundId);
   const closingBellStrikesRef = useRef<BellStrikeCount>(closingBellStrikes);
   const closingBellVolumeRef = useRef<number>(closingBellVolume);
+  const lastMediaPositionSecRef = useRef<number>(-1);
 
   // Accurate active-listening duration tracking (excludes paused intervals)
   const sessionStartedAtRef = useRef<string | null>(null);
@@ -261,6 +295,64 @@ export function GuidedSessionPlayer({
     };
   }, []);
 
+  // Resolve locally cached Blob URL for saved DIRECT_AUDIO tracks (Airplane Mode playback)
+  useEffect(() => {
+    if (track.provider !== "DIRECT_AUDIO") return;
+    let cancelled = false;
+    let createdUrl: string | null = null;
+
+    void getOfflineTrackAudioBlobUrl(track.id).then((url) => {
+      if (cancelled) {
+        if (url) URL.revokeObjectURL(url);
+        return;
+      }
+      createdUrl = url;
+      setOfflineBlobUrl(url);
+      if (url) {
+        setPlayerErrorKey(null);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      if (createdUrl) {
+        URL.revokeObjectURL(createdUrl);
+      }
+    };
+  }, [isSavedOffline, track.id, track.provider]);
+
+  const handleToggleOfflineSave = useCallback(async () => {
+    if (track.provider !== "DIRECT_AUDIO") return;
+    setOfflineError(null);
+
+    if (isSavedOffline) {
+      await removeTrackAudioOffline(track.id);
+      return;
+    }
+
+    setIsTogglingOffline(true);
+    try {
+      await saveTrackAudioOffline(track, isAuthenticated);
+    } catch {
+      setOfflineError(m.guided.errOfflineDownload);
+    } finally {
+      setIsTogglingOffline(false);
+    }
+  }, [isAuthenticated, isSavedOffline, m.guided.errOfflineDownload, track]);
+
+  const syncDirectAudioPosition = useCallback(() => {
+    const el = directAudioRef.current;
+    if (!el || !Number.isFinite(el.duration) || el.duration <= 0) return;
+    const roundedSec = Math.floor(el.currentTime);
+    if (roundedSec === lastMediaPositionSecRef.current) return;
+    lastMediaPositionSecRef.current = roundedSec;
+    setMediaSessionPositionState({
+      duration: el.duration,
+      position: el.currentTime,
+      playbackRate: el.playbackRate || 1,
+    });
+  }, []);
+
   const markPlayingStart = useCallback(() => {
     if (!sessionStartedAtRef.current) {
       sessionStartedAtRef.current = new Date().toISOString();
@@ -293,7 +385,7 @@ export function GuidedSessionPlayer({
 
     if (closingBellRef.current) {
       const audio = getAudioEngine();
-      audio.unlock();
+      audio.unlock({ bells: [closingBellSoundRef.current] });
       audio.playBellStrikes(
         closingBellSoundRef.current,
         closingBellStrikesRef.current,
@@ -302,16 +394,19 @@ export function GuidedSessionPlayer({
     }
 
     if (isAuthenticated) {
-      void saveMeditationSession({
-        mode: "TRACK",
-        trackId: track.id,
-        trackTitle: track.title,
-        trackProvider: track.provider,
-        actualDurationSec: elapsedSec,
-        completed: true,
-        startedAt: sessionStartedAtRef.current ?? undefined,
-        endedAt: new Date().toISOString(),
-      }).then((saved) => {
+      void saveMeditationSession(
+        {
+          mode: "TRACK",
+          trackId: track.id,
+          trackTitle: track.title,
+          trackProvider: track.provider,
+          actualDurationSec: elapsedSec,
+          completed: true,
+          startedAt: sessionStartedAtRef.current ?? undefined,
+          endedAt: new Date().toISOString(),
+        },
+        userId
+      ).then((saved) => {
         if (saved) {
           setSavedSessionId(saved.id);
           onSessionSaved?.(saved);
@@ -326,93 +421,74 @@ export function GuidedSessionPlayer({
     track.id,
     track.provider,
     track.title,
+    userId,
   ]);
 
-  // Configure Media Session API for lock-screen controls on Direct Audio tracks
+  // Unified Media Session API across Direct Audio, YouTube, and SoundCloud guided tracks
   useEffect(() => {
-    if (track.provider !== "DIRECT_AUDIO") return;
-    if (typeof navigator === "undefined" || !("mediaSession" in navigator)) {
-      return;
-    }
+    setMediaSessionMetadata({
+      title: track.title,
+      artist: track.author ?? m.mediaSession.artist,
+      album: "Bodhi",
+    });
 
-    const mediaSession = navigator.mediaSession;
-    try {
-      mediaSession.metadata = new MediaMetadata({
-        title: track.title,
-        artist: track.author ?? "Bodhi Guided Practice",
-        album: "Bodhi",
-        artwork: [
-          {
-            src: "/icons/icon-192.png",
-            sizes: "192x192",
-            type: "image/png",
-          },
-          {
-            src: "/icons/icon-512.png",
-            sizes: "512x512",
-            type: "image/png",
-          },
-        ],
+    if (track.provider === "DIRECT_AUDIO") {
+      setMediaSessionActionHandlers({
+        onPlay: () => {
+          void directAudioRef.current?.play();
+        },
+        onPause: () => {
+          directAudioRef.current?.pause();
+        },
+        onSeekBackward: (offset) => {
+          const el = directAudioRef.current;
+          if (!el) return;
+          el.currentTime = Math.max(0, el.currentTime - offset);
+        },
+        onSeekForward: (offset) => {
+          const el = directAudioRef.current;
+          if (!el) return;
+          const max = Number.isFinite(el.duration)
+            ? el.duration
+            : el.currentTime + offset;
+          el.currentTime = Math.min(max, el.currentTime + offset);
+        },
+        onStop: () => {
+          const el = directAudioRef.current;
+          if (!el) return;
+          el.pause();
+          el.currentTime = 0;
+        },
       });
-
-      mediaSession.setActionHandler("play", () => {
-        void directAudioRef.current?.play();
+    } else if (track.provider === "YOUTUBE") {
+      setMediaSessionActionHandlers({
+        onPlay: () => ytPlayerRef.current?.playVideo(),
+        onPause: () => ytPlayerRef.current?.pauseVideo(),
+        onStop: () => ytPlayerRef.current?.pauseVideo(),
       });
-      mediaSession.setActionHandler("pause", () => {
-        directAudioRef.current?.pause();
+    } else {
+      setMediaSessionActionHandlers({
+        onPlay: () => scWidgetRef.current?.play(),
+        onPause: () => scWidgetRef.current?.pause(),
+        onStop: () => scWidgetRef.current?.pause(),
       });
-      mediaSession.setActionHandler("seekbackward", (details) => {
-        const el = directAudioRef.current;
-        if (!el) return;
-        const offset = details.seekOffset ?? 15;
-        el.currentTime = Math.max(0, el.currentTime - offset);
-      });
-      mediaSession.setActionHandler("seekforward", (details) => {
-        const el = directAudioRef.current;
-        if (!el) return;
-        const offset = details.seekOffset ?? 15;
-        const max = Number.isFinite(el.duration)
-          ? el.duration
-          : el.currentTime + offset;
-        el.currentTime = Math.min(max, el.currentTime + offset);
-      });
-      mediaSession.setActionHandler("stop", () => {
-        const el = directAudioRef.current;
-        if (!el) return;
-        el.pause();
-        el.currentTime = 0;
-      });
-    } catch {
-      // Ignore unsupported Media Session handlers on older browsers
     }
 
     return () => {
-      try {
-        mediaSession.metadata = null;
-        mediaSession.setActionHandler("play", null);
-        mediaSession.setActionHandler("pause", null);
-        mediaSession.setActionHandler("seekbackward", null);
-        mediaSession.setActionHandler("seekforward", null);
-        mediaSession.setActionHandler("stop", null);
-      } catch {
-        // Ignore cleanup errors
-      }
+      clearMediaSession();
     };
-  }, [track.author, track.provider, track.title]);
+  }, [m.mediaSession.artist, track.author, track.provider, track.title]);
 
   // Sync Media Session playbackState
   useEffect(() => {
-    if (track.provider !== "DIRECT_AUDIO") return;
-    if (typeof navigator === "undefined" || !("mediaSession" in navigator)) {
-      return;
-    }
-    navigator.mediaSession.playbackState =
+    setMediaSessionPlaybackState(
       playbackState === "playing"
         ? "playing"
         : playbackState === "paused"
           ? "paused"
-          : "none";
-  }, [playbackState, track.provider]);
+          : "none"
+    );
+  }, [playbackState]);
 
   // Mount YouTube IFrame Player API into an unmanaged child node so YouTube's
   // in-place iframe replacement never conflicts with React's unmount reconciliation.
@@ -593,17 +669,20 @@ export function GuidedSessionPlayer({
   const handleSaveEarlyStop = useCallback(async () => {
     if (earlyStopElapsedSec === null) return;
     setIsSavingEarlyStop(true);
-    const saved = await saveMeditationSession({
-      mode: "TRACK",
-      trackId: track.id,
-      trackTitle: track.title,
-      trackProvider: track.provider,
-      actualDurationSec: earlyStopElapsedSec,
-      completed: false,
-      note: noteInput.trim() || null,
-      startedAt: sessionStartedAtRef.current ?? undefined,
-      endedAt: new Date().toISOString(),
-    });
+    const saved = await saveMeditationSession(
+      {
+        mode: "TRACK",
+        trackId: track.id,
+        trackTitle: track.title,
+        trackProvider: track.provider,
+        actualDurationSec: earlyStopElapsedSec,
+        completed: false,
+        note: noteInput.trim() || null,
+        startedAt: sessionStartedAtRef.current ?? undefined,
+        endedAt: new Date().toISOString(),
+      },
+      userId
+    );
     setIsSavingEarlyStop(false);
     if (saved) {
       onSessionSaved?.(saved);
@@ -617,6 +696,7 @@ export function GuidedSessionPlayer({
     track.id,
     track.provider,
     track.title,
+    userId,
   ]);
 
   const handleSaveCompletedNote = useCallback(async () => {
@@ -624,14 +704,15 @@ export function GuidedSessionPlayer({
     setIsSavingNote(true);
     const updated = await updateMeditationSessionNote(
       savedSessionId,
-      noteInput.trim() || null
+      noteInput.trim() || null,
+      userId
     );
     setIsSavingNote(false);
     if (updated) {
       setNoteSaved(true);
       onSessionUpdated?.(updated);
     }
-  }, [noteInput, onSessionUpdated, savedSessionId]);
+  }, [noteInput, onSessionUpdated, savedSessionId, userId]);
 
   const handleReplay = useCallback(() => {
     getAudioEngine().unlock();
@@ -839,12 +920,17 @@ export function GuidedSessionPlayer({
                 </div>
                 <audio
                   ref={directAudioRef}
-                  src={track.url}
+                  src={offlineBlobUrl ?? track.url}
                   controls
                   preload="metadata"
+                  onLoadedMetadata={syncDirectAudioPosition}
+                  onTimeUpdate={syncDirectAudioPosition}
                   onPlay={() => {
-                    getAudioEngine().unlock();
+                    getAudioEngine().unlock({
+                      bells: [closingBellSoundRef.current],
+                    });
                     markPlayingStart();
+                    syncDirectAudioPosition();
                     setEarlyStopElapsedSec(null);
                     setPlaybackState("playing");
                   }}
@@ -858,6 +944,48 @@ export function GuidedSessionPlayer({
                   onError={() => setPlayerErrorKey("direct_audio")}
                   className="w-full"
                 />
+
+                <div className="flex flex-col items-center gap-1.5">
+                  {offlineBlobUrl && !isOnline ? (
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-[var(--accent-soft)] px-3 py-1 text-[11px] font-medium text-[var(--accent)]">
+                      <CheckCircle2 className="h-3.5 w-3.5" />
+                      {m.guided.player.playingOffline}
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => void handleToggleOfflineSave()}
+                      disabled={isTogglingOffline || (!isOnline && !isSavedOffline)}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-black/8 bg-[var(--background)] px-3 py-1 text-[11px] font-medium text-[var(--foreground-muted)] transition-colors hover:text-[var(--foreground)] disabled:opacity-50 dark:border-white/10"
+                    >
+                      {isTogglingOffline ? (
+                        <>
+                          <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--accent)]" />
+                          {m.guided.downloadingOffline}
+                        </>
+                      ) : isSavedOffline && offlineMeta ? (
+                        <>
+                          <CheckCircle2 className="h-3.5 w-3.5 text-[var(--accent)]" />
+                          <span className="text-[var(--accent)]">
+                            {m.guided.player.savedOffline} ·{" "}
+                            {formatBytesLabel(offlineMeta.bytes)}
+                          </span>
+                        </>
+                      ) : (
+                        <>
+                          <Download className="h-3.5 w-3.5" />
+                          {m.guided.player.saveOffline}
+                        </>
+                      )}
+                    </button>
+                  )}
+
+                  {offlineError && (
+                    <p className="text-[11px] text-red-600 dark:text-red-400">
+                      {offlineError}
+                    </p>
+                  )}
+                </div>
               </div>
             )}
           </div>

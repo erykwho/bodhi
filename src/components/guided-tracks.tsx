@@ -1,10 +1,19 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import {
   Bell,
   BellOff,
   Check,
+  CheckCircle2,
+  Download,
   Headphones,
   Link2,
   Loader2,
@@ -24,6 +33,15 @@ import { GuidedSessionPlayer } from "@/components/guided-session-player";
 import { useI18n } from "@/components/i18n-provider";
 import type { SessionUserSummary } from "@/lib/auth";
 import type { MeditationSessionItem } from "@/lib/history/types";
+import {
+  cacheGuidedTrackList,
+  formatBytesLabel,
+  getOfflineGuidedServerSnapshot,
+  getOfflineGuidedSnapshot,
+  removeTrackAudioOffline,
+  saveTrackAudioOffline,
+  subscribeOfflineGuided,
+} from "@/lib/offline/audio-cache";
 import {
   SUGGESTED_TRACK_TAGS,
   normalizeTrackTags,
@@ -81,6 +99,14 @@ export function GuidedTracks({
   onReorderingChange,
 }: GuidedTracksProps) {
   const { m } = useI18n();
+  const userId = user?.id ?? null;
+  const isAuthenticated = Boolean(user);
+  const offlineGuided = useSyncExternalStore(
+    subscribeOfflineGuided,
+    getOfflineGuidedSnapshot,
+    getOfflineGuidedServerSnapshot
+  );
+
   const [tracks, setTracks] = useState<FavoriteTrackItem[]>(initialTracks);
   const [activeTrack, setActiveTrack] = useState<FavoriteTrackItem | null>(
     null
@@ -101,6 +127,9 @@ export function GuidedTracks({
   const [isResolving, setIsResolving] = useState<boolean>(false);
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [downloadingTrackId, setDownloadingTrackId] = useState<string | null>(
+    null
+  );
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // Inline track edit state
@@ -124,6 +153,12 @@ export function GuidedTracks({
     tracksRef.current = tracks;
   }, [tracks]);
 
+  // Cache track metadata locally when signed in & online so saved audio stays browsable offline
+  useEffect(() => {
+    if (!isOnline || !isAuthenticated) return;
+    cacheGuidedTrackList(tracks);
+  }, [isAuthenticated, isOnline, tracks]);
+
   useEffect(() => {
     onSessionActiveChange(activeTrack !== null);
   }, [activeTrack, onSessionActiveChange]);
@@ -131,6 +166,15 @@ export function GuidedTracks({
   useEffect(() => {
     onReorderingChange?.(draggingId !== null);
   }, [draggingId, onReorderingChange]);
+
+  const offlinePlayableTracks = useMemo(() => {
+    const source = tracks.length > 0 ? tracks : offlineGuided.tracks;
+    return source.filter(
+      (track) =>
+        track.provider === "DIRECT_AUDIO" &&
+        Boolean(offlineGuided.savedAudio[track.id])
+    );
+  }, [offlineGuided.savedAudio, offlineGuided.tracks, tracks]);
 
   const detectedProvider = parseTrackUrl(urlInput)?.provider ?? null;
 
@@ -374,6 +418,7 @@ export function GuidedTracks({
         }
 
         setTracks((prev) => prev.filter((item) => item.id !== id));
+        void removeTrackAudioOffline(id);
       } catch {
         setErrorMessage(m.guided.errDeleteTrack);
       } finally {
@@ -381,6 +426,28 @@ export function GuidedTracks({
       }
     },
     [m.guided.errDeleteTrack]
+  );
+
+  const handleToggleOfflineTrack = useCallback(
+    async (track: FavoriteTrackItem) => {
+      if (track.provider !== "DIRECT_AUDIO") return;
+      setErrorMessage(null);
+
+      if (offlineGuided.savedAudio[track.id]) {
+        await removeTrackAudioOffline(track.id);
+        return;
+      }
+
+      setDownloadingTrackId(track.id);
+      try {
+        await saveTrackAudioOffline(track, isAuthenticated);
+      } catch {
+        setErrorMessage(m.guided.errOfflineDownload);
+      } finally {
+        setDownloadingTrackId((prev) => (prev === track.id ? null : prev));
+      }
+    },
+    [isAuthenticated, m.guided.errOfflineDownload, offlineGuided.savedAudio]
   );
 
   const persistTrackOrder = useCallback(
@@ -667,7 +734,9 @@ export function GuidedTracks({
       <GuidedSessionPlayer
         track={activeTrack}
         closingBellEnabled={closingBellEnabled}
-        isAuthenticated={Boolean(user)}
+        isAuthenticated={isAuthenticated}
+        userId={userId}
+        isOnline={isOnline}
         onToggleClosingBell={() => setClosingBellEnabled((prev) => !prev)}
         onExit={() => setActiveTrack(null)}
         onSessionSaved={onSessionSaved}
@@ -677,6 +746,82 @@ export function GuidedTracks({
   }
 
   if (!isOnline) {
+    if (offlinePlayableTracks.length > 0) {
+      return (
+        <section className="flex flex-1 flex-col gap-3.5 py-1">
+          <div className="flex items-center justify-between gap-2 rounded-2xl border border-black/6 bg-[var(--surface)] px-3.5 py-2.5 dark:border-white/10">
+            <div className="flex min-w-0 items-center gap-2 text-xs text-[var(--foreground-muted)]">
+              <WifiOff className="h-3.5 w-3.5 shrink-0 text-[var(--warm-amber)]" />
+              <span className="truncate">{m.guided.offlineShowingSaved}</span>
+            </div>
+            {onSwitchToTimer && (
+              <button
+                type="button"
+                onClick={onSwitchToTimer}
+                className="inline-flex shrink-0 items-center gap-1 rounded-full bg-[var(--accent-soft)] px-2.5 py-1 text-[11px] font-medium text-[var(--accent)]"
+              >
+                <Timer className="h-3 w-3" />
+                {m.nav.timer}
+              </button>
+            )}
+          </div>
+
+          <ul className="flex flex-col gap-2.5">
+            {offlinePlayableTracks.map((track) => {
+              const meta = offlineGuided.savedAudio[track.id];
+              return (
+                <li
+                  key={track.id}
+                  className="flex items-center gap-2.5 rounded-2xl border border-black/6 bg-[var(--surface)] p-3 shadow-xs transition-colors hover:border-[var(--accent)]/35 dark:border-white/10"
+                >
+                  <button
+                    type="button"
+                    onClick={() => setActiveTrack(track)}
+                    className="flex min-w-0 flex-1 items-center gap-3 text-left"
+                  >
+                    <div className="relative flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-[var(--accent-soft)] text-[var(--accent)]">
+                      <Music2 className="h-5 w-5" />
+                      <span className="absolute inset-0 flex items-center justify-center bg-black/25 text-white">
+                        <Play className="h-4 w-4 fill-current" />
+                      </span>
+                    </div>
+
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium text-[var(--foreground)]">
+                        {track.title}
+                      </p>
+                      <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-[var(--foreground-muted)]">
+                        {meta && (
+                          <span className="inline-flex shrink-0 items-center gap-1 rounded-md bg-[var(--accent-soft)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--accent)]">
+                            <CheckCircle2 className="h-2.5 w-2.5" />
+                            {m.guided.savedOfflineBadge(
+                              formatBytesLabel(meta.bytes)
+                            )}
+                          </span>
+                        )}
+                        {track.author && (
+                          <span className="truncate">{track.author}</span>
+                        )}
+                      </div>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => void removeTrackAudioOffline(track.id)}
+                    aria-label={m.guided.removeOfflineAria(track.title)}
+                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-[var(--foreground-muted)] transition-colors hover:bg-red-500/10 hover:text-red-600 dark:hover:text-red-400"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      );
+    }
+
     return (
       <section className="flex flex-1 flex-col items-center justify-center py-6 text-center">
         <div className="w-full rounded-3xl border border-black/6 bg-[var(--surface)] p-6 shadow-xs dark:border-white/10">
@@ -1033,6 +1178,17 @@ export function GuidedTracks({
                           <span className="shrink-0 rounded-md bg-[var(--surface-muted)] px-1.5 py-0.5 text-[10px] font-medium">
                             {m.guided.providers[track.provider]}
                           </span>
+                          {track.provider === "DIRECT_AUDIO" &&
+                            offlineGuided.savedAudio[track.id] && (
+                              <span className="inline-flex shrink-0 items-center gap-1 rounded-md bg-[var(--accent-soft)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--accent)]">
+                                <CheckCircle2 className="h-2.5 w-2.5" />
+                                {m.guided.savedOfflineBadge(
+                                  formatBytesLabel(
+                                    offlineGuided.savedAudio[track.id].bytes
+                                  )
+                                )}
+                              </span>
+                            )}
                           {track.author && (
                             <span className="truncate">{track.author}</span>
                           )}
@@ -1056,6 +1212,41 @@ export function GuidedTracks({
                       data-no-drag="true"
                       className="flex shrink-0 items-center gap-0.5"
                     >
+                      {track.provider === "DIRECT_AUDIO" && (
+                        <button
+                          type="button"
+                          data-no-drag="true"
+                          onClick={() => void handleToggleOfflineTrack(track)}
+                          disabled={downloadingTrackId === track.id}
+                          aria-label={
+                            offlineGuided.savedAudio[track.id]
+                              ? m.guided.removeOfflineAria(track.title)
+                              : m.guided.saveOfflineAria(track.title)
+                          }
+                          title={
+                            downloadingTrackId === track.id
+                              ? m.guided.downloadingOffline
+                              : offlineGuided.savedAudio[track.id]
+                                ? m.guided.removeOfflineAria(track.title)
+                                : m.guided.saveOfflineAria(track.title)
+                          }
+                          className={cn(
+                            "flex h-8 w-8 items-center justify-center rounded-xl transition-colors disabled:opacity-50",
+                            offlineGuided.savedAudio[track.id]
+                              ? "text-[var(--accent)] hover:bg-[var(--accent-soft)]"
+                              : "text-[var(--foreground-muted)] hover:bg-[var(--surface-muted)] hover:text-[var(--foreground)]"
+                          )}
+                        >
+                          {downloadingTrackId === track.id ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : offlineGuided.savedAudio[track.id] ? (
+                            <CheckCircle2 className="h-3.5 w-3.5" />
+                          ) : (
+                            <Download className="h-3.5 w-3.5" />
+                          )}
+                        </button>
+                      )}
+
                       <button
                         type="button"
                         data-no-drag="true"

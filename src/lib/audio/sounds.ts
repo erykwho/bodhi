@@ -29,37 +29,43 @@ export const BELL_SOUNDS: readonly BellSoundOption[] = [
     id: "singing-bowl",
     name: "Singing Bowl",
     description: "Warm Tibetan harmonic bowl",
-    kind: "synth",
+    kind: "file",
+    src: "/audio/bells/singing-bowl.mp3",
   },
   {
     id: "tibetan-healing-bowl",
     name: "Tibetan Healing Bowl",
     description: "Deep hand-hammered resonant shimmer",
-    kind: "synth",
+    kind: "file",
+    src: "/audio/bells/tibetan-healing-bowl.mp3",
   },
   {
     id: "deep-gong",
     name: "Deep Gong",
     description: "Resonant low temple gong",
-    kind: "synth",
+    kind: "file",
+    src: "/audio/bells/deep-gong.mp3",
   },
   {
     id: "soft-chime",
     name: "Soft Chime",
     description: "Delicate metallic shimmer",
-    kind: "synth",
+    kind: "file",
+    src: "/audio/bells/soft-chime.mp3",
   },
   {
     id: "crystal-bowl",
     name: "Crystal Bowl",
     description: "Pure ethereal sustained tone",
-    kind: "synth",
+    kind: "file",
+    src: "/audio/bells/crystal-bowl.mp3",
   },
   {
     id: "wood-block",
     name: "Wood Block",
     description: "Crisp organic temple tap",
-    kind: "synth",
+    kind: "file",
+    src: "/audio/bells/wood-block.mp3",
   },
 ] as const;
 
@@ -83,7 +89,7 @@ export interface AmbientSoundOption {
   name: string;
   description: string;
   kind: AmbientSoundKind;
-  /** Optional relative audio asset path for future file-backed soundscapes. */
+  /** Optional relative audio asset path for file-backed acoustic soundscapes. */
   src?: string;
 }
 
@@ -116,13 +122,15 @@ export const AMBIENT_SOUNDS: readonly AmbientSoundOption[] = [
     id: "gentle-rain",
     name: "Gentle Rain",
     description: "Soft layered rainfall ambiance",
-    kind: "synth",
+    kind: "file",
+    src: "/audio/ambient/gentle-rain.mp3",
   },
   {
     id: "ocean-waves",
     name: "Ocean Waves",
     description: "Slow rhythmic surf swell",
-    kind: "synth",
+    kind: "file",
+    src: "/audio/ambient/ocean-waves.mp3",
   },
   {
     id: "warm-drone",

@@ -39,6 +39,10 @@ vi.mock("@/lib/tracks/oembed", () => ({
 
 import { GET, POST } from "@/app/api/tracks/route";
 import { DELETE, PATCH } from "@/app/api/tracks/[id]/route";
+import {
+  GET as AUDIO_GET,
+  isSafePublicAudioUrl,
+} from "@/app/api/tracks/[id]/audio/route";
 import { PATCH as REORDER_PATCH } from "@/app/api/tracks/reorder/route";
 import { POST as RESOLVE_POST } from "@/app/api/tracks/resolve/route";
 
@@ -294,6 +298,81 @@ describe("API /api/tracks/**", () => {
         })
       );
       expect(okRes.status).toBe(200);
+    });
+  });
+
+  describe("GET /api/tracks/[id]/audio (offline proxy)", () => {
+    it("blocks private, loopback, metadata, and non-HTTP URLs against SSRF", () => {
+      expect(isSafePublicAudioUrl("https://cdn.example.com/calm.mp3")).toBe(true);
+      expect(isSafePublicAudioUrl("http://localhost:3000/a.mp3")).toBe(false);
+      expect(isSafePublicAudioUrl("http://127.0.0.1/a.mp3")).toBe(false);
+      expect(isSafePublicAudioUrl("http://169.254.169.254/latest/meta-data")).toBe(false);
+      expect(isSafePublicAudioUrl("http://192.168.1.10/a.mp3")).toBe(false);
+      expect(isSafePublicAudioUrl("http://10.0.0.1/a.mp3")).toBe(false);
+      expect(isSafePublicAudioUrl("http://[::1]/a.mp3")).toBe(false);
+      expect(isSafePublicAudioUrl("file:///etc/passwd")).toBe(false);
+    });
+
+    it("returns 401 when unauthenticated", async () => {
+      requireUserMock.mockRejectedValueOnce(new Error("UNAUTHORIZED"));
+      const res = await AUDIO_GET(
+        new Request("http://localhost/api/tracks/t1/audio"),
+        { params: Promise.resolve({ id: "t1" }) }
+      );
+      expect(res.status).toBe(401);
+    });
+
+    it("returns 404 when track belongs to another user (zero IDOR)", async () => {
+      prismaMock.favoriteTrack.findFirst.mockResolvedValueOnce(null);
+      const res = await AUDIO_GET(
+        new Request("http://localhost/api/tracks/foreign/audio"),
+        { params: Promise.resolve({ id: "foreign" }) }
+      );
+      expect(res.status).toBe(404);
+      expect(prismaMock.favoriteTrack.findFirst).toHaveBeenCalledWith({
+        where: { id: "foreign", userId: USER_A.id },
+      });
+    });
+
+    it("returns 400 for non-DIRECT_AUDIO tracks", async () => {
+      prismaMock.favoriteTrack.findFirst.mockResolvedValueOnce({
+        id: "t-yt",
+        userId: USER_A.id,
+        provider: "YOUTUBE",
+        url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+      });
+      const res = await AUDIO_GET(
+        new Request("http://localhost/api/tracks/t-yt/audio"),
+        { params: Promise.resolve({ id: "t-yt" }) }
+      );
+      expect(res.status).toBe(400);
+    });
+
+    it("streams audio bytes with private no-store cache headers for valid DIRECT_AUDIO tracks", async () => {
+      prismaMock.favoriteTrack.findFirst.mockResolvedValueOnce({
+        id: "t-mp3",
+        userId: USER_A.id,
+        provider: "DIRECT_AUDIO",
+        url: "https://cdn.example.com/meditation.mp3",
+      });
+      const fetchSpy = vi
+        .spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(
+          new Response(new Uint8Array([1, 2, 3, 4]), {
+            status: 200,
+            headers: { "Content-Type": "audio/mpeg", "Content-Length": "4" },
+          })
+        );
+
+      const res = await AUDIO_GET(
+        new Request("http://localhost/api/tracks/t-mp3/audio"),
+        { params: Promise.resolve({ id: "t-mp3" }) }
+      );
+      expect(res.status).toBe(200);
+      expect(res.headers.get("Content-Type")).toBe("audio/mpeg");
+      expect(res.headers.get("Cache-Control")).toBe("private, no-store");
+      expect((await res.arrayBuffer()).byteLength).toBe(4);
+      fetchSpy.mockRestore();
     });
   });
 });

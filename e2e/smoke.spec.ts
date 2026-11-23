@@ -224,20 +224,29 @@ test.describe("Bodhi E2E Smoke Suite (Mobile PWA)", () => {
     const healthBody = (await healthRes.json()) as { status: string };
     expect(healthBody.status).toBe("ok");
 
-    // Verify bundled multi-sample nasal breath audio files are served cleanly for offline caching
-    for (const audioPath of [
-      "/audio/breath-inhale-short.mp3",
-      "/audio/breath-exhale-short.mp3",
-      "/audio/breath-inhale-medium.mp3",
-      "/audio/breath-exhale-medium.mp3",
-      "/audio/breath-inhale-long.mp3",
-      "/audio/breath-exhale-long.mp3",
-    ]) {
-      const audioRes = await request.get(audioPath);
+    // Verify all 14 bundled CC0 audio samples (breath, bells, nature loops) serve cleanly for offline caching
+    const expectedAudioAssets: Array<{ path: string; minBytes: number }> = [
+      { path: "/audio/breath-inhale-short.mp3", minBytes: 10_000 },
+      { path: "/audio/breath-exhale-short.mp3", minBytes: 10_000 },
+      { path: "/audio/breath-inhale-medium.mp3", minBytes: 10_000 },
+      { path: "/audio/breath-exhale-medium.mp3", minBytes: 10_000 },
+      { path: "/audio/breath-inhale-long.mp3", minBytes: 10_000 },
+      { path: "/audio/breath-exhale-long.mp3", minBytes: 10_000 },
+      { path: "/audio/bells/singing-bowl.mp3", minBytes: 10_000 },
+      { path: "/audio/bells/tibetan-healing-bowl.mp3", minBytes: 10_000 },
+      { path: "/audio/bells/deep-gong.mp3", minBytes: 10_000 },
+      { path: "/audio/bells/soft-chime.mp3", minBytes: 10_000 },
+      { path: "/audio/bells/crystal-bowl.mp3", minBytes: 10_000 },
+      { path: "/audio/bells/wood-block.mp3", minBytes: 4_000 },
+      { path: "/audio/ambient/gentle-rain.mp3", minBytes: 50_000 },
+      { path: "/audio/ambient/ocean-waves.mp3", minBytes: 50_000 },
+    ];
+    for (const asset of expectedAudioAssets) {
+      const audioRes = await request.get(asset.path);
       expect(audioRes.status()).toBe(200);
       expect(audioRes.headers()["content-type"]).toContain("audio/mpeg");
       const bytes = await audioRes.body();
-      expect(bytes.byteLength).toBeGreaterThan(10_000);
+      expect(bytes.byteLength).toBeGreaterThan(asset.minBytes);
     }
 
     await page.goto("/");
