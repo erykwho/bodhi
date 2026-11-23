@@ -11,12 +11,6 @@ type NavigatorWithAudioSession = Navigator & {
   };
 };
 
-type PitchPreservingAudioElement = HTMLAudioElement & {
-  preservesPitch?: boolean;
-  mozPreservesPitch?: boolean;
-  webkitPreservesPitch?: boolean;
-};
-
 type BreathSampleKind = "inhale" | "exhale";
 
 export type BreathDurationTier = "short" | "medium" | "long";
@@ -38,12 +32,20 @@ interface ActiveAmbientGraph {
   gainCeiling: number;
 }
 
+interface ActiveBreathBufferCue {
+  source: AudioBufferSourceNode;
+  masterGain: GainNode;
+  cleanupTimer: ReturnType<typeof setTimeout> | null;
+}
+
 const MULTI_STRIKE_SPACING_MS = 2100;
 
 /**
- * WebKit / iOS Safari guarantees pitch-preserved <audio> output within [0.5, 2.0].
- * With 3 duration-matched nasal breath samples (short ~1.25s, medium ~3.0s, long ~5.3s),
- * runtime playbackRate stays in the natural sweet spot [0.62x, 1.27x] across 1s–8s.
+ * With 3 duration-matched nasal breath samples centered at ~1.47s / ~3.70s / ~6.22s
+ * (pre-stretched offline with formant-preserving librubberband), Web Audio API
+ * AudioBufferSourceNode playbackRate stays in the natural [0.73x, 1.50x] range across
+ * 1s–8s (0.91x–0.94x on 4s Box, 1.12x–1.14x on 5.5s Coherent, 0.78x on 8s 4-7-8 exhale)
+ * while completely avoiding iOS Safari AVPlayer seek/preservesPitch silent bugs.
  */
 export const MIN_BREATH_PLAYBACK_RATE = 0.5;
 export const MAX_BREATH_PLAYBACK_RATE = 2.0;
@@ -55,39 +57,39 @@ export const BREATH_AUDIO_CATALOG: Record<
   inhale: {
     short: {
       src: "/audio/breath-inhale-short.mp3",
-      nominalDurationSec: 1.23,
+      nominalDurationSec: 1.45,
     },
     medium: {
       src: "/audio/breath-inhale-medium.mp3",
-      nominalDurationSec: 2.99,
+      nominalDurationSec: 3.66,
     },
     long: {
       src: "/audio/breath-inhale-long.mp3",
-      nominalDurationSec: 5.21,
+      nominalDurationSec: 6.18,
     },
   },
   exhale: {
     short: {
       src: "/audio/breath-exhale-short.mp3",
-      nominalDurationSec: 1.27,
+      nominalDurationSec: 1.49,
     },
     medium: {
       src: "/audio/breath-exhale-medium.mp3",
-      nominalDurationSec: 3.06,
+      nominalDurationSec: 3.74,
     },
     long: {
       src: "/audio/breath-exhale-long.mp3",
-      nominalDurationSec: 5.45,
+      nominalDurationSec: 6.27,
     },
   },
 };
 
 /**
  * Selects the closest natural breath sample tier for a phase duration so
- * pitch-preserved playbackRate stays close to 1.0x without sounding artificial:
- * - <= 2.2s: short nasal sample (giddster, ~1.25s)
- * - <= 4.5s: medium studio nasal sample (thomasXkiteXforXlife, ~3.0s)
- * - > 4.5s: long multi-take studio nasal sample (thomasXkiteXforXlife, ~5.3s)
+ * Web Audio playbackRate stays close to 1.0x without sounding artificial:
+ * - <= 2.2s: short nasal sample (giddster, ~1.47s)
+ * - <= 4.6s: medium studio nasal sample (thomasXkiteXforXlife, ~3.70s)
+ * - > 4.6s: long multi-take studio nasal sample (thomasXkiteXforXlife, ~6.22s)
  */
 export function selectBreathDurationTier(
   targetPhaseDurationSec: number
@@ -96,21 +98,21 @@ export function selectBreathDurationTier(
     return "medium";
   }
   if (targetPhaseDurationSec <= 2.2) return "short";
-  if (targetPhaseDurationSec <= 4.5) return "medium";
+  if (targetPhaseDurationSec <= 4.6) return "medium";
   return "long";
 }
 
 /**
  * Valid 50ms silent 8kHz mono PCM WAV played once on user gesture to switch
  * pre-iOS 16.4 Safari AVAudioSession from "ambient" to "playback" so Web Audio
- * bells and ambient loops remain audible even with the hardware Silent switch ON.
+ * bells, breath buffers, and ambient loops remain audible with the Silent switch ON.
  */
 const SILENT_UNLOCK_WAV_DATA_URI =
   "data:audio/wav;base64,UklGRrQBAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YZABAACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA";
 
 /**
- * Computes the pitch-preserved playbackRate required to span a breath sample
- * across `targetPhaseDurationSec`, safely clamped to WebKit's [0.5, 2.0] range.
+ * Computes the playbackRate required to span a breath sample across
+ * `targetPhaseDurationSec`, safely clamped to [0.5, 2.0].
  */
 export function computeBreathPlaybackRate(
   sampleDurationSec: number,
@@ -133,10 +135,11 @@ export function computeBreathPlaybackRate(
 }
 
 /**
- * Self-contained offline-first audio engine for meditation bells, ambient soundscapes
- * (Web Audio API), and multi-sample CC0 human nasal breath cues (pitch-preserving HTML5 Audio).
- * Configures iOS "playback" audio session so practice audio plays even when the
- * device's hardware Silent switch is enabled.
+ * Self-contained offline-first Web Audio API engine for meditation bells,
+ * ambient soundscapes, and decoded in-RAM multi-sample CC0 human nasal breath cues.
+ * Configures iOS "playback" audio session so all practice audio plays reliably
+ * even when the device's hardware Silent switch is enabled — without relying on
+ * HTML5 <audio> (AVPlayer) for recurring breathing phase playback.
  */
 export class MeditationAudioEngine {
   private ctx: AudioContext | null = null;
@@ -144,28 +147,10 @@ export class MeditationAudioEngine {
   private pinkNoiseBuffer: AudioBuffer | null = null;
   private brownNoiseBuffer: AudioBuffer | null = null;
   private ambientGraph: ActiveAmbientGraph | null = null;
-  private breathAudioElements: Record<
-    BreathSampleKind,
-    PitchPreservingAudioElement | null
-  > = {
-    inhale: null,
-    exhale: null,
-  };
-  private breathAudioTiers: Record<BreathSampleKind, BreathDurationTier> = {
-    inhale: "medium",
-    exhale: "medium",
-  };
-  private breathAudioPrimed: Record<BreathSampleKind, boolean> = {
-    inhale: false,
-    exhale: false,
-  };
-  private breathPlayTokens: Record<BreathSampleKind, number> = {
-    inhale: 0,
-    exhale: 0,
-  };
-  private activeBreathKind: BreathSampleKind | null = null;
-  private breathPhaseEndTimer: ReturnType<typeof setTimeout> | null = null;
-  private breathFadeInterval: ReturnType<typeof setInterval> | null = null;
+  private breathBuffers = new Map<string, AudioBuffer>();
+  private breathBufferLoads = new Map<string, Promise<AudioBuffer | null>>();
+  private activeBreathCue: ActiveBreathBufferCue | null = null;
+  private breathPlayToken = 0;
   private breathPreviewTimeout: ReturnType<typeof setTimeout> | null = null;
   private silentUnlockAudio: HTMLAudioElement | null = null;
   private silentSwitchUnlocked = false;
@@ -192,7 +177,7 @@ export class MeditationAudioEngine {
 
   /**
    * Plays a 50ms silent HTML5 <audio> clip once during a user gesture to nudge
-   * older iOS Safari versions into the "playback" AVAudioSession category.
+   * older iOS Safari / standalone PWA sessions into the "playback" AVAudioSession category.
    */
   private unlockSilentSwitchBridge(): void {
     if (this.silentSwitchUnlocked || typeof Audio === "undefined") return;
@@ -217,113 +202,87 @@ export class MeditationAudioEngine {
     }
   }
 
-  private getOrCreateBreathAudio(
-    kind: BreathSampleKind,
-    tier: BreathDurationTier
-  ): PitchPreservingAudioElement | null {
-    if (typeof Audio === "undefined") return null;
-
-    const spec = BREATH_AUDIO_CATALOG[kind][tier];
-    const existing = this.breathAudioElements[kind];
-    if (existing) {
-      if (this.breathAudioTiers[kind] !== tier) {
-        this.breathAudioTiers[kind] = tier;
-        existing.src = spec.src;
-        try {
-          existing.load();
-        } catch {
-          // Ignore in mocked/headless environments without load()
+  private decodeAudioBuffer(
+    ctx: AudioContext,
+    arrayBuffer: ArrayBuffer
+  ): Promise<AudioBuffer> {
+    // Copy buffer so repeated/fallback decode attempts never hit a detached ArrayBuffer
+    const copy = arrayBuffer.slice(0);
+    return new Promise<AudioBuffer>((resolve, reject) => {
+      try {
+        const maybePromise = ctx.decodeAudioData(
+          copy,
+          (decoded) => resolve(decoded),
+          (err) => reject(err)
+        );
+        if (maybePromise && typeof maybePromise.then === "function") {
+          void maybePromise.then(resolve, reject);
         }
+      } catch (err) {
+        reject(err);
       }
-      return existing;
-    }
-
-    const audio = new Audio(spec.src) as PitchPreservingAudioElement;
-    audio.preload = "auto";
-    audio.setAttribute("playsinline", "true");
-    this.applyPreservePitch(audio);
-    this.breathAudioElements[kind] = audio;
-    this.breathAudioTiers[kind] = tier;
-    return audio;
-  }
-
-  private applyPreservePitch(audio: PitchPreservingAudioElement): void {
-    try {
-      if ("preservesPitch" in audio) audio.preservesPitch = true;
-      if ("mozPreservesPitch" in audio) audio.mozPreservesPitch = true;
-      if ("webkitPreservesPitch" in audio) audio.webkitPreservesPitch = true;
-    } catch {
-      // Ignore if browser disallows vendor pitch property
-    }
+    });
   }
 
   /**
-   * Primes reusable inhale/exhale <audio> elements during a direct user gesture so
-   * subsequent timer-driven phase transitions play without iOS autoplay restrictions.
+   * Fetches and decodes a bundled breath MP3 into an in-memory Web Audio AudioBuffer
+   * (served straight from Service Worker cache when offline).
    */
-  private primeBreathAudioElements(options?: BreathUnlockOptions): void {
-    if (typeof Audio === "undefined") return;
+  private loadBreathBuffer(
+    ctx: AudioContext,
+    src: string
+  ): Promise<AudioBuffer | null> {
+    const cached = this.breathBuffers.get(src);
+    if (cached) return Promise.resolve(cached);
 
-    const targetTiers: Record<BreathSampleKind, BreathDurationTier> = {
-      inhale:
-        options?.inhaleSec !== undefined
-          ? selectBreathDurationTier(options.inhaleSec)
-          : this.breathAudioTiers.inhale,
-      exhale:
-        options?.exhaleSec !== undefined
-          ? selectBreathDurationTier(options.exhaleSec)
-          : this.breathAudioTiers.exhale,
-    };
+    const inflight = this.breathBufferLoads.get(src);
+    if (inflight) return inflight;
 
-    for (const kind of ["inhale", "exhale"] as const) {
-      const desiredTier = targetTiers[kind];
-      const tierChanged =
-        this.breathAudioElements[kind] !== null &&
-        this.breathAudioTiers[kind] !== desiredTier;
-
-      if (
-        (this.breathAudioPrimed[kind] && !tierChanged) ||
-        this.activeBreathKind === kind
-      ) {
-        continue;
-      }
-
-      const audio = this.getOrCreateBreathAudio(kind, desiredTier);
-      if (!audio) continue;
-
-      const token = ++this.breathPlayTokens[kind];
-      audio.muted = true;
-      try {
-        const playPromise = audio.play();
-        if (playPromise && typeof playPromise.then === "function") {
-          void playPromise
-            .then(() => {
-              this.breathAudioPrimed[kind] = true;
-              // Guard against racing with an immediate playBreathingCue() in the same tap
-              if (this.breathPlayTokens[kind] === token) {
-                audio.pause();
-                try {
-                  audio.currentTime = 0;
-                } catch {
-                  // Ignore if metadata not loaded yet
-                }
-                audio.muted = false;
-              }
-            })
-            .catch(() => {
-              if (this.breathPlayTokens[kind] === token) {
-                audio.muted = false;
-              }
-            });
-        } else {
-          this.breathAudioPrimed[kind] = true;
-          audio.pause();
-          audio.muted = false;
-        }
-      } catch {
-        audio.muted = false;
-      }
+    if (typeof fetch === "undefined") {
+      return Promise.resolve(null);
     }
+
+    const loadPromise = fetch(src)
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.arrayBuffer();
+      })
+      .then((buf) => this.decodeAudioBuffer(ctx, buf))
+      .then((decoded) => {
+        // Keep buffer only if engine wasn't disposed while decoding
+        if (this.ctx === ctx) {
+          this.breathBuffers.set(src, decoded);
+        }
+        return decoded;
+      })
+      .catch(() => {
+        this.breathBufferLoads.delete(src);
+        return null;
+      });
+
+    this.breathBufferLoads.set(src, loadPromise);
+    return loadPromise;
+  }
+
+  /**
+   * Preloads the inhale & exhale AudioBuffers for the active rhythm on user gesture
+   * so every phase transition plays from RAM with zero latency and zero AVPlayer glitches.
+   */
+  private preloadBreathBuffers(
+    ctx: AudioContext,
+    options?: BreathUnlockOptions
+  ): void {
+    const inhaleTier =
+      options?.inhaleSec !== undefined
+        ? selectBreathDurationTier(options.inhaleSec)
+        : "medium";
+    const exhaleTier =
+      options?.exhaleSec !== undefined
+        ? selectBreathDurationTier(options.exhaleSec)
+        : "medium";
+
+    void this.loadBreathBuffer(ctx, BREATH_AUDIO_CATALOG.inhale[inhaleTier].src);
+    void this.loadBreathBuffer(ctx, BREATH_AUDIO_CATALOG.exhale[exhaleTier].src);
   }
 
   private ensureContext(): AudioContext | null {
@@ -337,8 +296,18 @@ export class MeditationAudioEngine {
       this.ctx = new AudioCtx();
     }
 
-    if (this.ctx.state === "suspended") {
-      void this.ctx.resume();
+    // Resume both "suspended" and iOS Safari's proprietary "interrupted" state
+    if (this.ctx.state !== "running") {
+      try {
+        const res = this.ctx.resume();
+        if (res && typeof res.catch === "function") {
+          void res.catch(() => {
+            // Ignore autoplay restriction outside user gesture
+          });
+        }
+      } catch {
+        // Ignore if context is already closing
+      }
     }
 
     return this.ctx;
@@ -346,13 +315,15 @@ export class MeditationAudioEngine {
 
   /**
    * Unlocks the AudioContext, enables iOS "playback" audio session (Silent switch bypass),
-   * and primes breathing <audio> elements for the active session's phase durations.
+   * and preloads in-memory breath AudioBuffers for the active rhythm on a direct user gesture.
    */
   public unlock(breathTiming?: BreathUnlockOptions): void {
     this.configurePlaybackAudioSession();
-    this.ensureContext();
+    const ctx = this.ensureContext();
     this.unlockSilentSwitchBridge();
-    this.primeBreathAudioElements(breathTiming);
+    if (ctx && breathTiming) {
+      this.preloadBreathBuffers(ctx, breathTiming);
+    }
   }
 
   /**
@@ -434,52 +405,49 @@ export class MeditationAudioEngine {
   }
 
   /**
-   * Smoothly stops any currently playing breath cue or breath preview.
+   * Smoothly stops any currently playing breath cue or breath preview via Web Audio GainNode.
    */
   public stopBreathingCue(fadeSeconds: number = 0.2): void {
     if (this.breathPreviewTimeout) {
       clearTimeout(this.breathPreviewTimeout);
       this.breathPreviewTimeout = null;
     }
-    this.clearBreathTimers();
+    this.breathPlayToken += 1;
 
-    const kind = this.activeBreathKind;
-    if (!kind) return;
-    this.activeBreathKind = null;
+    const active = this.activeBreathCue;
+    if (!active) return;
+    this.activeBreathCue = null;
 
-    const audio = this.breathAudioElements[kind];
-    if (!audio) return;
+    if (active.cleanupTimer) {
+      clearTimeout(active.cleanupTimer);
+      active.cleanupTimer = null;
+    }
 
-    const token = ++this.breathPlayTokens[kind];
-    if (fadeSeconds <= 0 || audio.paused) {
-      this.stopBreathElementImmediate(audio);
+    const ctx = this.ctx;
+    if (!ctx || fadeSeconds <= 0) {
+      this.disposeBreathCueImmediate(active);
       return;
     }
 
-    const startVolume = audio.volume;
-    const steps = Math.max(3, Math.round((fadeSeconds * 1000) / 20));
-    const stepMs = Math.max(12, Math.round((fadeSeconds * 1000) / steps));
-    let currentStep = 0;
+    const now = ctx.currentTime;
+    const fade = Math.max(0.03, fadeSeconds);
+    try {
+      active.masterGain.gain.cancelScheduledValues(now);
+      active.masterGain.gain.setValueAtTime(
+        Math.max(0.0001, active.masterGain.gain.value),
+        now
+      );
+      active.masterGain.gain.exponentialRampToValueAtTime(0.0001, now + fade);
+      active.source.stop(now + fade + 0.02);
+    } catch {
+      this.disposeBreathCueImmediate(active);
+      return;
+    }
 
-    this.breathFadeInterval = setInterval(() => {
-      if (this.breathPlayTokens[kind] !== token) {
-        this.clearBreathFadeInterval();
-        return;
-      }
-
-      currentStep += 1;
-      const ratio = Math.max(0, 1 - currentStep / steps);
-      try {
-        audio.volume = startVolume * ratio;
-      } catch {
-        // Ignore on platforms where HTMLAudioElement.volume is read-only
-      }
-
-      if (currentStep >= steps) {
-        this.clearBreathFadeInterval();
-        this.stopBreathElementImmediate(audio);
-      }
-    }, stepMs);
+    setTimeout(
+      () => this.disposeBreathCueImmediate(active),
+      Math.ceil((fade + 0.08) * 1000)
+    );
   }
 
   /**
@@ -508,7 +476,8 @@ export class MeditationAudioEngine {
 
   /**
    * Plays an eyes-closed breathing phase cue spanning the full duration of
-   * inhale or exhale phases. Hold phases stay silent to preserve calm focus.
+   * inhale or exhale phases directly from decoded Web Audio RAM buffers.
+   * Hold phases stay silent to preserve calm focus.
    */
   public playBreathingCue(
     phase: BreathingPhase,
@@ -524,140 +493,152 @@ export class MeditationAudioEngine {
     const clampedVolume = Math.min(1, Math.max(0, volume));
     if (clampedVolume <= 0.001) return;
 
-    this.configurePlaybackAudioSession();
+    const ctx = this.ensureContext();
+    if (!ctx) return;
 
     if (cueMode === "chime") {
       this.playBellSound("soft-chime", clampedVolume * 0.45);
       return;
     }
 
-    // "tone": duration-matched CC0 human nasal breath sample scaled smoothly across the phase
     const kind: BreathSampleKind = phase === "inhale" ? "inhale" : "exhale";
     const targetDurationSec = Math.max(0.6, Math.min(12, durationSec));
     const tier = selectBreathDurationTier(targetDurationSec);
     const spec = BREATH_AUDIO_CATALOG[kind][tier];
-    const switchingSrc =
-      this.breathAudioElements[kind] !== null &&
-      this.breathAudioTiers[kind] !== tier;
-    const audio = this.getOrCreateBreathAudio(kind, tier);
-    if (!audio) return;
+    const token = ++this.breathPlayToken;
+    const triggeredAtMs = Date.now();
 
-    // Avoid reading stale `audio.duration` from a previously loaded tier while new src loads
-    const sampleDurationSec =
-      !switchingSrc && Number.isFinite(audio.duration) && audio.duration > 0.5
-        ? audio.duration
-        : spec.nominalDurationSec;
-    const playbackRate = computeBreathPlaybackRate(
-      sampleDurationSec,
-      targetDurationSec
-    );
-
-    const token = ++this.breathPlayTokens[kind];
-    this.activeBreathKind = kind;
-    this.clearBreathTimers();
-
-    this.applyPreservePitch(audio);
-    audio.muted = false;
-    try {
-      audio.volume = clampedVolume;
-    } catch {
-      // iOS Safari exposes read-only HTMLAudioElement.volume (hardware volume controls output)
-    }
-    try {
-      audio.playbackRate = playbackRate;
-    } catch {
-      // Fallback to default 1x rate if browser rejects rate change before metadata loads
-    }
-    try {
-      audio.currentTime = 0;
-    } catch {
-      // Ignore if media is still initializing
-    }
-
-    try {
-      const playPromise = audio.play();
-      if (playPromise && typeof playPromise.then === "function") {
-        void playPromise
-          .then(() => {
-            this.breathAudioPrimed[kind] = true;
-            if (this.breathPlayTokens[kind] !== token) return;
-            // Re-apply exact rate once real audio.duration metadata is guaranteed ready
-            if (Number.isFinite(audio.duration) && audio.duration > 0.5) {
-              const refinedRate = computeBreathPlaybackRate(
-                audio.duration,
-                targetDurationSec
-              );
-              if (Math.abs(audio.playbackRate - refinedRate) > 0.02) {
-                try {
-                  audio.playbackRate = refinedRate;
-                } catch {
-                  // Ignore
-                }
-              }
-            }
-          })
-          .catch(() => {
-            // Gracefully ignore autoplay or headless browser playback rejections
-            if (
-              this.activeBreathKind === kind &&
-              this.breathPlayTokens[kind] === token
-            ) {
-              this.activeBreathKind = null;
-            }
-          });
-      }
-    } catch {
-      this.activeBreathKind = null;
+    const cached = this.breathBuffers.get(spec.src);
+    if (cached) {
+      this.startBreathBufferNode(
+        ctx,
+        cached,
+        targetDurationSec,
+        clampedVolume,
+        0,
+        token
+      );
       return;
     }
 
-    // Ensure short or slightly longer clips always finish cleanly on phase boundary
-    const fadeOutSec = Math.min(0.16, targetDurationSec * 0.25);
-    const fadeStartMs = Math.max(
-      120,
-      Math.round((targetDurationSec - fadeOutSec) * 1000)
-    );
-    this.breathPhaseEndTimer = setTimeout(() => {
-      this.breathPhaseEndTimer = null;
-      if (
-        this.activeBreathKind === kind &&
-        this.breathPlayTokens[kind] === token
-      ) {
-        this.stopBreathingCue(fadeOutSec);
+    // First-ever play before decode completes (~15-30ms from SW cache): decode & sync to elapsed time
+    void this.loadBreathBuffer(ctx, spec.src).then((decoded) => {
+      if (!decoded || this.breathPlayToken !== token || this.ctx !== ctx) {
+        return;
       }
-    }, fadeStartMs);
+      const elapsedSec = Math.max(0, (Date.now() - triggeredAtMs) / 1000);
+      if (targetDurationSec - elapsedSec < 0.25) return;
+      this.startBreathBufferNode(
+        ctx,
+        decoded,
+        targetDurationSec,
+        clampedVolume,
+        elapsedSec,
+        token
+      );
+    });
   }
 
-  private clearBreathFadeInterval(): void {
-    if (this.breathFadeInterval) {
-      clearInterval(this.breathFadeInterval);
-      this.breathFadeInterval = null;
+  private startBreathBufferNode(
+    ctx: AudioContext,
+    buffer: AudioBuffer,
+    targetDurationSec: number,
+    volume: number,
+    elapsedSec: number,
+    token: number
+  ): void {
+    if (this.breathPlayToken !== token) return;
+    if (ctx.state !== "running") {
+      try {
+        const res = ctx.resume();
+        if (res && typeof res.catch === "function") {
+          void res.catch(() => {});
+        }
+      } catch {
+        // Ignore
+      }
     }
+
+    const playbackRate = computeBreathPlaybackRate(
+      buffer.duration,
+      targetDurationSec
+    );
+    const offsetSec = Math.min(
+      Math.max(0, elapsedSec * playbackRate),
+      Math.max(0, buffer.duration - 0.1)
+    );
+    const remainingPhaseSec = Math.max(0.15, targetDurationSec - elapsedSec);
+    const naturalRemainingSec = Math.max(
+      0.1,
+      (buffer.duration - offsetSec) / playbackRate
+    );
+    const playSec = Math.min(remainingPhaseSec, naturalRemainingSec);
+
+    const now = ctx.currentTime;
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+    source.playbackRate.setValueAtTime(playbackRate, now);
+
+    const masterGain = ctx.createGain();
+    const targetGain = Math.pow(volume, 1.15) * 1.15;
+    const fadeInSec = Math.min(0.05, playSec * 0.2);
+    const fadeOutSec = Math.min(0.18, playSec * 0.3);
+    const holdUntilSec = Math.max(fadeInSec, playSec - fadeOutSec);
+
+    masterGain.gain.setValueAtTime(0.0001, now);
+    masterGain.gain.linearRampToValueAtTime(targetGain, now + fadeInSec);
+    masterGain.gain.setValueAtTime(targetGain, now + holdUntilSec);
+    masterGain.gain.exponentialRampToValueAtTime(0.0001, now + playSec);
+
+    source.connect(masterGain);
+    masterGain.connect(ctx.destination);
+
+    const cue: ActiveBreathBufferCue = {
+      source,
+      masterGain,
+      cleanupTimer: null,
+    };
+
+    source.onended = () => {
+      if (cue.cleanupTimer) {
+        clearTimeout(cue.cleanupTimer);
+        cue.cleanupTimer = null;
+      }
+      if (this.activeBreathCue === cue) {
+        this.activeBreathCue = null;
+      }
+      this.disposeBreathCueImmediate(cue);
+    };
+
+    cue.cleanupTimer = setTimeout(() => {
+      cue.cleanupTimer = null;
+      if (this.activeBreathCue === cue) {
+        this.activeBreathCue = null;
+      }
+      this.disposeBreathCueImmediate(cue);
+    }, Math.ceil((playSec + 0.25) * 1000));
+
+    this.activeBreathCue = cue;
+    source.start(now, offsetSec);
+    source.stop(now + playSec + 0.04);
   }
 
-  private clearBreathTimers(): void {
-    this.clearBreathFadeInterval();
-    if (this.breathPhaseEndTimer) {
-      clearTimeout(this.breathPhaseEndTimer);
-      this.breathPhaseEndTimer = null;
-    }
-  }
-
-  private stopBreathElementImmediate(audio: PitchPreservingAudioElement): void {
+  private disposeBreathCueImmediate(cue: ActiveBreathBufferCue): void {
     try {
-      audio.pause();
+      cue.source.onended = null;
+      cue.source.stop();
     } catch {
-      // Ignore
+      // Ignore if already stopped
     }
     try {
-      audio.currentTime = 0;
+      cue.source.disconnect();
     } catch {
-      // Ignore
+      // Ignore if already disconnected
     }
     try {
-      audio.volume = 1;
+      cue.masterGain.disconnect();
     } catch {
-      // Ignore
+      // Ignore if already disconnected
     }
   }
 
@@ -1444,14 +1425,8 @@ export class MeditationAudioEngine {
     this.clearPreviewTimer();
     this.cancelBellStrikes();
     this.stopBreathingCue(0);
-    for (const kind of ["inhale", "exhale"] as const) {
-      const audio = this.breathAudioElements[kind];
-      if (audio) {
-        this.stopBreathElementImmediate(audio);
-        this.breathAudioElements[kind] = null;
-      }
-      this.breathAudioPrimed[kind] = false;
-    }
+    this.breathBuffers.clear();
+    this.breathBufferLoads.clear();
     if (this.silentUnlockAudio) {
       try {
         this.silentUnlockAudio.pause();
