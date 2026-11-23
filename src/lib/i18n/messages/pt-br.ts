@@ -213,7 +213,8 @@ export const ptBrMessages: Messages = {
     },
     offlineTitle: "Você está offline",
     offlineBody:
-      "Faixas guiadas do YouTube e SoundCloud precisam de internet. Seu Timer de Meditação funciona 100% offline.",
+      "Faixas do YouTube e SoundCloud precisam de internet. Salve faixas de áudio direto (.mp3/.m4a) offline ou use o Timer de Meditação quando quiser.",
+    offlineShowingSaved: "Offline · Exibindo faixas salvas neste dispositivo",
     openTimer: "Abrir Timer de Meditação",
     signedOutTitle: "Faixas Guiadas Favoritas",
     signedOutBody:
@@ -237,6 +238,11 @@ export const ptBrMessages: Messages = {
     noTagMatchBody: "Escolha outra tag ou toque em Todos para ver tudo.",
     holdAndDrag: "Segure e arraste para reordenar",
     editTrackTitlePlaceholder: "Título da faixa",
+    saveOfflineAria: (title: string) => `Salvar ${title} para ouvir offline`,
+    removeOfflineAria: (title: string) => `Remover download offline de ${title}`,
+    savedOfflineBadge: (size: string) => `Offline · ${size}`,
+    downloadingOffline: "Baixando...",
+    errOfflineDownload: "Não foi possível salvar este áudio offline.",
     errInvalidUrl:
       "Cole um link válido do YouTube, SoundCloud ou áudio direto (.mp3/.m4a).",
     errFetchMetadata: "Não foi possível obter os dados da faixa.",
@@ -272,7 +278,16 @@ export const ptBrMessages: Messages = {
       bellLabel: "Sino",
       dim: "Escurecer",
       source: "Origem",
+      playingOffline: "Tocando offline",
+      saveOffline: "Salvar offline",
+      savedOffline: "Salvo offline",
     },
+  },
+  mediaSession: {
+    timerTitle: (durationLabel: string) => `Meditação · ${durationLabel}`,
+    openTimerTitle: "Meditação Livre",
+    breathingTitle: (pattern: string) => `Respiração Guiada · ${pattern}`,
+    artist: "Bodhi",
   },
   history: {
     signedOutTitle: "Histórico de Meditação",

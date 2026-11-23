@@ -1,4 +1,5 @@
-const CACHE_NAME = "bodhi-offline-v5";
+const CACHE_NAME = "bodhi-offline-v6";
+const USER_AUDIO_CACHE_NAME = "bodhi-user-audio-v1";
 
 const PRECACHE_URLS = [
   "/",
@@ -13,6 +14,14 @@ const PRECACHE_URLS = [
   "/audio/breath-exhale-medium.mp3",
   "/audio/breath-inhale-long.mp3",
   "/audio/breath-exhale-long.mp3",
+  "/audio/bells/singing-bowl.mp3",
+  "/audio/bells/tibetan-healing-bowl.mp3",
+  "/audio/bells/deep-gong.mp3",
+  "/audio/bells/soft-chime.mp3",
+  "/audio/bells/crystal-bowl.mp3",
+  "/audio/bells/wood-block.mp3",
+  "/audio/ambient/gentle-rain.mp3",
+  "/audio/ambient/ocean-waves.mp3",
 ];
 
 async function respondWithRangeSupport(request, fullResponse) {
@@ -71,7 +80,12 @@ self.addEventListener("activate", (event) => {
       .then((keys) =>
         Promise.all(
           keys
-            .filter((key) => key.startsWith("bodhi-") && key !== CACHE_NAME)
+            .filter(
+              (key) =>
+                key.startsWith("bodhi-") &&
+                key !== CACHE_NAME &&
+                key !== USER_AUDIO_CACHE_NAME
+            )
             .map((key) => caches.delete(key))
         )
       )

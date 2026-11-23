@@ -74,6 +74,7 @@ describe("computeBreathPlaybackRate", () => {
 
 interface MockSourceNode {
   buffer: AudioBuffer | null;
+  loop: boolean;
   playbackRate: { setValueAtTime: ReturnType<typeof vi.fn> };
   onended: (() => void) | null;
   connect: ReturnType<typeof vi.fn>;
@@ -84,9 +85,11 @@ interface MockSourceNode {
 
 function createFakeAudioContext(initialState: string = "running") {
   const createdSources: MockSourceNode[] = [];
+  const createdOscillators: Array<{ start: ReturnType<typeof vi.fn>; stop: ReturnType<typeof vi.fn> }> = [];
   const ctx = {
     state: initialState,
     currentTime: 10,
+    sampleRate: 44100,
     destination: {},
     resume: vi.fn(() => {
       ctx.state = "running";
@@ -99,9 +102,17 @@ function createFakeAudioContext(initialState: string = "running") {
       const duration = view[0] || 3.66;
       return Promise.resolve({ duration } as AudioBuffer);
     }),
+    createBuffer: vi.fn((channels: number, length: number, sampleRate: number) => ({
+      numberOfChannels: channels,
+      length,
+      sampleRate,
+      duration: length / sampleRate,
+      getChannelData: () => new Float32Array(length),
+    })),
     createBufferSource: vi.fn(() => {
       const node: MockSourceNode = {
         buffer: null,
+        loop: false,
         playbackRate: { setValueAtTime: vi.fn() },
         onended: null,
         connect: vi.fn(),
@@ -112,10 +123,33 @@ function createFakeAudioContext(initialState: string = "running") {
       createdSources.push(node);
       return node;
     }),
+    createOscillator: vi.fn(() => {
+      const osc = {
+        type: "sine",
+        frequency: {
+          setValueAtTime: vi.fn(),
+          exponentialRampToValueAtTime: vi.fn(),
+        },
+        connect: vi.fn(),
+        disconnect: vi.fn(),
+        start: vi.fn(),
+        stop: vi.fn(),
+      };
+      createdOscillators.push(osc);
+      return osc;
+    }),
+    createBiquadFilter: vi.fn(() => ({
+      type: "lowpass",
+      frequency: { setValueAtTime: vi.fn() },
+      Q: { setValueAtTime: vi.fn() },
+      connect: vi.fn(),
+      disconnect: vi.fn(),
+    })),
     createGain: vi.fn(() => ({
       gain: {
         value: 1,
         setValueAtTime: vi.fn(),
+        setTargetAtTime: vi.fn(),
         linearRampToValueAtTime: vi.fn(),
         exponentialRampToValueAtTime: vi.fn(),
         cancelScheduledValues: vi.fn(),
@@ -124,7 +158,7 @@ function createFakeAudioContext(initialState: string = "running") {
       disconnect: vi.fn(),
     })),
   };
-  return { ctx, createdSources };
+  return { ctx, createdSources, createdOscillators };
 }
 
 function makeDurationBuffer(durationSec: number): ArrayBuffer {
@@ -285,6 +319,94 @@ describe("MeditationAudioEngine Web Audio breath buffers & iOS resilience", () =
       expect.closeTo(1.45 / 1.5, 3),
       10
     );
+
+    engine.dispose();
+  });
+
+  it("plays cached acoustic bell buffers from RAM and falls back to synth while preloading", async () => {
+    const { ctx, createdSources, createdOscillators } =
+      createFakeAudioContext("running");
+    (globalThis as unknown as { window: Record<string, unknown> }).window = {
+      AudioContext: vi.fn(function () {
+        return ctx;
+      }),
+    };
+
+    const fetchSpy = vi.fn(() =>
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        arrayBuffer: () => Promise.resolve(makeDurationBuffer(8.5)),
+      } as Response)
+    );
+    globalThis.fetch = fetchSpy as typeof fetch;
+
+    const engine = new MeditationAudioEngine();
+
+    // First uncached hit: falls back seamlessly to synthesis while preloading MP3
+    engine.playBellSound("singing-bowl", 0.85);
+    expect(createdOscillators.length).toBeGreaterThan(0);
+    expect(fetchSpy).toHaveBeenCalledWith("/audio/bells/singing-bowl.mp3");
+
+    // Wait for async decode to finish
+    await new Promise((r) => setTimeout(r, 0));
+
+    // Subsequent strike plays directly from cached RAM AudioBuffer with zero extra fetch
+    const oscCountBefore = createdOscillators.length;
+    const fetchCountBefore = fetchSpy.mock.calls.length;
+    engine.playBellSound("singing-bowl", 0.85);
+    expect(fetchSpy.mock.calls.length).toBe(fetchCountBefore);
+    expect(createdOscillators.length).toBe(oscCountBefore);
+    expect(createdSources).toHaveLength(1);
+    expect(createdSources[0]?.buffer?.duration).toBe(8.5);
+    expect(createdSources[0]?.start).toHaveBeenCalledWith(10);
+
+    engine.dispose();
+  });
+
+  it("preloads and loops cached nature ambient samples and crossfades on first uncached start", async () => {
+    const { ctx, createdSources } = createFakeAudioContext("running");
+    (globalThis as unknown as { window: Record<string, unknown> }).window = {
+      AudioContext: vi.fn(function () {
+        return ctx;
+      }),
+    };
+
+    const fetchSpy = vi.fn(() =>
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        arrayBuffer: () => Promise.resolve(makeDurationBuffer(16.0)),
+      } as Response)
+    );
+    globalThis.fetch = fetchSpy as typeof fetch;
+
+    const engine = new MeditationAudioEngine();
+
+    // Preload gentle-rain via unlock()
+    engine.unlock({
+      bells: ["singing-bowl", "deep-gong"],
+      ambientSound: "gentle-rain",
+    });
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(fetchSpy).toHaveBeenCalledWith("/audio/bells/singing-bowl.mp3");
+    expect(fetchSpy).toHaveBeenCalledWith("/audio/bells/deep-gong.mp3");
+    expect(fetchSpy).toHaveBeenCalledWith("/audio/ambient/gentle-rain.mp3");
+
+    // Starting gentle-rain uses the decoded stereo loop directly
+    engine.startAmbient("gentle-rain", 0.4, 0.8);
+    expect(createdSources).toHaveLength(1);
+    expect(createdSources[0]?.loop).toBe(true);
+    expect(createdSources[0]?.buffer?.duration).toBe(16.0);
+
+    // Starting uncached ocean-waves plays synth fallback immediately then upgrades to file loop
+    engine.startAmbient("ocean-waves", 0.4, 0.8);
+    expect(fetchSpy).toHaveBeenCalledWith("/audio/ambient/ocean-waves.mp3");
+    await new Promise((r) => setTimeout(r, 0));
+    const latestSource = createdSources[createdSources.length - 1];
+    expect(latestSource?.loop).toBe(true);
+    expect(latestSource?.buffer?.duration).toBe(16.0);
 
     engine.dispose();
   });

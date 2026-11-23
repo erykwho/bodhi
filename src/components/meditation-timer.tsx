@@ -47,6 +47,13 @@ import {
 } from "@/lib/history/stats";
 import type { MeditationSessionItem } from "@/lib/history/types";
 import {
+  clearMediaSession,
+  setMediaSessionActionHandlers,
+  setMediaSessionMetadata,
+  setMediaSessionPlaybackState,
+  setMediaSessionPositionState,
+} from "@/lib/media-session";
+import {
   clampDurationMinutes,
   clampIntervalMinutes,
   computeElapsedMs,
@@ -370,7 +377,7 @@ export function MeditationTimer({
   const handlePreviewBell = useCallback(
     (soundId: BellSoundId) => {
       const audio = getAudioEngine();
-      audio.unlock();
+      audio.unlock({ bells: [soundId] });
       audio.playBellSound(soundId, bellVolume);
     },
     [bellVolume, getAudioEngine]
@@ -379,7 +386,7 @@ export function MeditationTimer({
   const handleTogglePreview = useCallback(
     (soundId: AmbientSoundId) => {
       const audio = getAudioEngine();
-      audio.unlock();
+      audio.unlock({ ambientSound: soundId });
 
       if (previewingSoundId === soundId) {
         audio.stopPreview();
@@ -436,7 +443,10 @@ export function MeditationTimer({
 
   const handleStart = useCallback(() => {
     const audio = getAudioEngine();
-    audio.unlock();
+    audio.unlock({
+      bells: [startBell, endBell, ...(intervalEnabled ? [intervalBell] : [])],
+      ambientSound: selectedSound,
+    });
     audio.cancelBellStrikes();
     stopPreview();
     setActiveSoundSheet(null);
@@ -477,7 +487,10 @@ export function MeditationTimer({
   }, [
     ambientVolume,
     bellVolume,
+    endBell,
     getAudioEngine,
+    intervalBell,
+    intervalEnabled,
     openEnded,
     selectedSound,
     startBell,
@@ -512,7 +525,10 @@ export function MeditationTimer({
   const handleResume = useCallback(() => {
     if (phase !== "paused") return;
     const audio = getAudioEngine();
-    audio.unlock();
+    audio.unlock({
+      bells: [endBell, ...(intervalEnabled ? [intervalBell] : [])],
+      ambientSound: selectedSound,
+    });
     audio.cancelBellStrikes();
     setEarlyStopElapsedSec(null);
 
@@ -532,7 +548,10 @@ export function MeditationTimer({
     }
   }, [
     ambientVolume,
+    endBell,
     getAudioEngine,
+    intervalBell,
+    intervalEnabled,
     isAmbientMuted,
     openEnded,
     pausedFromPhase,
@@ -643,6 +662,69 @@ export function MeditationTimer({
     resetToIdle,
     totalSessionMs,
   ]);
+
+  // Unified Media Session API for Timer and Open-Ended sessions
+  const isTimerSessionOpen =
+    !isBreathingMode &&
+    (phase === "warmup" || phase === "running" || phase === "paused");
+  const timedPositionSec =
+    isTimerSessionOpen && !openEnded && phase !== "warmup"
+      ? Math.floor(computeElapsedMs(totalSessionMs, remainingMs) / 1000)
+      : -1;
+
+  useEffect(() => {
+    if (isBreathingMode) return;
+    if (!isTimerSessionOpen) {
+      clearMediaSession();
+      return;
+    }
+
+    setMediaSessionMetadata({
+      title: openEnded
+        ? m.mediaSession.openTimerTitle
+        : m.mediaSession.timerTitle(formatDurationLabel(durationMinutes)),
+      artist:
+        selectedSound !== "silence"
+          ? m.sounds.ambient[selectedSound]
+          : m.mediaSession.artist,
+      album: "Bodhi",
+    });
+    setMediaSessionPlaybackState(phase === "paused" ? "paused" : "playing");
+    setMediaSessionActionHandlers({
+      onPlay: handleResume,
+      onPause: handlePause,
+      onStop: handleFinish,
+    });
+
+    return () => {
+      clearMediaSession();
+    };
+  }, [
+    durationMinutes,
+    handleFinish,
+    handlePause,
+    handleResume,
+    isBreathingMode,
+    isTimerSessionOpen,
+    m.mediaSession,
+    m.sounds.ambient,
+    openEnded,
+    phase,
+    selectedSound,
+  ]);
+
+  useEffect(() => {
+    if (!isTimerSessionOpen) return;
+    if (openEnded || timedPositionSec < 0) {
+      setMediaSessionPositionState(null);
+      return;
+    }
+    setMediaSessionPositionState({
+      duration: Math.round(totalSessionMs / 1000),
+      position: timedPositionSec,
+      playbackRate: 1,
+    });
+  }, [isTimerSessionOpen, openEnded, timedPositionSec, totalSessionMs]);
 
   const handleSaveEarlyStop = useCallback(async () => {
     if (earlyStopElapsedSec === null) return;

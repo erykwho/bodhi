@@ -1,4 +1,9 @@
-import type { AmbientSoundId, BellSoundId } from "@/lib/audio/sounds";
+import {
+  getAmbientSoundOption,
+  getBellSoundOption,
+  type AmbientSoundId,
+  type BellSoundId,
+} from "@/lib/audio/sounds";
 import type { BreathingCueMode, BreathingPhase } from "@/lib/breathing/types";
 
 type WebkitWindow = Window & {
@@ -18,6 +23,11 @@ export type BreathDurationTier = "short" | "medium" | "long";
 export interface BreathUnlockOptions {
   inhaleSec?: number;
   exhaleSec?: number;
+}
+
+export interface AudioUnlockOptions extends BreathUnlockOptions {
+  bells?: BellSoundId[];
+  ambientSound?: AmbientSoundId;
 }
 
 interface BreathSampleSpec {
@@ -147,8 +157,10 @@ export class MeditationAudioEngine {
   private pinkNoiseBuffer: AudioBuffer | null = null;
   private brownNoiseBuffer: AudioBuffer | null = null;
   private ambientGraph: ActiveAmbientGraph | null = null;
-  private breathBuffers = new Map<string, AudioBuffer>();
-  private breathBufferLoads = new Map<string, Promise<AudioBuffer | null>>();
+  private ambientPlayToken = 0;
+  private ambientVolume = 0.35;
+  private audioBuffers = new Map<string, AudioBuffer>();
+  private audioBufferLoads = new Map<string, Promise<AudioBuffer | null>>();
   private activeBreathCue: ActiveBreathBufferCue | null = null;
   private breathPlayToken = 0;
   private breathPreviewTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -225,17 +237,17 @@ export class MeditationAudioEngine {
   }
 
   /**
-   * Fetches and decodes a bundled breath MP3 into an in-memory Web Audio AudioBuffer
-   * (served straight from Service Worker cache when offline).
+   * Fetches and decodes a bundled MP3 sample (bell, nature ambient, or breath cue)
+   * into an in-memory Web Audio AudioBuffer (served from Service Worker cache offline).
    */
-  private loadBreathBuffer(
+  private loadAudioBuffer(
     ctx: AudioContext,
     src: string
   ): Promise<AudioBuffer | null> {
-    const cached = this.breathBuffers.get(src);
+    const cached = this.audioBuffers.get(src);
     if (cached) return Promise.resolve(cached);
 
-    const inflight = this.breathBufferLoads.get(src);
+    const inflight = this.audioBufferLoads.get(src);
     if (inflight) return inflight;
 
     if (typeof fetch === "undefined") {
@@ -251,16 +263,16 @@ export class MeditationAudioEngine {
       .then((decoded) => {
         // Keep buffer only if engine wasn't disposed while decoding
         if (this.ctx === ctx) {
-          this.breathBuffers.set(src, decoded);
+          this.audioBuffers.set(src, decoded);
         }
         return decoded;
       })
       .catch(() => {
-        this.breathBufferLoads.delete(src);
+        this.audioBufferLoads.delete(src);
         return null;
       });
 
-    this.breathBufferLoads.set(src, loadPromise);
+    this.audioBufferLoads.set(src, loadPromise);
     return loadPromise;
   }
 
@@ -281,8 +293,29 @@ export class MeditationAudioEngine {
         ? selectBreathDurationTier(options.exhaleSec)
         : "medium";
 
-    void this.loadBreathBuffer(ctx, BREATH_AUDIO_CATALOG.inhale[inhaleTier].src);
-    void this.loadBreathBuffer(ctx, BREATH_AUDIO_CATALOG.exhale[exhaleTier].src);
+    void this.loadAudioBuffer(ctx, BREATH_AUDIO_CATALOG.inhale[inhaleTier].src);
+    void this.loadAudioBuffer(ctx, BREATH_AUDIO_CATALOG.exhale[exhaleTier].src);
+  }
+
+  private preloadBellBuffers(ctx: AudioContext, bells: BellSoundId[]): void {
+    const seen = new Set<string>();
+    for (const id of bells) {
+      const option = getBellSoundOption(id);
+      if (option.kind === "file" && option.src && !seen.has(option.src)) {
+        seen.add(option.src);
+        void this.loadAudioBuffer(ctx, option.src);
+      }
+    }
+  }
+
+  private preloadAmbientBuffer(
+    ctx: AudioContext,
+    ambientSound: AmbientSoundId
+  ): void {
+    const option = getAmbientSoundOption(ambientSound);
+    if (option.kind === "file" && option.src) {
+      void this.loadAudioBuffer(ctx, option.src);
+    }
   }
 
   private ensureContext(): AudioContext | null {
@@ -315,14 +348,22 @@ export class MeditationAudioEngine {
 
   /**
    * Unlocks the AudioContext, enables iOS "playback" audio session (Silent switch bypass),
-   * and preloads in-memory breath AudioBuffers for the active rhythm on a direct user gesture.
+   * and preloads in-memory AudioBuffers for active breathing cues, bells, and nature ambients.
    */
-  public unlock(breathTiming?: BreathUnlockOptions): void {
+  public unlock(options?: AudioUnlockOptions): void {
     this.configurePlaybackAudioSession();
     const ctx = this.ensureContext();
     this.unlockSilentSwitchBridge();
-    if (ctx && breathTiming) {
-      this.preloadBreathBuffers(ctx, breathTiming);
+    if (!ctx || !options) return;
+
+    if (options.inhaleSec !== undefined || options.exhaleSec !== undefined) {
+      this.preloadBreathBuffers(ctx, options);
+    }
+    if (options.bells && options.bells.length > 0) {
+      this.preloadBellBuffers(ctx, options.bells);
+    }
+    if (options.ambientSound && options.ambientSound !== "silence") {
+      this.preloadAmbientBuffer(ctx, options.ambientSound);
     }
   }
 
@@ -366,7 +407,9 @@ export class MeditationAudioEngine {
   }
 
   /**
-   * Plays a synthesized meditation chime/bell by catalog ID at the given volume [0, 1].
+   * Plays a meditation chime/bell by catalog ID at the given volume [0, 1].
+   * Uses the cached real acoustic AudioBuffer when decoded in RAM, and falls back
+   * seamlessly to Web Audio synthesis on first uncached hit while preloading the sample.
    */
   public playBellSound(soundId: BellSoundId, volume: number = 0.85): void {
     if (soundId === "none") return;
@@ -381,6 +424,32 @@ export class MeditationAudioEngine {
     const gainScale = Math.pow(clampedVolume, 1.35);
     outputGain.gain.setValueAtTime(gainScale, ctx.currentTime);
     outputGain.connect(ctx.destination);
+
+    const option = getBellSoundOption(soundId);
+    if (option.kind === "file" && option.src) {
+      const cached = this.audioBuffers.get(option.src);
+      if (cached) {
+        const source = ctx.createBufferSource();
+        source.buffer = cached;
+        source.connect(outputGain);
+        source.onended = () => {
+          try {
+            source.disconnect();
+          } catch {
+            // Ignore
+          }
+          try {
+            outputGain.disconnect();
+          } catch {
+            // Ignore
+          }
+        };
+        source.start(ctx.currentTime);
+        return;
+      }
+      // Preload in background so subsequent strikes play the real acoustic sample
+      void this.loadAudioBuffer(ctx, option.src);
+    }
 
     switch (soundId) {
       case "singing-bowl":
@@ -508,7 +577,7 @@ export class MeditationAudioEngine {
     const token = ++this.breathPlayToken;
     const triggeredAtMs = Date.now();
 
-    const cached = this.breathBuffers.get(spec.src);
+    const cached = this.audioBuffers.get(spec.src);
     if (cached) {
       this.startBreathBufferNode(
         ctx,
@@ -522,7 +591,7 @@ export class MeditationAudioEngine {
     }
 
     // First-ever play before decode completes (~15-30ms from SW cache): decode & sync to elapsed time
-    void this.loadBreathBuffer(ctx, spec.src).then((decoded) => {
+    void this.loadAudioBuffer(ctx, spec.src).then((decoded) => {
       if (!decoded || this.breathPlayToken !== token || this.ctx !== ctx) {
         return;
       }
@@ -1087,6 +1156,10 @@ export class MeditationAudioEngine {
 
   /**
    * Starts looping the chosen ambient sound with a smooth fade-in.
+   * For file-backed nature soundscapes (Gentle Rain, Ocean Waves), plays directly
+   * from the decoded in-RAM AudioBuffer loop when cached; on the first uncached start,
+   * begins the synthesized fallback immediately and crossfades to the real acoustic
+   * recording once decoded (~20–40ms from Service Worker cache).
    */
   public startAmbient(
     soundId: AmbientSoundId,
@@ -1106,8 +1179,19 @@ export class MeditationAudioEngine {
 
     this.teardownAmbientImmediate();
 
+    const token = ++this.ambientPlayToken;
+    this.ambientVolume = volume;
+
     const now = ctx.currentTime;
-    const graph = this.buildAmbientGraph(ctx, soundId, now);
+    const option = getAmbientSoundOption(soundId);
+    const cachedBuffer =
+      option.kind === "file" && option.src
+        ? this.audioBuffers.get(option.src)
+        : undefined;
+
+    const graph = cachedBuffer
+      ? this.buildFileAmbientGraph(ctx, cachedBuffer)
+      : this.buildAmbientGraph(ctx, soundId, now);
 
     const targetGain = this.mapVolumeToGain(volume, graph.gainCeiling);
     graph.masterGain.gain.setValueAtTime(0.0001, now);
@@ -1123,6 +1207,87 @@ export class MeditationAudioEngine {
 
     this.ambientGraph = graph;
     this.activeSoundId = soundId;
+
+    // Decode file-backed nature soundscape and smoothly crossfade in if still active
+    if (option.kind === "file" && option.src && !cachedBuffer) {
+      void this.loadAudioBuffer(ctx, option.src).then((decoded) => {
+        if (
+          !decoded ||
+          this.ambientPlayToken !== token ||
+          this.ctx !== ctx ||
+          this.activeSoundId !== soundId
+        ) {
+          return;
+        }
+        this.crossfadeToFileAmbient(ctx, decoded, 0.65);
+      });
+    }
+  }
+
+  private buildFileAmbientGraph(
+    ctx: AudioContext,
+    buffer: AudioBuffer
+  ): ActiveAmbientGraph {
+    const masterGain = ctx.createGain();
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+    source.loop = true;
+    source.connect(masterGain);
+
+    return {
+      sources: [source],
+      nodes: [masterGain, source],
+      masterGain,
+      gainCeiling: 0.72,
+    };
+  }
+
+  private crossfadeToFileAmbient(
+    ctx: AudioContext,
+    buffer: AudioBuffer,
+    crossfadeSeconds: number
+  ): void {
+    const previousGraph = this.ambientGraph;
+    const now = ctx.currentTime;
+    const fade = Math.max(0.1, crossfadeSeconds);
+
+    const nextGraph = this.buildFileAmbientGraph(ctx, buffer);
+    const targetGain = this.mapVolumeToGain(
+      this.ambientVolume,
+      nextGraph.gainCeiling
+    );
+    nextGraph.masterGain.gain.setValueAtTime(0.0001, now);
+    nextGraph.masterGain.gain.exponentialRampToValueAtTime(
+      Math.max(0.0001, targetGain),
+      now + fade
+    );
+    nextGraph.masterGain.connect(ctx.destination);
+    for (const source of nextGraph.sources) {
+      source.start(now);
+    }
+
+    this.ambientGraph = nextGraph;
+
+    if (previousGraph) {
+      try {
+        previousGraph.masterGain.gain.cancelScheduledValues(now);
+        previousGraph.masterGain.gain.setValueAtTime(
+          Math.max(0.0001, previousGraph.masterGain.gain.value),
+          now
+        );
+        previousGraph.masterGain.gain.exponentialRampToValueAtTime(
+          0.0001,
+          now + fade
+        );
+      } catch {
+        this.disposeGraph(previousGraph);
+        return;
+      }
+
+      setTimeout(() => {
+        this.disposeGraph(previousGraph);
+      }, Math.ceil((fade + 0.08) * 1000));
+    }
   }
 
   private buildAmbientGraph(
@@ -1342,6 +1507,7 @@ export class MeditationAudioEngine {
    * Smoothly adjusts ambient sound volume while playing.
    */
   public setAmbientVolume(volume: number): void {
+    this.ambientVolume = volume;
     if (!this.ctx || !this.ambientGraph) return;
     const now = this.ctx.currentTime;
     const target = Math.max(
@@ -1358,6 +1524,7 @@ export class MeditationAudioEngine {
   public stopAmbient(fadeOutSeconds = 0.8): void {
     this.clearPreviewTimer();
     this.isPreviewing = false;
+    this.ambientPlayToken += 1;
 
     if (!this.ctx || !this.ambientGraph) {
       this.teardownAmbientImmediate();
@@ -1425,8 +1592,9 @@ export class MeditationAudioEngine {
     this.clearPreviewTimer();
     this.cancelBellStrikes();
     this.stopBreathingCue(0);
-    this.breathBuffers.clear();
-    this.breathBufferLoads.clear();
+    this.ambientPlayToken += 1;
+    this.audioBuffers.clear();
+    this.audioBufferLoads.clear();
     if (this.silentUnlockAudio) {
       try {
         this.silentUnlockAudio.pause();
@@ -1468,6 +1636,7 @@ export class MeditationAudioEngine {
   }
 
   private teardownAmbientImmediate(): void {
+    this.ambientPlayToken += 1;
     if (this.ambientGraph) {
       this.disposeGraph(this.ambientGraph);
       this.ambientGraph = null;

@@ -66,6 +66,13 @@ import {
   formatSessionDuration,
 } from "@/lib/history/stats";
 import type { MeditationSessionItem } from "@/lib/history/types";
+import {
+  clearMediaSession,
+  setMediaSessionActionHandlers,
+  setMediaSessionMetadata,
+  setMediaSessionPlaybackState,
+  setMediaSessionPositionState,
+} from "@/lib/media-session";
 import { formatDurationLabel, formatTimerDisplay } from "@/lib/timer/engine";
 import { useWakeLock } from "@/lib/wake-lock";
 
@@ -314,6 +321,7 @@ export function BreathingPractice({
       audio.unlock({
         inhaleSec: rhythm.inhaleSec,
         exhaleSec: rhythm.exhaleSec,
+        bells: mode === "chime" ? ["soft-chime"] : undefined,
       });
       audio.previewBreathingCue(
         mode,
@@ -328,7 +336,7 @@ export function BreathingPractice({
   const handleTogglePreviewAmbient = useCallback(
     (soundId: AmbientSoundId) => {
       const audio = getAudioEngine();
-      audio.unlock();
+      audio.unlock({ ambientSound: soundId });
 
       if (previewingAmbientId === soundId) {
         audio.stopPreview();
@@ -388,6 +396,8 @@ export function BreathingPractice({
     audio.unlock({
       inhaleSec: rhythm.inhaleSec,
       exhaleSec: rhythm.exhaleSec,
+      bells: ["soft-chime"],
+      ambientSound,
     });
     audio.stopBreathingCue(0.1);
     stopPreview();
@@ -447,6 +457,8 @@ export function BreathingPractice({
     audio.unlock({
       inhaleSec: rhythm.inhaleSec,
       exhaleSec: rhythm.exhaleSec,
+      bells: ["soft-chime"],
+      ambientSound,
     });
     setEarlyFinishElapsedSec(null);
     segmentStartTimestampRef.current = Date.now();
@@ -517,6 +529,61 @@ export function BreathingPractice({
 
     resetToIdle();
   }, [getLiveElapsedMs, isAuthenticated, resetToIdle]);
+
+  // Unified Media Session API for Guided Breathing sessions
+  const isBreathingSessionOpen =
+    sessionPhase === "running" || sessionPhase === "paused";
+  const breathingPositionSec = isBreathingSessionOpen
+    ? Math.floor(elapsedMs / 1000)
+    : -1;
+
+  useEffect(() => {
+    if (!isBreathingSessionOpen) {
+      clearMediaSession();
+      return;
+    }
+
+    setMediaSessionMetadata({
+      title: m.mediaSession.breathingTitle(m.breathing.patterns[patternId]),
+      artist:
+        ambientSound !== "silence"
+          ? m.sounds.ambient[ambientSound]
+          : m.mediaSession.artist,
+      album: "Bodhi",
+    });
+    setMediaSessionPlaybackState(
+      sessionPhase === "paused" ? "paused" : "playing"
+    );
+    setMediaSessionActionHandlers({
+      onPlay: handleResume,
+      onPause: handlePause,
+      onStop: handleFinish,
+    });
+
+    return () => {
+      clearMediaSession();
+    };
+  }, [
+    ambientSound,
+    handleFinish,
+    handlePause,
+    handleResume,
+    isBreathingSessionOpen,
+    m.breathing.patterns,
+    m.mediaSession,
+    m.sounds.ambient,
+    patternId,
+    sessionPhase,
+  ]);
+
+  useEffect(() => {
+    if (!isBreathingSessionOpen || breathingPositionSec < 0) return;
+    setMediaSessionPositionState({
+      duration: Math.round(totalDurationMs / 1000),
+      position: breathingPositionSec,
+      playbackRate: 1,
+    });
+  }, [breathingPositionSec, isBreathingSessionOpen, totalDurationMs]);
 
   const handleSaveEarlyFinish = useCallback(async () => {
     if (earlyFinishElapsedSec === null) return;
