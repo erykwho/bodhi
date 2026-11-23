@@ -71,11 +71,11 @@ export const BREATH_AUDIO_CATALOG: Record<
   exhale: {
     short: {
       src: "/audio/breath-exhale-short.mp3",
-      nominalDurationSec: 1.49,
+      nominalDurationSec: 1.48,
     },
     medium: {
       src: "/audio/breath-exhale-medium.mp3",
-      nominalDurationSec: 3.74,
+      nominalDurationSec: 3.75,
     },
     long: {
       src: "/audio/breath-exhale-long.mp3",
