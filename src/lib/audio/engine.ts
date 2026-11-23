@@ -19,6 +19,18 @@ type PitchPreservingAudioElement = HTMLAudioElement & {
 
 type BreathSampleKind = "inhale" | "exhale";
 
+export type BreathDurationTier = "short" | "medium" | "long";
+
+export interface BreathUnlockOptions {
+  inhaleSec?: number;
+  exhaleSec?: number;
+}
+
+interface BreathSampleSpec {
+  src: string;
+  nominalDurationSec: number;
+}
+
 interface ActiveAmbientGraph {
   sources: AudioScheduledSourceNode[];
   nodes: AudioNode[];
@@ -30,26 +42,63 @@ const MULTI_STRIKE_SPACING_MS = 2100;
 
 /**
  * WebKit / iOS Safari guarantees pitch-preserved <audio> output within [0.5, 2.0].
- * Our denoised breath samples are centered around ~3.6-4.0s so every phase duration
- * from 2s to 8s (including 4s Box, 5.5s Coherent, and 8s 4-7-8 exhale) stays cleanly
- * within this natural range.
+ * With 3 duration-matched nasal breath samples (short ~1.25s, medium ~3.0s, long ~5.3s),
+ * runtime playbackRate stays in the natural sweet spot [0.62x, 1.27x] across 1s–8s.
  */
 export const MIN_BREATH_PLAYBACK_RATE = 0.5;
 export const MAX_BREATH_PLAYBACK_RATE = 2.0;
 
-const BREATH_AUDIO_SOURCES: Record<
+export const BREATH_AUDIO_CATALOG: Record<
   BreathSampleKind,
-  { src: string; nominalDurationSec: number }
+  Record<BreathDurationTier, BreathSampleSpec>
 > = {
   inhale: {
-    src: "/audio/breath-inhale.mp3",
-    nominalDurationSec: 3.61,
+    short: {
+      src: "/audio/breath-inhale-short.mp3",
+      nominalDurationSec: 1.23,
+    },
+    medium: {
+      src: "/audio/breath-inhale-medium.mp3",
+      nominalDurationSec: 2.99,
+    },
+    long: {
+      src: "/audio/breath-inhale-long.mp3",
+      nominalDurationSec: 5.21,
+    },
   },
   exhale: {
-    src: "/audio/breath-exhale.mp3",
-    nominalDurationSec: 3.98,
+    short: {
+      src: "/audio/breath-exhale-short.mp3",
+      nominalDurationSec: 1.27,
+    },
+    medium: {
+      src: "/audio/breath-exhale-medium.mp3",
+      nominalDurationSec: 3.06,
+    },
+    long: {
+      src: "/audio/breath-exhale-long.mp3",
+      nominalDurationSec: 5.45,
+    },
   },
 };
+
+/**
+ * Selects the closest natural breath sample tier for a phase duration so
+ * pitch-preserved playbackRate stays close to 1.0x without sounding artificial:
+ * - <= 2.2s: short nasal sample (giddster, ~1.25s)
+ * - <= 4.5s: medium studio nasal sample (thomasXkiteXforXlife, ~3.0s)
+ * - > 4.5s: long multi-take studio nasal sample (thomasXkiteXforXlife, ~5.3s)
+ */
+export function selectBreathDurationTier(
+  targetPhaseDurationSec: number
+): BreathDurationTier {
+  if (!Number.isFinite(targetPhaseDurationSec) || targetPhaseDurationSec <= 0) {
+    return "medium";
+  }
+  if (targetPhaseDurationSec <= 2.2) return "short";
+  if (targetPhaseDurationSec <= 4.5) return "medium";
+  return "long";
+}
 
 /**
  * Valid 50ms silent 8kHz mono PCM WAV played once on user gesture to switch
@@ -85,7 +134,7 @@ export function computeBreathPlaybackRate(
 
 /**
  * Self-contained offline-first audio engine for meditation bells, ambient soundscapes
- * (Web Audio API), and denoised CC0 human breath cues (pitch-preserving HTML5 Audio).
+ * (Web Audio API), and multi-sample CC0 human nasal breath cues (pitch-preserving HTML5 Audio).
  * Configures iOS "playback" audio session so practice audio plays even when the
  * device's hardware Silent switch is enabled.
  */
@@ -101,6 +150,10 @@ export class MeditationAudioEngine {
   > = {
     inhale: null,
     exhale: null,
+  };
+  private breathAudioTiers: Record<BreathSampleKind, BreathDurationTier> = {
+    inhale: "medium",
+    exhale: "medium",
   };
   private breathAudioPrimed: Record<BreathSampleKind, boolean> = {
     inhale: false,
@@ -165,20 +218,32 @@ export class MeditationAudioEngine {
   }
 
   private getOrCreateBreathAudio(
-    kind: BreathSampleKind
+    kind: BreathSampleKind,
+    tier: BreathDurationTier
   ): PitchPreservingAudioElement | null {
     if (typeof Audio === "undefined") return null;
 
+    const spec = BREATH_AUDIO_CATALOG[kind][tier];
     const existing = this.breathAudioElements[kind];
-    if (existing) return existing;
+    if (existing) {
+      if (this.breathAudioTiers[kind] !== tier) {
+        this.breathAudioTiers[kind] = tier;
+        existing.src = spec.src;
+        try {
+          existing.load();
+        } catch {
+          // Ignore in mocked/headless environments without load()
+        }
+      }
+      return existing;
+    }
 
-    const audio = new Audio(
-      BREATH_AUDIO_SOURCES[kind].src
-    ) as PitchPreservingAudioElement;
+    const audio = new Audio(spec.src) as PitchPreservingAudioElement;
     audio.preload = "auto";
     audio.setAttribute("playsinline", "true");
     this.applyPreservePitch(audio);
     this.breathAudioElements[kind] = audio;
+    this.breathAudioTiers[kind] = tier;
     return audio;
   }
 
@@ -196,15 +261,34 @@ export class MeditationAudioEngine {
    * Primes reusable inhale/exhale <audio> elements during a direct user gesture so
    * subsequent timer-driven phase transitions play without iOS autoplay restrictions.
    */
-  private primeBreathAudioElements(): void {
+  private primeBreathAudioElements(options?: BreathUnlockOptions): void {
     if (typeof Audio === "undefined") return;
 
+    const targetTiers: Record<BreathSampleKind, BreathDurationTier> = {
+      inhale:
+        options?.inhaleSec !== undefined
+          ? selectBreathDurationTier(options.inhaleSec)
+          : this.breathAudioTiers.inhale,
+      exhale:
+        options?.exhaleSec !== undefined
+          ? selectBreathDurationTier(options.exhaleSec)
+          : this.breathAudioTiers.exhale,
+    };
+
     for (const kind of ["inhale", "exhale"] as const) {
-      if (this.breathAudioPrimed[kind] || this.activeBreathKind === kind) {
+      const desiredTier = targetTiers[kind];
+      const tierChanged =
+        this.breathAudioElements[kind] !== null &&
+        this.breathAudioTiers[kind] !== desiredTier;
+
+      if (
+        (this.breathAudioPrimed[kind] && !tierChanged) ||
+        this.activeBreathKind === kind
+      ) {
         continue;
       }
 
-      const audio = this.getOrCreateBreathAudio(kind);
+      const audio = this.getOrCreateBreathAudio(kind, desiredTier);
       if (!audio) continue;
 
       const token = ++this.breathPlayTokens[kind];
@@ -262,13 +346,13 @@ export class MeditationAudioEngine {
 
   /**
    * Unlocks the AudioContext, enables iOS "playback" audio session (Silent switch bypass),
-   * and primes breathing <audio> elements on a direct user gesture.
+   * and primes breathing <audio> elements for the active session's phase durations.
    */
-  public unlock(): void {
+  public unlock(breathTiming?: BreathUnlockOptions): void {
     this.configurePlaybackAudioSession();
     this.ensureContext();
     this.unlockSilentSwitchBridge();
-    this.primeBreathAudioElements();
+    this.primeBreathAudioElements(breathTiming);
   }
 
   /**
@@ -399,11 +483,13 @@ export class MeditationAudioEngine {
   }
 
   /**
-   * Plays a short real inhale + exhale preview in the Breathing Cues sheet.
+   * Plays a natural inhale + exhale preview in the Breathing Cues sheet.
    */
   public previewBreathingCue(
     cueMode: BreathingCueMode,
-    volume: number = 0.85
+    volume: number = 0.85,
+    inhaleSec: number = 3.2,
+    exhaleSec: number = 3.4
   ): void {
     this.stopBreathingCue(0.1);
     if (cueMode === "silent") return;
@@ -413,8 +499,6 @@ export class MeditationAudioEngine {
       return;
     }
 
-    const inhaleSec = 2.6;
-    const exhaleSec = 3.0;
     this.playBreathingCue("inhale", "tone", volume, inhaleSec);
     this.breathPreviewTimeout = setTimeout(() => {
       this.breathPreviewTimeout = null;
@@ -447,16 +531,22 @@ export class MeditationAudioEngine {
       return;
     }
 
-    // "tone": denoised CC0 human breath sample scaled smoothly across the phase duration
+    // "tone": duration-matched CC0 human nasal breath sample scaled smoothly across the phase
     const kind: BreathSampleKind = phase === "inhale" ? "inhale" : "exhale";
-    const audio = this.getOrCreateBreathAudio(kind);
+    const targetDurationSec = Math.max(0.6, Math.min(12, durationSec));
+    const tier = selectBreathDurationTier(targetDurationSec);
+    const spec = BREATH_AUDIO_CATALOG[kind][tier];
+    const switchingSrc =
+      this.breathAudioElements[kind] !== null &&
+      this.breathAudioTiers[kind] !== tier;
+    const audio = this.getOrCreateBreathAudio(kind, tier);
     if (!audio) return;
 
-    const targetDurationSec = Math.max(0.6, Math.min(12, durationSec));
+    // Avoid reading stale `audio.duration` from a previously loaded tier while new src loads
     const sampleDurationSec =
-      Number.isFinite(audio.duration) && audio.duration > 0.5
+      !switchingSrc && Number.isFinite(audio.duration) && audio.duration > 0.5
         ? audio.duration
-        : BREATH_AUDIO_SOURCES[kind].nominalDurationSec;
+        : spec.nominalDurationSec;
     const playbackRate = computeBreathPlaybackRate(
       sampleDurationSec,
       targetDurationSec
@@ -521,7 +611,7 @@ export class MeditationAudioEngine {
       return;
     }
 
-    // Ensure short phases (e.g. 1s custom where playbackRate caps at 2.0x) fade cleanly on time
+    // Ensure short or slightly longer clips always finish cleanly on phase boundary
     const fadeOutSec = Math.min(0.16, targetDurationSec * 0.25);
     const fadeStartMs = Math.max(
       120,

@@ -1,4 +1,4 @@
-const CACHE_NAME = "bodhi-offline-v2";
+const CACHE_NAME = "bodhi-offline-v3";
 
 const PRECACHE_URLS = [
   "/",
@@ -7,8 +7,12 @@ const PRECACHE_URLS = [
   "/icons/favicon.png",
   "/icons/icon-192.png",
   "/icons/icon-512.png",
-  "/audio/breath-inhale.mp3",
-  "/audio/breath-exhale.mp3",
+  "/audio/breath-inhale-short.mp3",
+  "/audio/breath-exhale-short.mp3",
+  "/audio/breath-inhale-medium.mp3",
+  "/audio/breath-exhale-medium.mp3",
+  "/audio/breath-inhale-long.mp3",
+  "/audio/breath-exhale-long.mp3",
 ];
 
 async function respondWithRangeSupport(request, fullResponse) {

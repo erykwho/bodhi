@@ -311,10 +311,18 @@ export function BreathingPractice({
   const handlePreviewCue = useCallback(
     (mode: BreathingCueMode) => {
       const audio = getAudioEngine();
-      audio.unlock();
-      audio.previewBreathingCue(mode, bellVolume);
+      audio.unlock({
+        inhaleSec: rhythm.inhaleSec,
+        exhaleSec: rhythm.exhaleSec,
+      });
+      audio.previewBreathingCue(
+        mode,
+        bellVolume,
+        Math.min(4.5, rhythm.inhaleSec),
+        Math.min(4.5, rhythm.exhaleSec)
+      );
     },
-    [bellVolume, getAudioEngine]
+    [bellVolume, getAudioEngine, rhythm.exhaleSec, rhythm.inhaleSec]
   );
 
   const handleTogglePreviewAmbient = useCallback(
@@ -377,7 +385,10 @@ export function BreathingPractice({
 
   const handleStart = useCallback(() => {
     const audio = getAudioEngine();
-    audio.unlock();
+    audio.unlock({
+      inhaleSec: rhythm.inhaleSec,
+      exhaleSec: rhythm.exhaleSec,
+    });
     audio.stopBreathingCue(0.1);
     stopPreview();
     setActiveBreathingSheet(null);
@@ -413,6 +424,7 @@ export function BreathingPractice({
     cueMode,
     getAudioEngine,
     hapticsEnabled,
+    rhythm.exhaleSec,
     rhythm.inhaleSec,
     stopPreview,
   ]);
@@ -432,7 +444,10 @@ export function BreathingPractice({
   const handleResume = useCallback(() => {
     if (sessionPhase !== "paused") return;
     const audio = getAudioEngine();
-    audio.unlock();
+    audio.unlock({
+      inhaleSec: rhythm.inhaleSec,
+      exhaleSec: rhythm.exhaleSec,
+    });
     setEarlyFinishElapsedSec(null);
     segmentStartTimestampRef.current = Date.now();
     setSessionPhase("running");
