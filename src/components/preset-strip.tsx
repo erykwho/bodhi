@@ -93,7 +93,9 @@ export function PresetStrip({
                 <Bookmark className="h-3 w-3 shrink-0 opacity-75" />
                 <span>{preset.name}</span>
                 <span className="text-[10px] opacity-70 tabular-nums">
-                  {preset.preferences.durationMinutes}m
+                  {preset.preferences.openEnded
+                    ? "∞"
+                    : `${preset.preferences.durationMinutes}m`}
                 </span>
               </button>
 

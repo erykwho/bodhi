@@ -17,9 +17,12 @@ import {
   Headphones,
   Loader2,
   RotateCcw,
+  Square,
 } from "lucide-react";
 import { BodhiLogo } from "@/components/bodhi-logo";
+import { EarlyFinishCard } from "@/components/early-finish-card";
 import { useI18n } from "@/components/i18n-provider";
+import { ZenDimOverlay } from "@/components/zen-dim-overlay";
 import { MeditationAudioEngine } from "@/lib/audio/engine";
 import { DEFAULT_END_BELL_ID, type BellSoundId } from "@/lib/audio/sounds";
 import {
@@ -36,6 +39,7 @@ import {
   getTimerPreferencesSnapshot,
   subscribeTimerPreferences,
 } from "@/lib/timer/preferences";
+import type { BellStrikeCount } from "@/lib/timer/types";
 import { buildSoundCloudEmbedUrl } from "@/lib/tracks/providers";
 import type { FavoriteTrackItem } from "@/lib/tracks/types";
 import { useWakeLock } from "@/lib/wake-lock";
@@ -185,9 +189,11 @@ export function GuidedSessionPlayer({
     getTimerPreferencesServerSnapshot
   );
 
-  // Sync the closing bell sound with the user's configured Timer end bell
+  // Sync the closing bell sound, strikes, and volume with the user's Timer settings
   const closingBellSoundId: BellSoundId =
     timerPrefs.endBell === "none" ? DEFAULT_END_BELL_ID : timerPrefs.endBell;
+  const closingBellStrikes: BellStrikeCount = timerPrefs.endBellStrikes;
+  const closingBellVolume: number = timerPrefs.bellVolume;
   const closingBellName = m.sounds.bells[closingBellSoundId];
 
   const [playbackState, setPlaybackState] = useState<PlaybackState>(
@@ -217,6 +223,8 @@ export function GuidedSessionPlayer({
   const audioRef = useRef<MeditationAudioEngine | null>(null);
   const closingBellRef = useRef(closingBellEnabled);
   const closingBellSoundRef = useRef<BellSoundId>(closingBellSoundId);
+  const closingBellStrikesRef = useRef<BellStrikeCount>(closingBellStrikes);
+  const closingBellVolumeRef = useRef<number>(closingBellVolume);
 
   // Accurate active-listening duration tracking (excludes paused intervals)
   const sessionStartedAtRef = useRef<string | null>(null);
@@ -230,6 +238,14 @@ export function GuidedSessionPlayer({
   useEffect(() => {
     closingBellSoundRef.current = closingBellSoundId;
   }, [closingBellSoundId]);
+
+  useEffect(() => {
+    closingBellStrikesRef.current = closingBellStrikes;
+  }, [closingBellStrikes]);
+
+  useEffect(() => {
+    closingBellVolumeRef.current = closingBellVolume;
+  }, [closingBellVolume]);
 
   const getAudioEngine = useCallback(() => {
     if (!audioRef.current) {
@@ -278,7 +294,11 @@ export function GuidedSessionPlayer({
     if (closingBellRef.current) {
       const audio = getAudioEngine();
       audio.unlock();
-      audio.playBellSound(closingBellSoundRef.current);
+      audio.playBellStrikes(
+        closingBellSoundRef.current,
+        closingBellStrikesRef.current,
+        closingBellVolumeRef.current
+      );
     }
 
     if (isAuthenticated) {
@@ -665,8 +685,17 @@ export function GuidedSessionPlayer({
           onClick={handleExitClick}
           className="inline-flex items-center gap-1.5 rounded-full border border-black/8 bg-[var(--surface)] px-3 py-1.5 text-xs font-medium text-[var(--foreground-muted)] transition-colors hover:text-[var(--foreground)] dark:border-white/10"
         >
-          <ArrowLeft className="h-3.5 w-3.5" />
-          {m.guided.player.favorites}
+          {playbackState === "playing" || playbackState === "paused" ? (
+            <>
+              <Square className="h-3 w-3 fill-current" />
+              {m.guided.player.finish}
+            </>
+          ) : (
+            <>
+              <ArrowLeft className="h-3.5 w-3.5" />
+              {m.guided.player.favorites}
+            </>
+          )}
         </button>
 
         <div className="flex items-center gap-2">
@@ -835,47 +864,17 @@ export function GuidedSessionPlayer({
 
           {/* Early-Stop Save Prompt */}
           {earlyStopElapsedSec !== null ? (
-            <div className="w-full rounded-2xl border border-black/8 bg-[var(--surface)] p-4 text-left shadow-xs dark:border-white/10">
-              <p className="text-sm font-semibold text-[var(--foreground)]">
-                {m.timer.savePartialTitle}
-              </p>
-              <p className="mt-0.5 text-xs text-[var(--foreground-muted)]">
-                {m.guided.player.listenedFor(
-                  formatSessionDuration(earlyStopElapsedSec)
-                )}
-              </p>
-              <textarea
-                rows={2}
-                maxLength={500}
-                placeholder={m.timer.optionalNotePlaceholder}
-                value={noteInput}
-                onChange={(event) => setNoteInput(event.target.value)}
-                className="mt-2.5 w-full resize-none rounded-xl border border-black/10 bg-[var(--background)] px-3 py-2 text-xs text-[var(--foreground)] outline-none placeholder:text-[var(--foreground-muted)]/70 focus:border-[var(--accent)] dark:border-white/12"
-              />
-              <div className="mt-3 grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={onExit}
-                  disabled={isSavingEarlyStop}
-                  className="flex h-10 items-center justify-center rounded-xl border border-black/8 bg-[var(--background)] text-xs font-medium text-[var(--foreground)] transition-colors hover:bg-[var(--surface-muted)] dark:border-white/10"
-                >
-                  {m.timer.discard}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void handleSaveEarlyStop()}
-                  disabled={isSavingEarlyStop}
-                  className="flex h-10 items-center justify-center gap-1.5 rounded-xl bg-[var(--accent)] text-xs font-semibold text-[#fcfaf6] transition-colors hover:bg-[var(--accent-strong)] disabled:opacity-50 dark:text-[#151917]"
-                >
-                  {isSavingEarlyStop ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <Check className="h-3.5 w-3.5" />
-                  )}
-                  {m.timer.saveSession}
-                </button>
-              </div>
-            </div>
+            <EarlyFinishCard
+              subtitle={m.guided.player.listenedFor(
+                formatSessionDuration(earlyStopElapsedSec)
+              )}
+              noteValue={noteInput}
+              isSaving={isSavingEarlyStop}
+              onChangeNote={setNoteInput}
+              onDiscard={onExit}
+              onSave={() => void handleSaveEarlyStop()}
+              onResume={() => setEarlyStopElapsedSec(null)}
+            />
           ) : (
             <p className="text-center text-xs text-[var(--foreground-muted)]">
               {track.provider === "DIRECT_AUDIO"
@@ -890,19 +889,11 @@ export function GuidedSessionPlayer({
 
       {/* OLED-friendly Zen Dim Mode Overlay */}
       {isDimmed && playbackState !== "completed" && (
-        <button
-          type="button"
-          onClick={() => setIsDimmed(false)}
-          aria-label={m.timer.wakeDimmedAria}
-          className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-3 bg-[#050605] px-8 text-center focus:outline-none"
-        >
-          <span className="line-clamp-2 max-w-xs text-sm font-medium text-white/25">
-            {track.title}
-          </span>
-          <span className="text-[11px] tracking-wide text-white/15">
-            {m.timer.tapToWake}
-          </span>
-        </button>
+        <ZenDimOverlay
+          primaryText={track.title}
+          monospace={false}
+          onWake={() => setIsDimmed(false)}
+        />
       )}
 
       {/* Bottom Controls */}
@@ -923,7 +914,11 @@ export function GuidedSessionPlayer({
             )}
             <span className="truncate">
               {m.guided.player.bellLabel}:{" "}
-              {closingBellEnabled ? closingBellName : m.common.off}
+              {closingBellEnabled
+                ? closingBellStrikes === 3
+                  ? `${closingBellName} · 3×`
+                  : closingBellName
+                : m.common.off}
             </span>
           </button>
 

@@ -60,6 +60,7 @@ export default async function HomePage(props: {
         trackId: session.trackId,
         trackTitle: session.trackTitle,
         trackProvider: session.trackProvider,
+        breathingPattern: session.breathingPattern ?? null,
         plannedDurationSec: session.plannedDurationSec,
         actualDurationSec: session.actualDurationSec,
         completed: session.completed,

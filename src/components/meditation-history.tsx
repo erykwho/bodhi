@@ -15,6 +15,7 @@ import {
   Plus,
   Timer,
   Trash2,
+  Wind,
   X,
 } from "lucide-react";
 import { signInWithGoogle } from "@/app/actions";
@@ -580,7 +581,13 @@ export function MeditationHistory({
             const title =
               session.mode === "TRACK"
                 ? (session.trackTitle ?? m.history.guidedFallback)
-                : m.history.silentTimer;
+                : session.mode === "BREATHING"
+                  ? session.breathingPattern
+                    ? m.history.breathingTitle(session.breathingPattern)
+                    : m.history.breathingFallback
+                  : session.plannedDurationSec === null
+                    ? m.history.openTimer
+                    : m.history.silentTimer;
 
             return (
               <li
@@ -592,6 +599,8 @@ export function MeditationHistory({
                     <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[var(--accent-soft)] text-[var(--accent)]">
                       {session.mode === "TRACK" ? (
                         <Headphones className="h-4 w-4" />
+                      ) : session.mode === "BREATHING" ? (
+                        <Wind className="h-4 w-4" />
                       ) : (
                         <Timer className="h-4 w-4" />
                       )}

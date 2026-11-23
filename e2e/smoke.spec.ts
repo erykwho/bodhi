@@ -42,15 +42,63 @@ test.describe("Bodhi E2E Smoke Suite (Mobile PWA)", () => {
     await wakeOverlay.click();
     await expect(wakeOverlay).toBeHidden();
 
-    // Pause, resume, and reset
+    // Pause, resume, and finish
     await page.getByRole("button", { name: "Pause" }).click();
     await expect(page.getByText("Paused")).toBeVisible();
     await page.getByRole("button", { name: "Resume" }).click();
     await expect(page.getByRole("button", { name: "Pause" })).toBeVisible();
 
-    await page.getByRole("button", { name: "Reset" }).click();
+    await page.getByRole("button", { name: "Finish" }).click();
     await expect(
       page.getByRole("button", { name: "Begin Session" })
+    ).toBeVisible();
+
+    expect(errors).toEqual([]);
+  });
+
+  test("V9 Open-Ended mode, Guided Breathing flow, and 3x closing bell persist cleanly", async ({
+    page,
+  }) => {
+    const errors = trackRuntimeErrors(page);
+
+    await page.goto("/");
+
+    // Switch to Open-Ended mode and start/finish cleanly
+    await page.getByRole("tab", { name: "Open", exact: true }).click();
+    await expect(page.getByText("Open session")).toBeVisible();
+    await page.getByRole("button", { name: "Begin Session" }).click();
+    await expect(page.getByRole("button", { name: "Pause" })).toBeVisible();
+    await page.getByRole("button", { name: "Finish" }).click();
+    await expect(
+      page.getByRole("button", { name: "Begin Session" })
+    ).toBeVisible();
+
+    // Configure 3x closing bell strikes in End sound picker
+    await page.getByRole("button", { name: /^End/ }).click();
+    await page.getByRole("button", { name: "3×", exact: true }).click();
+    await page.getByRole("button", { name: "Close sound picker" }).click();
+    await expect(page.getByRole("button", { name: /3×/ })).toBeVisible();
+
+    // Switch to Guided Breathing sub-mode, select 4-7-8, run, Zen Dim, and Finish
+    await page.getByRole("tab", { name: "Breathe", exact: true }).click();
+    await expect(page.getByText("4 · 4 · 4 · 4")).toBeVisible();
+    await page.getByRole("button", { name: "4-7-8", exact: true }).click();
+    await expect(page.getByText("4 · 7 · 8")).toBeVisible();
+
+    await page.getByRole("button", { name: "Begin Breathing" }).click();
+    await expect(page.getByRole("button", { name: "Pause" })).toBeVisible();
+
+    await page.getByRole("button", { name: "Dim screen" }).click();
+    const wakeOverlay = page.getByRole("button", {
+      name: "Wake dimmed screen",
+    });
+    await expect(wakeOverlay).toBeVisible();
+    await wakeOverlay.click();
+    await expect(wakeOverlay).toBeHidden();
+
+    await page.getByRole("button", { name: "Finish" }).click();
+    await expect(
+      page.getByRole("button", { name: "Begin Breathing" })
     ).toBeVisible();
 
     expect(errors).toEqual([]);
@@ -170,7 +218,7 @@ test.describe("Bodhi E2E Smoke Suite (Mobile PWA)", () => {
       page.getByRole("heading", { name: "Meditation History" })
     ).toBeVisible();
 
-    await page.getByRole("button", { name: "Timer" }).click();
+    await page.getByRole("button", { name: "Timer", exact: true }).click();
     await expect(
       page.getByRole("button", { name: "Begin Session" })
     ).toBeVisible();
@@ -196,7 +244,7 @@ test.describe("Bodhi E2E Smoke Suite (Mobile PWA)", () => {
 
     await page.getByRole("button", { name: "Begin Session" }).click();
     await expect(page.getByRole("button", { name: "Pause" })).toBeVisible();
-    await page.getByRole("button", { name: "Reset" }).click();
+    await page.getByRole("button", { name: "Finish" }).click();
     await expect(
       page.getByRole("button", { name: "Begin Session" })
     ).toBeVisible();

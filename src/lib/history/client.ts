@@ -14,6 +14,7 @@ export interface SaveSessionPayload {
   trackId?: string | null;
   trackTitle?: string | null;
   trackProvider?: TrackProviderType | null;
+  breathingPattern?: string | null;
   plannedDurationSec?: number | null;
   actualDurationSec: number;
   completed: boolean;

@@ -1,6 +1,6 @@
 import type { TrackProviderType } from "@/lib/tracks/types";
 
-export type SessionModeType = "TIMER" | "TRACK";
+export type SessionModeType = "TIMER" | "TRACK" | "BREATHING";
 
 export interface MeditationSessionItem {
   id: string;
@@ -8,6 +8,7 @@ export interface MeditationSessionItem {
   trackId: string | null;
   trackTitle: string | null;
   trackProvider: TrackProviderType | null;
+  breathingPattern?: string | null;
   plannedDurationSec: number | null;
   actualDurationSec: number;
   completed: boolean;

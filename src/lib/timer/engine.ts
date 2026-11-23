@@ -76,6 +76,26 @@ export function computeIntervalBellIndex(
 }
 
 /**
+ * Returns the 1-based index of the most recent interval mark crossed during an
+ * open-ended (count-up) session, or 0 if no mark has been reached yet.
+ */
+export function computeOpenEndedIntervalBellIndex(
+  elapsedMs: number,
+  intervalMs: number
+): number {
+  if (
+    !Number.isFinite(elapsedMs) ||
+    !Number.isFinite(intervalMs) ||
+    intervalMs <= 0 ||
+    elapsedMs <= 0
+  ) {
+    return 0;
+  }
+
+  return Math.floor(elapsedMs / intervalMs);
+}
+
+/**
  * Computes remaining milliseconds from an absolute target timestamp.
  * Using timestamps prevents drift when mobile browsers throttle intervals.
  */
@@ -107,6 +127,24 @@ export function computeElapsedMs(totalMs: number, remainingMs: number): number {
  */
 export function formatTimerDisplay(ms: number): string {
   const totalSeconds = Math.max(0, Math.ceil(ms / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  const pad = (n: number) => String(n).padStart(2, "0");
+
+  if (hours > 0) {
+    return `${hours}:${pad(minutes)}:${pad(seconds)}`;
+  }
+  return `${pad(minutes)}:${pad(seconds)}`;
+}
+
+/**
+ * Formats elapsed milliseconds for an open-ended (count-up) session.
+ * Uses floor to whole seconds so the timer starts cleanly at 00:00.
+ */
+export function formatElapsedDisplay(ms: number): string {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
   const hours = Math.floor(totalSeconds / 3600);
   const minutes = Math.floor((totalSeconds % 3600) / 60);
   const seconds = totalSeconds % 60;

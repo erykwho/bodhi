@@ -47,6 +47,7 @@ export async function PATCH(
         trackId: updated.trackId,
         trackTitle: updated.trackTitle,
         trackProvider: updated.trackProvider,
+        breathingPattern: updated.breathingPattern ?? null,
         plannedDurationSec: updated.plannedDurationSec,
         actualDurationSec: updated.actualDurationSec,
         completed: updated.completed,

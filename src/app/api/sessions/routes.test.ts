@@ -169,6 +169,43 @@ describe("API /api/sessions/**", () => {
         })
       );
     });
+
+    it("accepts BREATHING mode with breathingPattern and open-ended TIMER sessions", async () => {
+      const now = new Date("2026-01-10T10:03:00.000Z");
+      const started = new Date("2026-01-10T10:00:00.000Z");
+      prismaMock.meditationSession.create.mockResolvedValue({
+        id: "s-breath",
+        userId: USER_A.id,
+        mode: "BREATHING",
+        trackId: null,
+        trackTitle: null,
+        trackProvider: null,
+        breathingPattern: "Box 4-4-4-4",
+        plannedDurationSec: 180,
+        actualDurationSec: 180,
+        completed: true,
+        note: null,
+        startedAt: started,
+        endedAt: now,
+      });
+
+      const res = await POST(
+        jsonRequest("http://localhost/api/sessions", "POST", {
+          mode: "BREATHING",
+          breathingPattern: "Box 4-4-4-4",
+          plannedDurationSec: 180,
+          actualDurationSec: 180,
+          completed: true,
+        })
+      );
+
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as {
+        session: { mode: string; breathingPattern: string | null };
+      };
+      expect(body.session.mode).toBe("BREATHING");
+      expect(body.session.breathingPattern).toBe("Box 4-4-4-4");
+    });
   });
 
   describe("PATCH & DELETE /api/sessions/[id] (IDOR protection)", () => {

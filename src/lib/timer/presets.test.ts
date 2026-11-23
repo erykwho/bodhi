@@ -51,6 +51,13 @@ describe("timer presets", () => {
     expect(
       formatPresetSummary({
         ...DEFAULT_TIMER_PREFERENCES,
+        openEnded: true,
+        ambientSound: "ocean-waves",
+      })
+    ).toBe("Open · Ocean Waves");
+    expect(
+      formatPresetSummary({
+        ...DEFAULT_TIMER_PREFERENCES,
         durationMinutes: 20,
         ambientSound: "gentle-rain",
         intervalEnabled: true,

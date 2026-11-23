@@ -1,4 +1,5 @@
 import type { AmbientSoundId, BellSoundId } from "@/lib/audio/sounds";
+import type { BreathingCueMode, BreathingPhase } from "@/lib/breathing/types";
 
 type WebkitWindow = Window & {
   webkitAudioContext?: typeof AudioContext;
@@ -11,10 +12,12 @@ interface ActiveAmbientGraph {
   gainCeiling: number;
 }
 
+const MULTI_STRIKE_SPACING_MS = 2100;
+
 /**
- * Self-contained Web Audio API engine for meditation bells and ambient loops.
- * Designed to stay 100% offline with smooth fade envelopes and zero audio files
- * required, while remaining extensible for file-backed tracks later.
+ * Self-contained Web Audio API engine for meditation bells, breathing cues,
+ * and ambient loops. Designed to stay 100% offline with smooth fade envelopes
+ * and zero audio files required, while remaining extensible for file-backed tracks later.
  */
 export class MeditationAudioEngine {
   private ctx: AudioContext | null = null;
@@ -25,6 +28,7 @@ export class MeditationAudioEngine {
   private activeSoundId: AmbientSoundId = "silence";
   private isPreviewing = false;
   private previewTimeout: ReturnType<typeof setTimeout> | null = null;
+  private bellStrikeTimeouts: Array<ReturnType<typeof setTimeout>> = [];
 
   private ensureContext(): AudioContext | null {
     if (typeof window === "undefined") return null;
@@ -53,45 +57,146 @@ export class MeditationAudioEngine {
   /**
    * Backward-compatible helper used by GuidedSessionPlayer and legacy callers.
    */
-  public playBell(variant: "start" | "end" = "start"): void {
-    this.playBellSound(variant === "end" ? "deep-gong" : "singing-bowl");
+  public playBell(variant: "start" | "end" = "start", volume: number = 0.85): void {
+    this.playBellSound(variant === "end" ? "deep-gong" : "singing-bowl", volume);
   }
 
   /**
-   * Plays a synthesized meditation chime/bell by catalog ID.
+   * Cancels any queued follow-up strikes from a multi-strike closing bell.
    */
-  public playBellSound(soundId: BellSoundId): void {
+  public cancelBellStrikes(): void {
+    for (const timer of this.bellStrikeTimeouts) {
+      clearTimeout(timer);
+    }
+    this.bellStrikeTimeouts = [];
+  }
+
+  /**
+   * Plays a bell 1 or 3 times with serene spacing (classic meditation closing).
+   */
+  public playBellStrikes(
+    soundId: BellSoundId,
+    strikes: 1 | 3 = 1,
+    volume: number = 0.85
+  ): void {
+    this.cancelBellStrikes();
     if (soundId === "none") return;
+
+    this.playBellSound(soundId, volume);
+    if (strikes <= 1) return;
+
+    for (let i = 1; i < strikes; i++) {
+      const timer = setTimeout(() => {
+        this.playBellSound(soundId, volume);
+      }, i * MULTI_STRIKE_SPACING_MS);
+      this.bellStrikeTimeouts.push(timer);
+    }
+  }
+
+  /**
+   * Plays a synthesized meditation chime/bell by catalog ID at the given volume [0, 1].
+   */
+  public playBellSound(soundId: BellSoundId, volume: number = 0.85): void {
+    if (soundId === "none") return;
+    const clampedVolume = Math.min(1, Math.max(0, volume));
+    if (clampedVolume <= 0.001) return;
 
     const ctx = this.ensureContext();
     if (!ctx) return;
 
+    const outputGain = ctx.createGain();
+    // Slight gentle curve so 85% feels full and lower settings stay crisp
+    const gainScale = Math.pow(clampedVolume, 1.35);
+    outputGain.gain.setValueAtTime(gainScale, ctx.currentTime);
+    outputGain.connect(ctx.destination);
+
     switch (soundId) {
       case "singing-bowl":
-        this.playSingingBowl(ctx);
+        this.playSingingBowl(ctx, outputGain);
         break;
       case "tibetan-healing-bowl":
-        this.playTibetanHealingBowl(ctx);
+        this.playTibetanHealingBowl(ctx, outputGain);
         break;
       case "deep-gong":
-        this.playDeepGong(ctx);
+        this.playDeepGong(ctx, outputGain);
         break;
       case "soft-chime":
-        this.playSoftChime(ctx);
+        this.playSoftChime(ctx, outputGain);
         break;
       case "crystal-bowl":
-        this.playCrystalBowl(ctx);
+        this.playCrystalBowl(ctx, outputGain);
         break;
       case "wood-block":
-        this.playWoodBlock(ctx);
+        this.playWoodBlock(ctx, outputGain);
         break;
     }
   }
 
   /**
+   * Plays a serene eyes-closed breathing phase cue.
+   * Hold phases intentionally stay silent to preserve calm focus.
+   */
+  public playBreathingCue(
+    phase: BreathingPhase,
+    cueMode: BreathingCueMode,
+    volume: number = 0.75
+  ): void {
+    if (cueMode === "silent") return;
+    if (phase === "holdIn" || phase === "holdOut") return;
+
+    const clampedVolume = Math.min(1, Math.max(0, volume));
+    if (clampedVolume <= 0.001) return;
+
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+
+    if (cueMode === "chime") {
+      this.playBellSound("soft-chime", clampedVolume * 0.45);
+      return;
+    }
+
+    // "tone": gentle organic sine+harmonic breath glide
+    const now = ctx.currentTime;
+    const isInhale = phase === "inhale";
+    const startFreq = isInhale ? 246.94 : 329.63; // B3 -> E4 on inhale, E4 -> A3 on exhale
+    const endFreq = isInhale ? 329.63 : 220.0;
+    const duration = isInhale ? 0.65 : 0.75;
+    const peakGain = 0.16 * Math.pow(clampedVolume, 1.35);
+
+    const masterGain = ctx.createGain();
+    masterGain.gain.setValueAtTime(0.0001, now);
+    masterGain.gain.exponentialRampToValueAtTime(peakGain, now + 0.14);
+    masterGain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+    masterGain.connect(ctx.destination);
+
+    const osc1 = ctx.createOscillator();
+    osc1.type = "sine";
+    osc1.frequency.setValueAtTime(startFreq, now);
+    osc1.frequency.exponentialRampToValueAtTime(endFreq, now + duration * 0.85);
+    osc1.connect(masterGain);
+
+    const osc2 = ctx.createOscillator();
+    const harmonicGain = ctx.createGain();
+    osc2.type = "sine";
+    osc2.frequency.setValueAtTime(startFreq * 1.5, now);
+    osc2.frequency.exponentialRampToValueAtTime(
+      endFreq * 1.5,
+      now + duration * 0.85
+    );
+    harmonicGain.gain.setValueAtTime(0.28, now);
+    osc2.connect(harmonicGain);
+    harmonicGain.connect(masterGain);
+
+    osc1.start(now);
+    osc2.start(now);
+    osc1.stop(now + duration + 0.05);
+    osc2.stop(now + duration + 0.05);
+  }
+
+  /**
    * Warm Tibetan singing bowl strike with harmonic partials and natural decay.
    */
-  private playSingingBowl(ctx: AudioContext): void {
+  private playSingingBowl(ctx: AudioContext, destination: AudioNode): void {
     const now = ctx.currentTime;
     const baseFreq = 216;
     const duration = 8.5;
@@ -104,11 +209,18 @@ export class MeditationAudioEngine {
       { ratio: 5.404, gain: 0.025, decay: duration * 0.35 },
     ];
 
-    this.playHarmonicTone(ctx, now, baseFreq, partials, {
-      attack: 0.04,
-      masterPeak: 0.85,
-      duration,
-    });
+    this.playHarmonicTone(
+      ctx,
+      destination,
+      now,
+      baseFreq,
+      partials,
+      {
+        attack: 0.04,
+        masterPeak: 0.85,
+        duration,
+      }
+    );
   }
 
   /**
@@ -116,7 +228,10 @@ export class MeditationAudioEngine {
    * paired doublet partials for authentic slow acoustic beating ("wah-wah" shimmer),
    * subtle stereo width, and a long resonant tail.
    */
-  private playTibetanHealingBowl(ctx: AudioContext): void {
+  private playTibetanHealingBowl(
+    ctx: AudioContext,
+    destination: AudioNode
+  ): void {
     const now = ctx.currentTime;
     const baseFreq = 174; // Grounding deep healing bowl fundamental (~F3)
     const duration = 13.5;
@@ -126,7 +241,7 @@ export class MeditationAudioEngine {
     masterGain.gain.exponentialRampToValueAtTime(0.88, now + 0.08);
     masterGain.gain.setValueAtTime(0.88, now + duration * 0.65);
     masterGain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
-    masterGain.connect(ctx.destination);
+    masterGain.connect(destination);
 
     // Subtle soft felt mallet strike transient
     const malletSource = ctx.createBufferSource();
@@ -244,7 +359,7 @@ export class MeditationAudioEngine {
   /**
    * Deep resonant temple gong with slow bloom and gentle metallic shimmer.
    */
-  private playDeepGong(ctx: AudioContext): void {
+  private playDeepGong(ctx: AudioContext, destination: AudioNode): void {
     const now = ctx.currentTime;
     const baseFreq = 110;
     const duration = 11.0;
@@ -258,7 +373,7 @@ export class MeditationAudioEngine {
       { ratio: 3.65, gain: 0.022, decay: duration * 0.32 },
     ];
 
-    this.playHarmonicTone(ctx, now, baseFreq, partials, {
+    this.playHarmonicTone(ctx, destination, now, baseFreq, partials, {
       attack: 0.09,
       masterPeak: 0.88,
       duration,
@@ -268,7 +383,7 @@ export class MeditationAudioEngine {
   /**
    * Delicate ting-sha / wind chime with airy upper partials.
    */
-  private playSoftChime(ctx: AudioContext): void {
+  private playSoftChime(ctx: AudioContext, destination: AudioNode): void {
     const now = ctx.currentTime;
     const baseFreq = 880;
     const duration = 6.0;
@@ -281,7 +396,7 @@ export class MeditationAudioEngine {
       { ratio: 2.997, gain: 0.025, decay: duration * 0.32 },
     ];
 
-    this.playHarmonicTone(ctx, now, baseFreq, partials, {
+    this.playHarmonicTone(ctx, destination, now, baseFreq, partials, {
       attack: 0.012,
       masterPeak: 0.62,
       duration,
@@ -291,7 +406,7 @@ export class MeditationAudioEngine {
   /**
    * Pure quartz crystal bowl with serene beating and smooth bloom.
    */
-  private playCrystalBowl(ctx: AudioContext): void {
+  private playCrystalBowl(ctx: AudioContext, destination: AudioNode): void {
     const now = ctx.currentTime;
     const baseFreq = 432;
     const duration = 9.5;
@@ -303,7 +418,7 @@ export class MeditationAudioEngine {
       { ratio: 3.0, gain: 0.02, decay: duration * 0.38 },
     ];
 
-    this.playHarmonicTone(ctx, now, baseFreq, partials, {
+    this.playHarmonicTone(ctx, destination, now, baseFreq, partials, {
       attack: 0.14,
       masterPeak: 0.72,
       duration,
@@ -313,14 +428,14 @@ export class MeditationAudioEngine {
   /**
    * Crisp organic temple wood block (mokugyo) tap.
    */
-  private playWoodBlock(ctx: AudioContext): void {
+  private playWoodBlock(ctx: AudioContext, destination: AudioNode): void {
     const now = ctx.currentTime;
 
     const masterGain = ctx.createGain();
     masterGain.gain.setValueAtTime(0.0001, now);
     masterGain.gain.exponentialRampToValueAtTime(0.75, now + 0.004);
     masterGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.36);
-    masterGain.connect(ctx.destination);
+    masterGain.connect(destination);
 
     // Resonant hollow wooden body
     const bodySpecs = [
@@ -367,6 +482,7 @@ export class MeditationAudioEngine {
 
   private playHarmonicTone(
     ctx: AudioContext,
+    destination: AudioNode,
     now: number,
     baseFreq: number,
     partials: Array<{ ratio: number; gain: number; decay: number }>,
@@ -388,7 +504,7 @@ export class MeditationAudioEngine {
       0.0001,
       now + envelope.duration
     );
-    masterGain.connect(ctx.destination);
+    masterGain.connect(destination);
 
     for (const partial of partials) {
       const osc = ctx.createOscillator();
@@ -858,6 +974,7 @@ export class MeditationAudioEngine {
 
   public dispose(): void {
     this.clearPreviewTimer();
+    this.cancelBellStrikes();
     this.teardownAmbientImmediate();
     if (this.ctx) {
       void this.ctx.close();

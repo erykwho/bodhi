@@ -16,6 +16,7 @@ enum TrackProvider {
 enum SessionMode {
   TIMER
   TRACK
+  BREATHING
 }
 
 model User {
@@ -59,6 +60,7 @@ model MeditationSession {
   track              FavoriteTrack? @relation(fields: [trackId], references: [id], onDelete: SetNull)
   trackTitle         String?
   trackProvider      TrackProvider?
+  breathingPattern   String?
   plannedDurationSec Int?
   actualDurationSec  Int
   completed          Boolean        @default(true)
