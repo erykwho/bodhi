@@ -14,9 +14,12 @@ describe("timer preferences", () => {
   it("parses valid preferences accurately", () => {
     const parsed = parseTimerPreferences({
       durationMinutes: 20,
+      openEnded: true,
       warmupSeconds: 10,
       startBell: "tibetan-healing-bowl",
       endBell: "none",
+      endBellStrikes: 3,
+      bellVolume: 0.7,
       intervalEnabled: true,
       intervalMinutes: 5,
       intervalBell: "wood-block",
@@ -26,9 +29,12 @@ describe("timer preferences", () => {
 
     expect(parsed).toEqual({
       durationMinutes: 20,
+      openEnded: true,
       warmupSeconds: 10,
       startBell: "tibetan-healing-bowl",
       endBell: "none",
+      endBellStrikes: 3,
+      bellVolume: 0.7,
       intervalEnabled: true,
       intervalMinutes: 5,
       intervalBell: "wood-block",
@@ -37,12 +43,15 @@ describe("timer preferences", () => {
     });
   });
 
-  it("clamps numeric fields and falls back for unknown sound IDs", () => {
+  it("clamps numeric fields and falls back for unknown sound IDs or legacy shapes", () => {
     const parsed = parseTimerPreferences({
       durationMinutes: 999,
+      openEnded: "yes",
       warmupSeconds: 99,
       startBell: "unknown-bell",
       endBell: 123,
+      endBellStrikes: 5,
+      bellVolume: 1.5,
       intervalEnabled: "yes",
       intervalMinutes: 0,
       intervalBell: "none",
@@ -52,9 +61,12 @@ describe("timer preferences", () => {
 
     expect(parsed).toEqual({
       durationMinutes: 180,
+      openEnded: false,
       warmupSeconds: DEFAULT_TIMER_PREFERENCES.warmupSeconds,
       startBell: DEFAULT_TIMER_PREFERENCES.startBell,
       endBell: DEFAULT_TIMER_PREFERENCES.endBell,
+      endBellStrikes: DEFAULT_TIMER_PREFERENCES.endBellStrikes,
+      bellVolume: 1,
       intervalEnabled: false,
       intervalMinutes: 1,
       intervalBell: DEFAULT_TIMER_PREFERENCES.intervalBell,

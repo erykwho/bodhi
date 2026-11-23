@@ -12,10 +12,14 @@ import {
   clampIntervalMinutes,
 } from "@/lib/timer/engine";
 import {
+  BELL_STRIKE_OPTIONS,
+  DEFAULT_BELL_VOLUME,
   DEFAULT_DURATION_MINUTES,
+  DEFAULT_END_BELL_STRIKES,
   DEFAULT_INTERVAL_MINUTES,
   DEFAULT_WARMUP_SECONDS,
   WARMUP_OPTIONS_SECONDS,
+  type BellStrikeCount,
   type TimerPreferences,
   type WarmupSeconds,
 } from "@/lib/timer/types";
@@ -24,9 +28,12 @@ export const TIMER_PREFERENCES_STORAGE_KEY = "bodhi.timer.preferences.v1";
 
 export const DEFAULT_TIMER_PREFERENCES: TimerPreferences = {
   durationMinutes: DEFAULT_DURATION_MINUTES,
+  openEnded: false,
   warmupSeconds: DEFAULT_WARMUP_SECONDS,
   startBell: DEFAULT_START_BELL_ID,
   endBell: DEFAULT_END_BELL_ID,
+  endBellStrikes: DEFAULT_END_BELL_STRIKES,
+  bellVolume: DEFAULT_BELL_VOLUME,
   intervalEnabled: false,
   intervalMinutes: DEFAULT_INTERVAL_MINUTES,
   intervalBell: DEFAULT_INTERVAL_BELL_ID,
@@ -41,9 +48,16 @@ function isWarmupSeconds(value: unknown): value is WarmupSeconds {
   );
 }
 
-function clampVolume(value: unknown): number {
+function isBellStrikeCount(value: unknown): value is BellStrikeCount {
+  return (
+    typeof value === "number" &&
+    (BELL_STRIKE_OPTIONS as readonly number[]).includes(value)
+  );
+}
+
+function clampVolume(value: unknown, fallback: number): number {
   if (typeof value !== "number" || !Number.isFinite(value)) {
-    return DEFAULT_AMBIENT_VOLUME;
+    return fallback;
   }
   return Math.min(1, Math.max(0, Math.round(value * 20) / 20));
 }
@@ -65,6 +79,11 @@ export function parseTimerPreferences(raw: unknown): TimerPreferences {
       ? clampDurationMinutes(record.durationMinutes)
       : DEFAULT_TIMER_PREFERENCES.durationMinutes;
 
+  const openEnded =
+    typeof record.openEnded === "boolean"
+      ? record.openEnded
+      : DEFAULT_TIMER_PREFERENCES.openEnded;
+
   const warmupSeconds = isWarmupSeconds(record.warmupSeconds)
     ? record.warmupSeconds
     : DEFAULT_TIMER_PREFERENCES.warmupSeconds;
@@ -76,6 +95,12 @@ export function parseTimerPreferences(raw: unknown): TimerPreferences {
   const endBell = isBellSoundId(record.endBell)
     ? record.endBell
     : DEFAULT_TIMER_PREFERENCES.endBell;
+
+  const endBellStrikes = isBellStrikeCount(record.endBellStrikes)
+    ? record.endBellStrikes
+    : DEFAULT_TIMER_PREFERENCES.endBellStrikes;
+
+  const bellVolume = clampVolume(record.bellVolume, DEFAULT_BELL_VOLUME);
 
   const intervalEnabled =
     typeof record.intervalEnabled === "boolean"
@@ -98,13 +123,19 @@ export function parseTimerPreferences(raw: unknown): TimerPreferences {
     ? record.ambientSound
     : DEFAULT_TIMER_PREFERENCES.ambientSound;
 
-  const ambientVolume = clampVolume(record.ambientVolume);
+  const ambientVolume = clampVolume(
+    record.ambientVolume,
+    DEFAULT_AMBIENT_VOLUME
+  );
 
   return {
     durationMinutes,
+    openEnded,
     warmupSeconds,
     startBell,
     endBell,
+    endBellStrikes,
+    bellVolume,
     intervalEnabled,
     intervalMinutes,
     intervalBell,

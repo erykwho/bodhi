@@ -18,11 +18,19 @@ export const MIN_INTERVAL_MINUTES = 1;
 export const MAX_INTERVAL_MINUTES = 60;
 export const DEFAULT_INTERVAL_MINUTES = 5;
 
+export const BELL_STRIKE_OPTIONS = [1, 3] as const;
+export type BellStrikeCount = (typeof BELL_STRIKE_OPTIONS)[number];
+export const DEFAULT_BELL_VOLUME = 0.85;
+export const DEFAULT_END_BELL_STRIKES: BellStrikeCount = 1;
+
 export interface TimerPreferences {
   durationMinutes: number;
+  openEnded: boolean;
   warmupSeconds: WarmupSeconds;
   startBell: BellSoundId;
   endBell: BellSoundId;
+  endBellStrikes: BellStrikeCount;
+  bellVolume: number;
   intervalEnabled: boolean;
   intervalMinutes: number;
   intervalBell: BellSoundId;

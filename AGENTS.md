@@ -23,7 +23,7 @@ Mobile-first meditation web application (**PWA**) designed for calm, distraction
    - Production database updates run exclusively via **Prisma Migrations** (`prisma migrate deploy` in `scripts/vercel-db-sync.mjs`). Never re-enable `prisma db push` in production.
    - Never drop or rename an existing column, table, or enum value in a single deploy. Always use *expand-and-contract* (add nullable/default column first → deploy compatible app code → backfill/migrate → remove legacy column in a subsequent release) so 1-click Vercel rollbacks remain safe.
 4. **Service Worker & Cache Safety (`public/sw.js`):** Never cache `/api/*` or `/api/auth/*` requests. Keep `Cache-Control: no-cache` on `public/sw.js` (`next.config.ts`) and keep it excluded from `src/proxy.ts` so silent PWA updates always propagate.
-5. **Backward-Compatible Client Storage:** All `localStorage` readers (`bodhi-timer-preferences`, `bodhi-locale`, local presets, offline session queue, and history cache) MUST gracefully handle missing, partial, or older JSON shapes with safe defaults — never throw on parse.
+5. **Backward-Compatible Client Storage:** All `localStorage` readers (`bodhi.timer.preferences.v1`, `bodhi.breathing.preferences.v1`, `bodhi-locale`, local presets, offline session queue, and history cache) MUST gracefully handle missing, partial, or older JSON shapes with safe defaults — never throw on parse.
 6. **100% i18n Key Parity:** Every locale catalog under `src/lib/i18n/messages/` MUST satisfy the `Messages` type from `en.ts` and pass `src/lib/i18n/locale.test.ts`.
 7. **React 19 & Next.js 16 Guardrails:**
    - Do not call `setState` synchronously inside a `useEffect` body (`react-hooks/set-state-in-effect`); use `useSyncExternalStore`, `queueMicrotask`, or async callbacks.
@@ -33,23 +33,28 @@ Mobile-first meditation web application (**PWA**) designed for calm, distraction
 
 ## Domain Business Rules
 
-- **Meditation Timer & Audio (`src/lib/timer/`, `src/lib/audio/`):**
-  - Duration presets: `5`, `10`, `15`, `20`, `30` min; custom duration clamped to `1–180` min (`MIN_DURATION_MINUTES` / `MAX_DURATION_MINUTES`).
+- **Meditation Timer, Open-Ended Mode & Audio (`src/lib/timer/`, `src/lib/audio/`):**
+  - Subtle sub-mode selector (`Timer · Open · Breathe`) lives inside the Timer tab, keeping top-level navigation strictly 3 tabs (`Timer | Guided | History`).
+  - Duration presets: `5`, `10`, `15`, `20`, `30` min; custom duration clamped to `1–180` min (`MIN_DURATION_MINUTES` / `MAX_DURATION_MINUTES`); plus **Open-Ended (`Open`)** count-up mode with no fixed time limit (`plannedDurationSec: null`, plays closing bell when finished manually).
   - Optional warm-up: `Off (0s)`, `5s`, `10s` before the opening bell.
-  - Countdown is timestamp-based and drift-free; Screen Wake Lock is held during active sessions.
-  - 7 synthesized bells (`None`, `Singing Bowl`, `Tibetan Healing Bowl`, `Deep Gong`, `Soft Chime`, `Crystal Bowl`, `Wood Block`) for start, interval (`1–60` min, pauses with timer), and end chimes; 7 offline ambient soundscapes (`Silence`, `White Noise`, `Pink Noise`, `Brown Noise`, `Gentle Rain`, `Ocean Waves`, `Warm Drone`).
-  - OLED-friendly **Zen Dim Mode** (`Dim screen` pill + tap-anywhere-to-wake overlay) keeps Wake Lock active during timer sessions.
+  - Countdown and count-up timing are timestamp-based and drift-free; Screen Wake Lock is held during active sessions.
+  - 7 synthesized bells (`None`, `Singing Bowl`, `Tibetan Healing Bowl`, `Deep Gong`, `Soft Chime`, `Crystal Bowl`, `Wood Block`) with independent **bell volume** (`bellVolume`, default `0.85`) and configurable closing bell strikes (`1×` or `3×`, `endBellStrikes`), plus interval chimes (`1–60` min, pause with timer) and 7 offline ambient soundscapes (`Silence`, `White Noise`, `Pink Noise`, `Brown Noise`, `Gentle Rain`, `Ocean Waves`, `Warm Drone`).
+  - OLED-friendly **Zen Dim Mode** (`ZenDimOverlay` — `Dim screen` pill + tap-anywhere-to-wake overlay) keeps Wake Lock active during Timer, Breathing, and Guided sessions.
+- **Guided Breathing (`src/lib/breathing/`, `BreathingPractice`, `BreathingSheet`):**
+  - 100% public & offline-first with 4 rhythms: `Box` (`4-4-4-4`), `4-7-8` (`4-7-8`), `Coherent` (`5.5-5.5`), and `Custom` (`inhale 1–15s`, `holdIn 0–15s`, `exhale 1–20s`, `holdOut 0–15s`), duration `1–30` min (default `3` min).
+  - Eyes-closed guidance via Web Audio phase cues (`tone | chime | silent`, hold phases stay silent) + optional haptic vibration (`navigator.vibrate`, enabled by default on supported mobile devices) + optional ambient soundscape.
+  - Completion view saves automatically for signed-in users (`SessionMode.BREATHING` + `breathingPattern`, offline-queued when offline) and provides a one-tap **"Continue to Meditation"** bridge directly into the Timer.
 - **Practice Presets (`TimerPreset`, `src/lib/timer/presets.ts`, `PresetStrip`):**
-  - Presets capture full timer configuration (duration, warm-up, bells, interval, ambient sound & volume).
+  - Presets capture full timer configuration (duration, open-ended mode, warm-up, bells, closing strikes, bell volume, interval, ambient sound & volume).
   - Synced to Neon PostgreSQL when signed in and online; automatically falls back to `localStorage` when signed out or offline.
 - **Guided Tracks & Player (`FavoriteTrack`, `src/lib/tracks/`, `GuidedTracks`, `GuidedSessionPlayer`):**
   - Supports `YOUTUBE`, `SOUNDCLOUD`, and `DIRECT_AUDIO` (`.mp3`/`.m4a`/`.ogg`/`.wav`/`.aac`/`.opus`) URLs with auto-detection and oEmbed metadata resolution.
   - Press-and-hold drag reordering (`/api/tracks/reorder`) MUST keep `data-no-drag="true"` on interactive card controls/editors and disable `PullToRefresh` while dragging.
-  - Supports custom and suggested tags, single-row tag filter bar, inline title/tag editing (`PATCH /api/tracks/[id]`), closing bell synced with the user's configured Timer end bell, **Zen Dim Mode**, and **Media Session API** lock-screen controls for `DIRECT_AUDIO`.
+  - Supports custom and suggested tags, single-row tag filter bar, inline title/tag editing (`PATCH /api/tracks/[id]`), closing bell synced with the user's configured Timer end bell (including `1×`/`3×` strikes and `bellVolume`), **Zen Dim Mode**, and **Media Session API** lock-screen controls for `DIRECT_AUDIO`.
 - **Meditation History & Offline Sync (`MeditationSession`, `src/lib/history/`, `src/lib/offline/`):**
-  - `SessionMode` is `TIMER | TRACK`. Completed sessions are logged automatically for signed-in users.
-  - Early-stop save prompt triggers only when active practice duration is `>= MIN_SAVEABLE_EARLY_STOP_SECONDS` (`60` seconds).
-  - Signed-in Timer sessions completed offline are queued locally (`Pending sync`), merged into the History view, and flushed automatically to `/api/sessions` upon reconnect.
+  - `SessionMode` is `TIMER | TRACK | BREATHING` (with nullable `breathingPattern` for breathing sessions and `plannedDurationSec: null` for open-ended timer sessions). Completed sessions are logged automatically for signed-in users and all modes count toward totals and daily streaks.
+  - Active sessions across all modes provide a `Finish` button; the early-finish save prompt (`EarlyFinishCard`, with Save to History, Discard, and Keep going) triggers when active practice duration is `>= MIN_SAVEABLE_EARLY_STOP_SECONDS` (`10` seconds).
+  - Signed-in Timer and Breathing sessions completed offline are queued locally (`Pending sync`), merged into the History view, and flushed automatically to `/api/sessions` upon reconnect.
   - History provides period filters (`7d | 30d | All`), total time, current and all-time longest streak (`Best Xd`), session count, monthly practice calendar/heatmap with tap-to-filter, inline manual logging (`+ Log`), reflection notes, and RFC-4180 CSV / JSON export.
 - **Authentication (`src/lib/auth.ts`, `src/proxy.ts`):**
   - Auth.js v5 (`next-auth@beta`, JWT session) with Google OAuth 2.0.
@@ -65,25 +70,26 @@ Mobile-first meditation web application (**PWA**) designed for calm, distraction
 - **Observability:** Sentry (`@sentry/nextjs`, org `bodhi-09`, project `bodhi`), enabled automatically when `NEXT_PUBLIC_SENTRY_DSN` is set (no-op in dev/CI without DSN; PII off by default in SDK v11; source maps uploaded on build when `SENTRY_AUTH_TOKEN` is configured).
 - **CI/CD & Hosting:** GitHub Actions (`.github/workflows/ci.yml` running `prisma validate`, `pnpm test`, `pnpm lint`, `pnpm build`, and `pnpm test:e2e`) + Vercel (continuous deployment from `master`, protected branch requiring PR + passing checks).
 
-## Directory Structure (V8)
+## Directory Structure (V9)
 
 - `.github/workflows/ci.yml` — GitHub Actions CI (`CI` job: Prisma validate, Vitest, ESLint, Next.js build, Playwright E2E smoke tests).
 - `.github/dependabot.yml` — Grouped weekly Dependabot updates for `npm`/`pnpm` dependencies and GitHub Actions.
-- `e2e/smoke.spec.ts` & `playwright.config.ts` — Mobile PWA Playwright E2E smoke tests (Timer lifecycle, Zen Dim, Sound Picker, local Presets, i18n, theme persistence, navigation, `/api/health`, offline mode).
+- `e2e/smoke.spec.ts` & `playwright.config.ts` — Mobile PWA Playwright E2E smoke tests (Timer, Open-Ended, Guided Breathing, 3× bell, Zen Dim, Sound Picker, local Presets, i18n, theme persistence, navigation, `/api/health`, offline mode).
 - `sentry.server.config.ts`, `sentry.edge.config.ts`, `src/instrumentation.ts`, `src/instrumentation-client.ts` — Conditional Sentry SDK initialization and `onRequestError` / router transition hooks.
 - `public/sw.js` — Offline PWA Service Worker.
-- `prisma/schema.prisma` & `prisma/migrations/` — `User`, `FavoriteTrack`, `MeditationSession`, and `TimerPreset` models and versioned SQL migrations.
+- `prisma/schema.prisma` & `prisma/migrations/` — `User`, `FavoriteTrack`, `MeditationSession` (`TIMER | TRACK | BREATHING`), and `TimerPreset` models and versioned SQL migrations.
 - `scripts/vercel-db-sync.mjs` — Production-only `prisma migrate deploy` runner (with one-time `P3005` baseline transition and no `db push` fallback).
 - `src/app/` — App Router layout, global styles, Error Boundaries (`error.tsx`, `global-error.tsx`), PWA `manifest.ts`, server actions (`actions.ts`), main page, and REST API routes (`/api/health` with optional `?db=1` Neon check, `/api/auth/[...nextauth]`, `/api/tracks`, `/api/tracks/resolve`, `/api/tracks/reorder`, `/api/tracks/[id]`, `/api/sessions`, `/api/sessions/[id]`, `/api/presets`, `/api/presets/[id]`, plus Vitest security & contract tests).
 - `src/lib/i18n/` — Locale types & metadata (`types.ts`), resolver & helpers (`locale.ts` + `locale.test.ts`), and typed message bundles (`messages/en.ts`, `messages/pt-br.ts`).
-- `src/lib/timer/` — Timestamp-based timer engine (`engine.ts` + `engine.test.ts`), persisted preferences (`preferences.ts` + `preferences.test.ts`), named presets (`presets.ts` + `presets.test.ts`), and types (`types.ts`).
-- `src/lib/audio/` — Extensible bell & ambient sound catalog (`sounds.ts`) and Web Audio API synthesis engine (`engine.ts`).
+- `src/lib/timer/` — Timestamp-based countdown & open-ended timer engine (`engine.ts` + `engine.test.ts`), persisted preferences (`preferences.ts` + `preferences.test.ts`), named presets (`presets.ts` + `presets.test.ts`), and types (`types.ts`).
+- `src/lib/breathing/` — Timestamp-based guided breathing engine (`engine.ts` + `engine.test.ts`), persisted preferences (`preferences.ts` + `preferences.test.ts`), and types/presets (`types.ts`).
+- `src/lib/audio/` — Extensible bell & ambient sound catalog (`sounds.ts`) and Web Audio API synthesis engine with bell volume, 1×/3× strikes, and breathing cues (`engine.ts`).
 - `src/lib/tracks/` — YouTube/SoundCloud/Direct Audio URL parser (`providers.ts` + `providers.test.ts`), oEmbed resolver (`oembed.ts`), drag-reorder helpers (`reorder.ts` + `reorder.test.ts`), and types (`types.ts`).
 - `src/lib/history/` — History statistics, period filter & monthly calendar engine (`stats.ts` + `stats.test.ts`), CSV/JSON export (`export.ts` + `export.test.ts`), client helpers with offline fallback (`client.ts`), and types (`types.ts`).
 - `src/lib/offline/` — Offline session queue & history cache (`queue.ts` + `queue.test.ts`) and reactive online status hook (`use-network-status.ts`).
 - `src/lib/pull-to-refresh.ts` + `pull-to-refresh.test.ts` — Pure rubber-band pull-to-refresh physics and tests.
 - `src/lib/wake-lock.ts` — Screen Wake Lock hook.
-- `src/components/` — `BodhiShell`, `BodhiLogo`, `ThemeProvider`, `I18nProvider`, `ServiceWorkerRegister`, `PullToRefresh`, `MeditationTimer`, `PresetStrip`, `SoundPickerSheet`, `GuidedTracks`, `GuidedSessionPlayer`, `MeditationHistory`, and `HistoryCalendar`.
+- `src/components/` — `BodhiShell`, `BodhiLogo`, `ThemeProvider`, `I18nProvider`, `ServiceWorkerRegister`, `PullToRefresh`, `MeditationTimer`, `BreathingPractice`, `BreathingSheet`, `ZenDimOverlay`, `EarlyFinishCard`, `PresetStrip`, `SoundPickerSheet`, `GuidedTracks`, `GuidedSessionPlayer`, `MeditationHistory`, and `HistoryCalendar`.
 - `public/icons/` — Official Bodhi leaf SVG, transparent PNG favicon, and PWA PNG icons.
 
 ## Commands & Conventions

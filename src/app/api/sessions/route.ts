@@ -4,13 +4,14 @@ import { authErrorResponse, requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
 const createSessionSchema = z.object({
-  mode: z.enum(["TIMER", "TRACK"]),
+  mode: z.enum(["TIMER", "TRACK", "BREATHING"]),
   trackId: z.string().trim().min(1).max(100).optional().nullable(),
   trackTitle: z.string().trim().max(160).optional().nullable(),
   trackProvider: z
     .enum(["YOUTUBE", "SOUNDCLOUD", "DIRECT_AUDIO"])
     .optional()
     .nullable(),
+  breathingPattern: z.string().trim().max(80).optional().nullable(),
   plannedDurationSec: z
     .number()
     .int()
@@ -31,10 +32,11 @@ const createSessionSchema = z.object({
 
 function serializeSession(session: {
   id: string;
-  mode: "TIMER" | "TRACK";
+  mode: "TIMER" | "TRACK" | "BREATHING";
   trackId: string | null;
   trackTitle: string | null;
   trackProvider: "YOUTUBE" | "SOUNDCLOUD" | "DIRECT_AUDIO" | null;
+  breathingPattern?: string | null;
   plannedDurationSec: number | null;
   actualDurationSec: number;
   completed: boolean;
@@ -48,6 +50,7 @@ function serializeSession(session: {
     trackId: session.trackId,
     trackTitle: session.trackTitle,
     trackProvider: session.trackProvider,
+    breathingPattern: session.breathingPattern ?? null,
     plannedDurationSec: session.plannedDurationSec,
     actualDurationSec: session.actualDurationSec,
     completed: session.completed,
@@ -122,6 +125,7 @@ export async function POST(request: Request) {
         trackId: verifiedTrackId,
         trackTitle: resolvedTrackTitle,
         trackProvider: resolvedTrackProvider,
+        breathingPattern: data.breathingPattern?.trim() || null,
         plannedDurationSec: data.plannedDurationSec ?? null,
         actualDurationSec: data.actualDurationSec,
         completed: data.completed,

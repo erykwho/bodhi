@@ -5,9 +5,11 @@ import {
   computeElapsedMs,
   computeIntervalBellIndex,
   computeIntervalCount,
+  computeOpenEndedIntervalBellIndex,
   computeProgress,
   computeRemainingMs,
   formatDurationLabel,
+  formatElapsedDisplay,
   formatTimerDisplay,
 } from "./engine";
 
@@ -139,6 +141,29 @@ describe("timer engine", () => {
     it("formats H:MM:SS for durations of one hour or more", () => {
       expect(formatTimerDisplay(3_600_000)).toBe("1:00:00");
       expect(formatTimerDisplay(5_430_000)).toBe("1:30:30");
+    });
+  });
+
+  describe("computeOpenEndedIntervalBellIndex", () => {
+    it("advances indefinitely without an upper session limit", () => {
+      const fiveMin = 5 * 60_000;
+      expect(computeOpenEndedIntervalBellIndex(0, fiveMin)).toBe(0);
+      expect(computeOpenEndedIntervalBellIndex(fiveMin - 1, fiveMin)).toBe(0);
+      expect(computeOpenEndedIntervalBellIndex(fiveMin, fiveMin)).toBe(1);
+      expect(computeOpenEndedIntervalBellIndex(3 * fiveMin + 1000, fiveMin)).toBe(
+        3
+      );
+      expect(computeOpenEndedIntervalBellIndex(-100, fiveMin)).toBe(0);
+    });
+  });
+
+  describe("formatElapsedDisplay", () => {
+    it("formats count-up elapsed time starting cleanly at 00:00", () => {
+      expect(formatElapsedDisplay(0)).toBe("00:00");
+      expect(formatElapsedDisplay(999)).toBe("00:00");
+      expect(formatElapsedDisplay(1_000)).toBe("00:01");
+      expect(formatElapsedDisplay(65_400)).toBe("01:05");
+      expect(formatElapsedDisplay(3_661_000)).toBe("1:01:01");
     });
   });
 

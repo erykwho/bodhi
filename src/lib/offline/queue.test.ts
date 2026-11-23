@@ -47,6 +47,7 @@ describe("offline session queue", () => {
       trackId: null,
       trackTitle: null,
       trackProvider: null,
+      breathingPattern: null,
       plannedDurationSec: 300,
       actualDurationSec: 180,
       completed: false,

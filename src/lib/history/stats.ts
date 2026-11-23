@@ -6,7 +6,7 @@ import type {
 /**
  * Minimum elapsed seconds required to prompt saving an early-stopped session.
  */
-export const MIN_SAVEABLE_EARLY_STOP_SECONDS = 60;
+export const MIN_SAVEABLE_EARLY_STOP_SECONDS = 10;
 
 export type HistoryPeriod = "7d" | "30d" | "all";
 

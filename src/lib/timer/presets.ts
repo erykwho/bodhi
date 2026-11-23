@@ -32,10 +32,13 @@ export function doesPresetMatchPreferences(
 ): boolean {
   const p = preset.preferences;
   return (
-    p.durationMinutes === prefs.durationMinutes &&
+    p.openEnded === prefs.openEnded &&
+    (p.openEnded || p.durationMinutes === prefs.durationMinutes) &&
     p.warmupSeconds === prefs.warmupSeconds &&
     p.startBell === prefs.startBell &&
     p.endBell === prefs.endBell &&
+    (p.endBell === "none" || p.endBellStrikes === prefs.endBellStrikes) &&
+    Math.abs(p.bellVolume - prefs.bellVolume) < 0.001 &&
     p.intervalEnabled === prefs.intervalEnabled &&
     (!p.intervalEnabled ||
       (p.intervalMinutes === prefs.intervalMinutes &&
@@ -47,10 +50,10 @@ export function doesPresetMatchPreferences(
 }
 
 /**
- * Builds a compact human-readable subtitle for a preset (e.g., "15m · Gentle Rain").
+ * Builds a compact human-readable subtitle for a preset (e.g., "15m · Gentle Rain" or "Open · Gentle Rain").
  */
 export function formatPresetSummary(prefs: TimerPreferences): string {
-  const parts = [`${prefs.durationMinutes}m`];
+  const parts = [prefs.openEnded ? "Open" : `${prefs.durationMinutes}m`];
   if (prefs.ambientSound !== "silence") {
     parts.push(getAmbientSoundOption(prefs.ambientSound).name);
   }

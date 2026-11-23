@@ -31,7 +31,13 @@ export function sessionsToCsv(
     const title =
       session.mode === "TRACK"
         ? (session.trackTitle ?? "Guided Meditation")
-        : "Silent Timer";
+        : session.mode === "BREATHING"
+          ? session.breathingPattern
+            ? `Breathing · ${session.breathingPattern}`
+            : "Guided Breathing"
+          : session.plannedDurationSec === null
+            ? "Open Timer"
+            : "Silent Timer";
     const durationMinutes = Number((session.actualDurationSec / 60).toFixed(2));
 
     return [

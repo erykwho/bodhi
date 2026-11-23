@@ -45,6 +45,12 @@ A serene, mobile-first meditation Progressive Web App (PWA) built with Next.js 1
 - **Global Language Switcher:** Toggle between **English (`EN`)** and **Brazilian Portuguese (`PT`)** from the top header anywhere in the app.
 - **Persistent & Extensible i18n:** Selected language is persisted in `localStorage` (`bodhi-locale`), updates `<html lang>` and `Intl` date/calendar formatting automatically, and is backed by strongly-typed locale catalogs (`src/lib/i18n/messages/`) ready for additional languages.
 
+### V9 — Guided Breathing, Open-Ended Timer, Early Finish & Bell Controls
+- **Guided Breathing (100% Offline):** Minimalist sub-mode (`Timer · Open · Breathe`) with Box (`4-4-4-4`), `4-7-8`, Coherent (`5.5-5.5`), and Custom rhythms, organic animated breathing orb, eyes-closed Web Audio phase cues + optional gentle haptic vibration, Zen Dim Mode, automatic history logging (`BREATHING`), and a one-tap **"Continue to Meditation"** bridge on completion.
+- **Open-Ended Timer (`Open`):** Practice without a fixed time limit (count-up display, optional interval chimes, closing bell when finishing manually, and preset support).
+- **Finish Early & Save Everywhere:** Clear `Finish` action across Timer, Open Timer, Breathing, and Guided Tracks offering a Save to History prompt (with optional reflection note) after 10 seconds of practice.
+- **Bell Strikes & Independent Volume:** Choose `1×` or `3×` strikes on the closing bell and adjust bell volume independently inside the sound picker sheet.
+
 ## Environment Variables (V2+)
 
 Copy `.env.example` to `.env.local` for local development with cloud-synced Favorites, Presets, and Meditation History:

@@ -19,33 +19,42 @@ import {
 } from "@/lib/audio/sounds";
 import { computeIntervalCount } from "@/lib/timer/engine";
 import {
+  BELL_STRIKE_OPTIONS,
+  DEFAULT_BELL_VOLUME,
+  DEFAULT_END_BELL_STRIKES,
   INTERVAL_PRESETS_MINUTES,
   MAX_INTERVAL_MINUTES,
   MIN_INTERVAL_MINUTES,
+  type BellStrikeCount,
 } from "@/lib/timer/types";
 
 export type SoundSheetSlot = "start" | "interval" | "end" | "background";
 
 interface SoundPickerSheetProps {
   slot: SoundSheetSlot | null;
-  durationMinutes: number;
-  startBell: BellSoundId;
-  endBell: BellSoundId;
-  intervalEnabled: boolean;
-  intervalMinutes: number;
-  intervalBell: BellSoundId;
+  durationMinutes?: number;
+  openEnded?: boolean;
+  startBell?: BellSoundId;
+  endBell?: BellSoundId;
+  endBellStrikes?: BellStrikeCount;
+  bellVolume?: number;
+  intervalEnabled?: boolean;
+  intervalMinutes?: number;
+  intervalBell?: BellSoundId;
   ambientSound: AmbientSoundId;
   ambientVolume: number;
   previewingAmbientId: AmbientSoundId | null;
   onClose: () => void;
-  onSelectStartBell: (id: BellSoundId) => void;
-  onSelectEndBell: (id: BellSoundId) => void;
-  onToggleIntervalEnabled: (enabled: boolean) => void;
-  onChangeIntervalMinutes: (minutes: number) => void;
-  onSelectIntervalBell: (id: BellSoundId) => void;
+  onSelectStartBell?: (id: BellSoundId) => void;
+  onSelectEndBell?: (id: BellSoundId) => void;
+  onSelectEndBellStrikes?: (strikes: BellStrikeCount) => void;
+  onChangeBellVolume?: (volume: number) => void;
+  onToggleIntervalEnabled?: (enabled: boolean) => void;
+  onChangeIntervalMinutes?: (minutes: number) => void;
+  onSelectIntervalBell?: (id: BellSoundId) => void;
   onSelectAmbientSound: (id: AmbientSoundId) => void;
   onChangeAmbientVolume: (volume: number) => void;
-  onPreviewBell: (id: BellSoundId) => void;
+  onPreviewBell?: (id: BellSoundId) => void;
   onTogglePreviewAmbient: (id: AmbientSoundId) => void;
 }
 
@@ -55,18 +64,23 @@ const INTERVAL_BELL_OPTIONS = BELL_SOUNDS.filter(
 
 export function SoundPickerSheet({
   slot,
-  durationMinutes,
-  startBell,
-  endBell,
-  intervalEnabled,
-  intervalMinutes,
-  intervalBell,
+  durationMinutes = 10,
+  openEnded = false,
+  startBell = "singing-bowl",
+  endBell = "deep-gong",
+  endBellStrikes = DEFAULT_END_BELL_STRIKES,
+  bellVolume = DEFAULT_BELL_VOLUME,
+  intervalEnabled = false,
+  intervalMinutes = 5,
+  intervalBell = "soft-chime",
   ambientSound,
   ambientVolume,
   previewingAmbientId,
   onClose,
   onSelectStartBell,
   onSelectEndBell,
+  onSelectEndBellStrikes,
+  onChangeBellVolume,
   onToggleIntervalEnabled,
   onChangeIntervalMinutes,
   onSelectIntervalBell,
@@ -164,61 +178,123 @@ export function SoundPickerSheet({
         {/* Scrollable content */}
         <div className="flex-1 overflow-x-hidden overflow-y-auto px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))]">
           {(slot === "start" || slot === "end") && (
-            <div className="flex flex-col gap-2">
-              {BELL_SOUNDS.map((sound) => {
-                const selectedId = slot === "start" ? startBell : endBell;
-                const isSelected = selectedId === sound.id;
-                const soundName = m.sounds.bells[sound.id];
-                const handleSelect = () => {
-                  if (slot === "start") {
-                    onSelectStartBell(sound.id);
-                  } else {
-                    onSelectEndBell(sound.id);
-                  }
-                };
+            <div className="flex flex-col gap-3">
+              <div className="flex flex-col gap-2">
+                {BELL_SOUNDS.map((sound) => {
+                  const selectedId = slot === "start" ? startBell : endBell;
+                  const isSelected = selectedId === sound.id;
+                  const soundName = m.sounds.bells[sound.id];
+                  const handleSelect = () => {
+                    if (slot === "start") {
+                      onSelectStartBell?.(sound.id);
+                    } else {
+                      onSelectEndBell?.(sound.id);
+                    }
+                  };
 
-                return (
-                  <div
-                    key={sound.id}
-                    className={`flex items-center justify-between gap-2 rounded-xl border px-3 py-2.5 transition-colors ${
-                      isSelected
-                        ? "border-[var(--accent)]/40 bg-[var(--accent-soft)]"
-                        : "border-black/5 bg-[var(--background)]/60 dark:border-white/8"
-                    }`}
-                  >
-                    <button
-                      type="button"
-                      onClick={handleSelect}
-                      className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
+                  return (
+                    <div
+                      key={sound.id}
+                      className={`flex items-center justify-between gap-2 rounded-xl border px-3 py-2.5 transition-colors ${
+                        isSelected
+                          ? "border-[var(--accent)]/40 bg-[var(--accent-soft)]"
+                          : "border-black/5 bg-[var(--background)]/60 dark:border-white/8"
+                      }`}
                     >
-                      <span
-                        className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition-colors ${
-                          isSelected
-                            ? "border-[var(--accent)] bg-[var(--accent)] text-[#fcfaf6] dark:text-[#151917]"
-                            : "border-black/20 dark:border-white/25"
-                        }`}
-                      >
-                        {isSelected && <Check className="h-3 w-3" />}
-                      </span>
-                      <span className="truncate text-sm font-medium text-[var(--foreground)]">
-                        {soundName}
-                      </span>
-                    </button>
-
-                    {sound.kind !== "none" && (
                       <button
                         type="button"
-                        onClick={() => onPreviewBell(sound.id)}
-                        aria-label={`${m.soundPicker.preview} ${soundName}`}
-                        className="inline-flex h-8 shrink-0 items-center gap-1 rounded-lg bg-[var(--surface)] px-2.5 text-xs font-medium text-[var(--foreground-muted)] transition-colors hover:text-[var(--foreground)]"
+                        onClick={handleSelect}
+                        className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
                       >
-                        <Play className="h-3 w-3 fill-current" />
-                        {m.soundPicker.preview}
+                        <span
+                          className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition-colors ${
+                            isSelected
+                              ? "border-[var(--accent)] bg-[var(--accent)] text-[#fcfaf6] dark:text-[#151917]"
+                              : "border-black/20 dark:border-white/25"
+                          }`}
+                        >
+                          {isSelected && <Check className="h-3 w-3" />}
+                        </span>
+                        <span className="truncate text-sm font-medium text-[var(--foreground)]">
+                          {soundName}
+                        </span>
                       </button>
-                    )}
+
+                      {sound.kind !== "none" && onPreviewBell && (
+                        <button
+                          type="button"
+                          onClick={() => onPreviewBell(sound.id)}
+                          aria-label={`${m.soundPicker.preview} ${soundName}`}
+                          className="inline-flex h-8 shrink-0 items-center gap-1 rounded-lg bg-[var(--surface)] px-2.5 text-xs font-medium text-[var(--foreground-muted)] transition-colors hover:text-[var(--foreground)]"
+                        >
+                          <Play className="h-3 w-3 fill-current" />
+                          {m.soundPicker.preview}
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {slot === "end" &&
+                endBell !== "none" &&
+                onSelectEndBellStrikes && (
+                  <div className="flex items-center justify-between gap-3 rounded-xl border border-black/6 bg-[var(--background)]/60 px-3.5 py-2.5 dark:border-white/8">
+                    <span className="text-xs font-medium text-[var(--foreground)]">
+                      {m.soundPicker.endStrikesLabel}
+                    </span>
+                    <div className="grid grid-cols-2 gap-1 rounded-lg bg-[var(--surface-muted)] p-0.5">
+                      {BELL_STRIKE_OPTIONS.map((strikes) => {
+                        const active = endBellStrikes === strikes;
+                        return (
+                          <button
+                            key={strikes}
+                            type="button"
+                            onClick={() => onSelectEndBellStrikes(strikes)}
+                            className={`rounded-md px-2.5 py-1 text-xs font-semibold tabular-nums transition-colors ${
+                              active
+                                ? "bg-[var(--surface)] text-[var(--foreground)] shadow-2xs"
+                                : "text-[var(--foreground-muted)] hover:text-[var(--foreground)]"
+                            }`}
+                          >
+                            {strikes === 3
+                              ? m.soundPicker.endStrikesThree
+                              : m.soundPicker.endStrikesOne}
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
-                );
-              })}
+                )}
+
+              {onChangeBellVolume &&
+                (slot === "start" ? startBell : endBell) !== "none" && (
+                  <div className="flex flex-col gap-1.5 rounded-xl border border-black/6 bg-[var(--background)]/60 px-3.5 py-2.5 dark:border-white/8">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-medium text-[var(--foreground-muted)]">
+                        {m.soundPicker.bellVolumeLabel}
+                      </span>
+                      <span className="font-medium text-[var(--foreground-muted)] tabular-nums">
+                        {Math.round(bellVolume * 100)}%
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <Volume2 className="h-4 w-4 shrink-0 text-[var(--foreground-muted)]" />
+                      <input
+                        type="range"
+                        min={0.1}
+                        max={1}
+                        step={0.05}
+                        value={bellVolume}
+                        onChange={(event) =>
+                          onChangeBellVolume(Number(event.target.value))
+                        }
+                        aria-label={m.soundPicker.bellVolumeAria}
+                        className="h-1.5 w-full cursor-pointer accent-[var(--accent)]"
+                      />
+                    </div>
+                  </div>
+                )}
             </div>
           )}
 
@@ -232,12 +308,14 @@ export function SoundPickerSheet({
                   </p>
                   <p className="text-xs text-[var(--foreground-muted)]">
                     {intervalEnabled
-                      ? intervalChimeCount > 0
-                        ? m.soundPicker.intervalPlaysCount(
-                            intervalChimeCount,
-                            durationMinutes
-                          )
-                        : m.soundPicker.intervalNoneFit(durationMinutes)
+                      ? openEnded
+                        ? m.soundPicker.intervalOpenEndedHint(intervalMinutes)
+                        : intervalChimeCount > 0
+                          ? m.soundPicker.intervalPlaysCount(
+                              intervalChimeCount,
+                              durationMinutes
+                            )
+                          : m.soundPicker.intervalNoneFit(durationMinutes)
                       : m.soundPicker.disabledByDefault}
                   </p>
                 </div>
@@ -247,7 +325,7 @@ export function SoundPickerSheet({
                   role="switch"
                   aria-checked={intervalEnabled}
                   aria-label={m.soundPicker.enableIntervalAria}
-                  onClick={() => onToggleIntervalEnabled(!intervalEnabled)}
+                  onClick={() => onToggleIntervalEnabled?.(!intervalEnabled)}
                   className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${
                     intervalEnabled
                       ? "bg-[var(--accent)]"
@@ -274,7 +352,7 @@ export function SoundPickerSheet({
                         <button
                           type="button"
                           onClick={() =>
-                            onChangeIntervalMinutes(intervalMinutes - 1)
+                            onChangeIntervalMinutes?.(intervalMinutes - 1)
                           }
                           disabled={intervalMinutes <= MIN_INTERVAL_MINUTES}
                           aria-label={m.soundPicker.decreaseIntervalAria}
@@ -288,7 +366,7 @@ export function SoundPickerSheet({
                         <button
                           type="button"
                           onClick={() =>
-                            onChangeIntervalMinutes(intervalMinutes + 1)
+                            onChangeIntervalMinutes?.(intervalMinutes + 1)
                           }
                           disabled={intervalMinutes >= MAX_INTERVAL_MINUTES}
                           aria-label={m.soundPicker.increaseIntervalAria}
@@ -306,7 +384,7 @@ export function SoundPickerSheet({
                           <button
                             key={preset}
                             type="button"
-                            onClick={() => onChangeIntervalMinutes(preset)}
+                            onClick={() => onChangeIntervalMinutes?.(preset)}
                             className={`h-9 rounded-xl text-xs font-medium whitespace-nowrap tabular-nums transition-colors ${
                               isSelected
                                 ? "bg-[var(--accent)] text-[#fcfaf6] dark:text-[#151917]"
@@ -339,7 +417,7 @@ export function SoundPickerSheet({
                         >
                           <button
                             type="button"
-                            onClick={() => onSelectIntervalBell(sound.id)}
+                            onClick={() => onSelectIntervalBell?.(sound.id)}
                             className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
                           >
                             <span
@@ -356,19 +434,49 @@ export function SoundPickerSheet({
                             </span>
                           </button>
 
-                          <button
-                            type="button"
-                            onClick={() => onPreviewBell(sound.id)}
-                            aria-label={`${m.soundPicker.preview} ${soundName}`}
-                            className="inline-flex h-8 shrink-0 items-center gap-1 rounded-lg bg-[var(--surface)] px-2.5 text-xs font-medium text-[var(--foreground-muted)] transition-colors hover:text-[var(--foreground)]"
-                          >
-                            <Play className="h-3 w-3 fill-current" />
-                            {m.soundPicker.preview}
-                          </button>
+                          {onPreviewBell && (
+                            <button
+                              type="button"
+                              onClick={() => onPreviewBell(sound.id)}
+                              aria-label={`${m.soundPicker.preview} ${soundName}`}
+                              className="inline-flex h-8 shrink-0 items-center gap-1 rounded-lg bg-[var(--surface)] px-2.5 text-xs font-medium text-[var(--foreground-muted)] transition-colors hover:text-[var(--foreground)]"
+                            >
+                              <Play className="h-3 w-3 fill-current" />
+                              {m.soundPicker.preview}
+                            </button>
+                          )}
                         </div>
                       );
                     })}
                   </div>
+
+                  {onChangeBellVolume && (
+                    <div className="flex flex-col gap-1.5 rounded-xl border border-black/6 bg-[var(--background)]/60 px-3.5 py-2.5 dark:border-white/8">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="font-medium text-[var(--foreground-muted)]">
+                          {m.soundPicker.bellVolumeLabel}
+                        </span>
+                        <span className="font-medium text-[var(--foreground-muted)] tabular-nums">
+                          {Math.round(bellVolume * 100)}%
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <Volume2 className="h-4 w-4 shrink-0 text-[var(--foreground-muted)]" />
+                        <input
+                          type="range"
+                          min={0.1}
+                          max={1}
+                          step={0.05}
+                          value={bellVolume}
+                          onChange={(event) =>
+                            onChangeBellVolume(Number(event.target.value))
+                          }
+                          aria-label={m.soundPicker.bellVolumeAria}
+                          className="h-1.5 w-full cursor-pointer accent-[var(--accent)]"
+                        />
+                      </div>
+                    </div>
+                  )}
                 </>
               )}
             </div>
