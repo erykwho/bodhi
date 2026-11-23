@@ -40,6 +40,7 @@ import {
   estimateTotalCycles,
   formatBreathingHistoryLabel,
   formatBreathingRhythm,
+  getBreathingRhythmParts,
   resolveBreathingRhythm,
 } from "@/lib/breathing/engine";
 import {
@@ -227,6 +228,7 @@ export function BreathingPractice({
         setSessionPhase("completed");
 
         const audio = getAudioEngine();
+        audio.stopBreathingCue(0.15);
         audio.stopAmbient(1.0);
         audio.playBellSound("soft-chime", bellVolume);
 
@@ -258,7 +260,12 @@ export function BreathingPractice({
       const snap = computeBreathingSnapshot(liveElapsed, rhythm);
       if (snap.phaseStepIndex !== lastPhaseStepRef.current) {
         lastPhaseStepRef.current = snap.phaseStepIndex;
-        getAudioEngine().playBreathingCue(snap.phase, cueMode, bellVolume);
+        getAudioEngine().playBreathingCue(
+          snap.phase,
+          cueMode,
+          bellVolume,
+          snap.phaseDurationMs / 1000
+        );
         if (hapticsEnabled) {
           triggerPhaseHaptic(snap.phase);
         }
@@ -305,7 +312,7 @@ export function BreathingPractice({
     (mode: BreathingCueMode) => {
       const audio = getAudioEngine();
       audio.unlock();
-      audio.playBreathingCue("inhale", mode, bellVolume);
+      audio.previewBreathingCue(mode, bellVolume);
     },
     [bellVolume, getAudioEngine]
   );
@@ -371,6 +378,7 @@ export function BreathingPractice({
   const handleStart = useCallback(() => {
     const audio = getAudioEngine();
     audio.unlock();
+    audio.stopBreathingCue(0.1);
     stopPreview();
     setActiveBreathingSheet(null);
     setIsSoundSheetOpen(false);
@@ -390,8 +398,8 @@ export function BreathingPractice({
     setElapsedMs(0);
     setSessionPhase("running");
 
-    // Trigger initial inhale cue immediately on user gesture
-    audio.playBreathingCue("inhale", cueMode, bellVolume);
+    // Trigger initial inhale cue immediately on user gesture for its full duration
+    audio.playBreathingCue("inhale", cueMode, bellVolume, rhythm.inhaleSec);
     if (hapticsEnabled) {
       triggerPhaseHaptic("inhale");
     }
@@ -405,6 +413,7 @@ export function BreathingPractice({
     cueMode,
     getAudioEngine,
     hapticsEnabled,
+    rhythm.inhaleSec,
     stopPreview,
   ]);
 
@@ -416,6 +425,7 @@ export function BreathingPractice({
     setElapsedMs(live);
     setIsDimmed(false);
     setSessionPhase("paused");
+    audioRef.current?.stopBreathingCue(0.2);
     audioRef.current?.stopAmbient(0.4);
   }, [getLiveElapsedMs, sessionPhase]);
 
@@ -427,14 +437,30 @@ export function BreathingPractice({
     segmentStartTimestampRef.current = Date.now();
     setSessionPhase("running");
 
+    const snap = computeBreathingSnapshot(accumulatedElapsedMsRef.current, rhythm);
+    if (
+      (snap.phase === "inhale" || snap.phase === "exhale") &&
+      snap.phaseRemainingMs >= 500
+    ) {
+      audio.playBreathingCue(
+        snap.phase,
+        cueMode,
+        bellVolume,
+        snap.phaseRemainingMs / 1000
+      );
+    }
+
     if (ambientSound !== "silence" && !isAmbientMuted) {
       audio.startAmbient(ambientSound, ambientVolume, 0.7);
     }
   }, [
     ambientSound,
     ambientVolume,
+    bellVolume,
+    cueMode,
     getAudioEngine,
     isAmbientMuted,
+    rhythm,
     sessionPhase,
   ]);
 
@@ -443,6 +469,7 @@ export function BreathingPractice({
     accumulatedElapsedMsRef.current = 0;
     lastPhaseStepRef.current = -1;
     sessionStartedAtRef.current = null;
+    audioRef.current?.stopBreathingCue(0.15);
     audioRef.current?.stopAmbient(0.4);
     audioRef.current?.cancelBellStrikes();
     stopPreview();
@@ -467,6 +494,7 @@ export function BreathingPractice({
       setElapsedMs(live);
       setIsDimmed(false);
       setSessionPhase("paused");
+      audioRef.current?.stopBreathingCue(0.2);
       audioRef.current?.stopAmbient(0.4);
       setEarlyFinishElapsedSec(elapsedSec);
       return;
@@ -529,6 +557,7 @@ export function BreathingPractice({
 
   const remainingMs = Math.max(0, totalDurationMs - elapsedMs);
   const rhythmDisplay = formatBreathingRhythm(rhythm);
+  const rhythmParts = useMemo(() => getBreathingRhythmParts(rhythm), [rhythm]);
   const ambientName = m.sounds.ambient[ambientSound];
 
   const cuesSummary = hapticsEnabled
@@ -545,17 +574,32 @@ export function BreathingPractice({
   return (
     <>
       {sessionPhase === "idle" && (
-        <>
+        <div className="flex flex-1 flex-col gap-4">
           {/* Organic Rhythm & Duration Dial */}
           <section className="flex flex-col items-center pt-1">
-            <div className="relative flex h-44 w-44 flex-col items-center justify-center rounded-full border border-black/6 bg-[var(--surface)] shadow-xs dark:border-white/10">
+            <div className="relative flex h-44 w-44 flex-col items-center justify-center rounded-full border border-black/6 bg-[var(--surface)] px-3 shadow-xs dark:border-white/10">
               <span className="text-[11px] font-medium tracking-[0.18em] text-[var(--foreground-muted)] uppercase">
                 {m.breathing.rhythmLabel}
               </span>
-              <span className="mt-1.5 font-mono text-2xl font-medium tracking-tight text-[var(--foreground)] tabular-nums">
-                {rhythmDisplay}
+              <span
+                aria-label={rhythmDisplay}
+                className="mt-1 inline-flex items-center justify-center whitespace-nowrap font-mono text-[22px] leading-tight font-medium tracking-tight text-[var(--foreground)] tabular-nums"
+              >
+                {rhythmParts.map((part, idx) => (
+                  <span key={`${part}-${idx}`} className="inline-flex items-center">
+                    {idx > 0 && (
+                      <span
+                        aria-hidden="true"
+                        className="px-1 text-sm text-[var(--foreground-muted)]/60"
+                      >
+                        ·
+                      </span>
+                    )}
+                    <span>{part}</span>
+                  </span>
+                ))}
               </span>
-              <div className="mt-3 flex items-center gap-3">
+              <div className="mt-2.5 flex items-center gap-2">
                 <button
                   type="button"
                   onClick={() => handleDurationChange(durationMinutes - 1)}
@@ -565,7 +609,7 @@ export function BreathingPractice({
                 >
                   <Minus className="h-3.5 w-3.5" />
                 </button>
-                <span className="min-w-[3.5rem] text-center text-xs font-medium text-[var(--foreground-muted)] tabular-nums">
+                <span className="min-w-[3rem] text-center text-xs font-medium text-[var(--foreground-muted)] tabular-nums">
                   {formatDurationLabel(durationMinutes)}
                 </span>
                 <button
@@ -658,7 +702,7 @@ export function BreathingPractice({
           </section>
 
           {/* Primary CTA */}
-          <div className="pt-1">
+          <div className="mt-auto pt-1">
             <button
               type="button"
               onClick={handleStart}
@@ -668,7 +712,7 @@ export function BreathingPractice({
               {m.breathing.beginBreathing}
             </button>
           </div>
-        </>
+        </div>
       )}
 
       {(sessionPhase === "running" || sessionPhase === "paused") && (
@@ -977,7 +1021,10 @@ export function BreathingPractice({
         cueMode={cueMode}
         hapticsEnabled={hapticsEnabled}
         customRhythm={customRhythm}
-        onClose={() => setActiveBreathingSheet(null)}
+        onClose={() => {
+          audioRef.current?.stopBreathingCue(0.15);
+          setActiveBreathingSheet(null);
+        }}
         onSelectCueMode={(mode) => updateBreathingPreferences({ cueMode: mode })}
         onPreviewCueMode={handlePreviewCue}
         onToggleHaptics={(enabled) =>

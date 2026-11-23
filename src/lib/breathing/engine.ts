@@ -18,6 +18,8 @@ export interface BreathingPhaseSegment {
 
 export interface BreathingSnapshot {
   phase: BreathingPhase;
+  /** Total duration in milliseconds of the active phase. */
+  phaseDurationMs: number;
   /** Progress through the active phase in [0, 1]. */
   phaseProgress: number;
   /** Remaining milliseconds in the active phase. */
@@ -185,6 +187,7 @@ export function computeBreathingSnapshot(
 
   return {
     phase: activeSegment.phase,
+    phaseDurationMs: activeSegment.durationMs,
     phaseProgress,
     phaseRemainingMs,
     phaseCountdownSec,
@@ -200,18 +203,25 @@ function formatSecPart(value: number): string {
 }
 
 /**
+ * Returns formatted phase duration parts (omitting 0s hold phases) for compact UI rendering.
+ */
+export function getBreathingRhythmParts(rhythm: BreathingRhythm): string[] {
+  const safe = clampBreathingRhythm(rhythm);
+  const parts: number[] = [safe.inhaleSec];
+  if (safe.holdInSec > 0) parts.push(safe.holdInSec);
+  parts.push(safe.exhaleSec);
+  if (safe.holdOutSec > 0) parts.push(safe.holdOutSec);
+  return parts.map(formatSecPart);
+}
+
+/**
  * Formats a breathing rhythm compactly for the setup dial (e.g. "4 · 4 · 4 · 4", "4 · 7 · 8", "5.5 · 5.5").
  */
 export function formatBreathingRhythm(
   rhythm: BreathingRhythm,
   separator: string = " · "
 ): string {
-  const safe = clampBreathingRhythm(rhythm);
-  const parts: number[] = [safe.inhaleSec];
-  if (safe.holdInSec > 0) parts.push(safe.holdInSec);
-  parts.push(safe.exhaleSec);
-  if (safe.holdOutSec > 0) parts.push(safe.holdOutSec);
-  return parts.map(formatSecPart).join(separator);
+  return getBreathingRhythmParts(rhythm).join(separator);
 }
 
 /**

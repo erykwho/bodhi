@@ -12,6 +12,13 @@ interface ActiveAmbientGraph {
   gainCeiling: number;
 }
 
+interface ActiveBreathCue {
+  source: AudioBufferSourceNode;
+  nodes: AudioNode[];
+  masterGain: GainNode;
+  cleanupTimer: ReturnType<typeof setTimeout> | null;
+}
+
 const MULTI_STRIKE_SPACING_MS = 2100;
 
 /**
@@ -25,6 +32,8 @@ export class MeditationAudioEngine {
   private pinkNoiseBuffer: AudioBuffer | null = null;
   private brownNoiseBuffer: AudioBuffer | null = null;
   private ambientGraph: ActiveAmbientGraph | null = null;
+  private activeBreathCue: ActiveBreathCue | null = null;
+  private breathPreviewTimeout: ReturnType<typeof setTimeout> | null = null;
   private activeSoundId: AmbientSoundId = "silence";
   private isPreviewing = false;
   private previewTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -133,14 +142,86 @@ export class MeditationAudioEngine {
   }
 
   /**
-   * Plays a serene eyes-closed breathing phase cue.
-   * Hold phases intentionally stay silent to preserve calm focus.
+   * Smoothly stops any currently playing breath cue or breath preview.
+   */
+  public stopBreathingCue(fadeSeconds: number = 0.2): void {
+    if (this.breathPreviewTimeout) {
+      clearTimeout(this.breathPreviewTimeout);
+      this.breathPreviewTimeout = null;
+    }
+
+    const active = this.activeBreathCue;
+    if (!active) return;
+    this.activeBreathCue = null;
+
+    if (active.cleanupTimer) {
+      clearTimeout(active.cleanupTimer);
+      active.cleanupTimer = null;
+    }
+
+    const ctx = this.ctx;
+    if (!ctx || fadeSeconds <= 0) {
+      this.disposeBreathCueImmediate(active);
+      return;
+    }
+
+    const now = ctx.currentTime;
+    try {
+      active.masterGain.gain.cancelScheduledValues(now);
+      active.masterGain.gain.setValueAtTime(
+        Math.max(0.0001, active.masterGain.gain.value),
+        now
+      );
+      active.masterGain.gain.exponentialRampToValueAtTime(
+        0.0001,
+        now + fadeSeconds
+      );
+    } catch {
+      // Ignore scheduling errors if context already closed
+    }
+
+    setTimeout(
+      () => this.disposeBreathCueImmediate(active),
+      Math.ceil((fadeSeconds + 0.08) * 1000)
+    );
+  }
+
+  /**
+   * Plays a short inhale + exhale preview in the Breathing Cues sheet.
+   */
+  public previewBreathingCue(
+    cueMode: BreathingCueMode,
+    volume: number = 0.85
+  ): void {
+    this.stopBreathingCue(0.12);
+    if (cueMode === "silent") return;
+
+    if (cueMode === "chime") {
+      this.playBreathingCue("inhale", "chime", volume, 2.0);
+      return;
+    }
+
+    const inhaleSec = 2.0;
+    const exhaleSec = 2.4;
+    this.playBreathingCue("inhale", "tone", volume, inhaleSec);
+    this.breathPreviewTimeout = setTimeout(() => {
+      this.breathPreviewTimeout = null;
+      this.playBreathingCue("exhale", "tone", volume, exhaleSec);
+    }, Math.round((inhaleSec + 0.25) * 1000));
+  }
+
+  /**
+   * Plays an eyes-closed breathing phase cue spanning the full duration of
+   * inhale or exhale phases. Hold phases stay silent to preserve calm focus.
    */
   public playBreathingCue(
     phase: BreathingPhase,
     cueMode: BreathingCueMode,
-    volume: number = 0.75
+    volume: number = 0.85,
+    durationSec: number = 4.0
   ): void {
+    this.stopBreathingCue(0.14);
+
     if (cueMode === "silent") return;
     if (phase === "holdIn" || phase === "holdOut") return;
 
@@ -155,42 +236,126 @@ export class MeditationAudioEngine {
       return;
     }
 
-    // "tone": gentle organic sine+harmonic breath glide
+    // "tone": realistic formant-filtered airflow breath spanning the full phase
     const now = ctx.currentTime;
+    const d = Math.max(0.6, Math.min(12, durationSec));
     const isInhale = phase === "inhale";
-    const startFreq = isInhale ? 246.94 : 329.63; // B3 -> E4 on inhale, E4 -> A3 on exhale
-    const endFreq = isInhale ? 329.63 : 220.0;
-    const duration = isInhale ? 0.65 : 0.75;
-    const peakGain = 0.16 * Math.pow(clampedVolume, 1.35);
+    const gainCurve = Math.pow(clampedVolume, 1.3);
+    const peakGain = (isInhale ? 0.42 : 0.48) * gainCurve;
+
+    const source = ctx.createBufferSource();
+    source.buffer = this.getPinkNoiseBuffer(ctx);
+    source.loop = true;
+
+    const highpass = ctx.createBiquadFilter();
+    highpass.type = "highpass";
+    highpass.frequency.setValueAtTime(isInhale ? 180 : 120, now);
+
+    const lowpass = ctx.createBiquadFilter();
+    lowpass.type = "lowpass";
+    lowpass.Q.setValueAtTime(0.6, now);
+    lowpass.frequency.setValueAtTime(isInhale ? 2900 : 2100, now);
+
+    // Formant 1: warm throat / chest air resonance
+    const formant1 = ctx.createBiquadFilter();
+    formant1.type = "bandpass";
+    formant1.Q.setValueAtTime(isInhale ? 1.4 : 1.45, now);
+    formant1.frequency.setValueAtTime(isInhale ? 480 : 740, now);
+    formant1.frequency.exponentialRampToValueAtTime(
+      isInhale ? 840 : 340,
+      now + d * 0.94
+    );
+
+    const formant1Gain = ctx.createGain();
+    formant1Gain.gain.setValueAtTime(isInhale ? 0.68 : 0.78, now);
+
+    // Formant 2: soft airy nasal / oral breath sheen
+    const formant2 = ctx.createBiquadFilter();
+    formant2.type = "bandpass";
+    formant2.Q.setValueAtTime(isInhale ? 2.0 : 1.85, now);
+    formant2.frequency.setValueAtTime(isInhale ? 1400 : 1500, now);
+    formant2.frequency.exponentialRampToValueAtTime(
+      isInhale ? 2150 : 780,
+      now + d * 0.94
+    );
+
+    const formant2Gain = ctx.createGain();
+    formant2Gain.gain.setValueAtTime(isInhale ? 0.42 : 0.36, now);
 
     const masterGain = ctx.createGain();
     masterGain.gain.setValueAtTime(0.0001, now);
-    masterGain.gain.exponentialRampToValueAtTime(peakGain, now + 0.14);
-    masterGain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+
+    if (isInhale) {
+      // Natural slow lung-filling swell across the full inhale duration
+      masterGain.gain.linearRampToValueAtTime(peakGain * 0.58, now + d * 0.18);
+      masterGain.gain.linearRampToValueAtTime(peakGain, now + d * 0.56);
+      masterGain.gain.linearRampToValueAtTime(peakGain * 0.48, now + d * 0.84);
+      masterGain.gain.exponentialRampToValueAtTime(0.0001, now + d * 0.98);
+    } else {
+      // Natural soft sighing release tapering peacefully across the full exhale
+      masterGain.gain.linearRampToValueAtTime(peakGain * 0.92, now + d * 0.14);
+      masterGain.gain.linearRampToValueAtTime(peakGain, now + d * 0.3);
+      masterGain.gain.linearRampToValueAtTime(peakGain * 0.3, now + d * 0.72);
+      masterGain.gain.exponentialRampToValueAtTime(0.0001, now + d * 0.98);
+    }
+
+    source.connect(highpass);
+    highpass.connect(formant1);
+    highpass.connect(formant2);
+    formant1.connect(formant1Gain);
+    formant2.connect(formant2Gain);
+    formant1Gain.connect(lowpass);
+    formant2Gain.connect(lowpass);
+    lowpass.connect(masterGain);
     masterGain.connect(ctx.destination);
 
-    const osc1 = ctx.createOscillator();
-    osc1.type = "sine";
-    osc1.frequency.setValueAtTime(startFreq, now);
-    osc1.frequency.exponentialRampToValueAtTime(endFreq, now + duration * 0.85);
-    osc1.connect(masterGain);
+    const randomOffset = Math.random() * Math.max(0.1, source.buffer.duration - 0.5);
+    source.start(now, randomOffset);
+    source.stop(now + d + 0.06);
 
-    const osc2 = ctx.createOscillator();
-    const harmonicGain = ctx.createGain();
-    osc2.type = "sine";
-    osc2.frequency.setValueAtTime(startFreq * 1.5, now);
-    osc2.frequency.exponentialRampToValueAtTime(
-      endFreq * 1.5,
-      now + duration * 0.85
-    );
-    harmonicGain.gain.setValueAtTime(0.28, now);
-    osc2.connect(harmonicGain);
-    harmonicGain.connect(masterGain);
+    const cue: ActiveBreathCue = {
+      source,
+      nodes: [
+        highpass,
+        formant1,
+        formant1Gain,
+        formant2,
+        formant2Gain,
+        lowpass,
+        masterGain,
+      ],
+      masterGain,
+      cleanupTimer: null,
+    };
 
-    osc1.start(now);
-    osc2.start(now);
-    osc1.stop(now + duration + 0.05);
-    osc2.stop(now + duration + 0.05);
+    cue.cleanupTimer = setTimeout(() => {
+      if (this.activeBreathCue === cue) {
+        this.activeBreathCue = null;
+      }
+      this.disposeBreathCueImmediate(cue);
+    }, Math.ceil((d + 0.15) * 1000));
+
+    this.activeBreathCue = cue;
+  }
+
+  private disposeBreathCueImmediate(cue: ActiveBreathCue): void {
+    try {
+      cue.source.stop();
+    } catch {
+      // Ignore if already stopped
+    }
+    try {
+      cue.source.disconnect();
+    } catch {
+      // Ignore if already disconnected
+    }
+    for (const node of cue.nodes) {
+      try {
+        node.disconnect();
+      } catch {
+        // Ignore if already disconnected
+      }
+    }
   }
 
   /**
@@ -975,6 +1140,7 @@ export class MeditationAudioEngine {
   public dispose(): void {
     this.clearPreviewTimer();
     this.cancelBellStrikes();
+    this.stopBreathingCue(0);
     this.teardownAmbientImmediate();
     if (this.ctx) {
       void this.ctx.close();

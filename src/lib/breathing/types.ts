@@ -52,9 +52,9 @@ export const MAX_BREATHING_DURATION_MINUTES = 30;
 export const DEFAULT_BREATHING_DURATION_MINUTES = 3;
 
 export const MIN_ACTIVE_PHASE_SEC = 1;
-export const MAX_INHALE_PHASE_SEC = 15;
-export const MAX_HOLD_PHASE_SEC = 15;
-export const MAX_EXHALE_PHASE_SEC = 20;
+export const MAX_INHALE_PHASE_SEC = 8;
+export const MAX_HOLD_PHASE_SEC = 8;
+export const MAX_EXHALE_PHASE_SEC = 8;
 
 export interface BreathingPreferences {
   patternId: BreathingPatternId;
