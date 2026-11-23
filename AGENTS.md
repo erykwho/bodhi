@@ -68,6 +68,7 @@ Mobile-first meditation web application (**PWA**) designed for calm, distraction
 ## Directory Structure (V8)
 
 - `.github/workflows/ci.yml` — GitHub Actions CI (`CI` job: Prisma validate, Vitest, ESLint, Next.js build, Playwright E2E smoke tests).
+- `.github/dependabot.yml` — Grouped weekly Dependabot updates for `npm`/`pnpm` dependencies and GitHub Actions.
 - `e2e/smoke.spec.ts` & `playwright.config.ts` — Mobile PWA Playwright E2E smoke tests (Timer lifecycle, Zen Dim, Sound Picker, local Presets, i18n, theme persistence, navigation, `/api/health`, offline mode).
 - `sentry.server.config.ts`, `sentry.edge.config.ts`, `src/instrumentation.ts`, `src/instrumentation-client.ts` — Conditional Sentry SDK initialization and `onRequestError` / router transition hooks.
 - `public/sw.js` — Offline PWA Service Worker.
