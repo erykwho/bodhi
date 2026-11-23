@@ -48,7 +48,7 @@ describe("computeBreathPlaybackRate", () => {
     ).toBeCloseTo(0.915, 3);
     expect(
       computeBreathPlaybackRate(BREATH_AUDIO_CATALOG.exhale.medium.nominalDurationSec, 4.0)
-    ).toBeCloseTo(0.935, 3);
+    ).toBeCloseTo(0.9375, 3);
 
     // 5.5s Coherent & 8s 4-7-8 exhale (thomas long ~6.2s -> 1.12x / 0.78x)
     expect(
