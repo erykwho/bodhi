@@ -224,6 +224,15 @@ test.describe("Bodhi E2E Smoke Suite (Mobile PWA)", () => {
     const healthBody = (await healthRes.json()) as { status: string };
     expect(healthBody.status).toBe("ok");
 
+    // Verify bundled denoised breath audio samples are served cleanly for offline caching
+    for (const audioPath of ["/audio/breath-inhale.mp3", "/audio/breath-exhale.mp3"]) {
+      const audioRes = await request.get(audioPath);
+      expect(audioRes.status()).toBe(200);
+      expect(audioRes.headers()["content-type"]).toContain("audio/mpeg");
+      const bytes = await audioRes.body();
+      expect(bytes.byteLength).toBeGreaterThan(20_000);
+    }
+
     await page.goto("/");
 
     await page.getByRole("button", { name: "Guided" }).click();

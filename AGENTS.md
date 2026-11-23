@@ -22,7 +22,7 @@ Mobile-first meditation web application (**PWA**) designed for calm, distraction
 3. **Zero-Downtime Database Migrations (Expand-and-Contract):**
    - Production database updates run exclusively via **Prisma Migrations** (`prisma migrate deploy` in `scripts/vercel-db-sync.mjs`). Never re-enable `prisma db push` in production.
    - Never drop or rename an existing column, table, or enum value in a single deploy. Always use *expand-and-contract* (add nullable/default column first → deploy compatible app code → backfill/migrate → remove legacy column in a subsequent release) so 1-click Vercel rollbacks remain safe.
-4. **Service Worker & Cache Safety (`public/sw.js`):** Never cache `/api/*` or `/api/auth/*` requests. Keep `Cache-Control: no-cache` on `public/sw.js` (`next.config.ts`) and keep it excluded from `src/proxy.ts` so silent PWA updates always propagate.
+4. **Service Worker & Cache Safety (`public/sw.js`):** Never cache `/api/*` or `/api/auth/*` requests. Keep `Cache-Control: no-cache` on `public/sw.js` (`next.config.ts`) and keep it excluded from `src/proxy.ts` so silent PWA updates always propagate. Precaches local `/audio/` assets (`breath-inhale.mp3`, `breath-exhale.mp3` in `bodhi-offline-v2`) and serves them Cache-First with HTTP `206 Partial Content` Range support for offline iOS Safari `<audio>`.
 5. **Backward-Compatible Client Storage:** All `localStorage` readers (`bodhi.timer.preferences.v1`, `bodhi.breathing.preferences.v1`, `bodhi-locale`, local presets, offline session queue, and history cache) MUST gracefully handle missing, partial, or older JSON shapes with safe defaults — never throw on parse.
 6. **100% i18n Key Parity:** Every locale catalog under `src/lib/i18n/messages/` MUST satisfy the `Messages` type from `en.ts` and pass `src/lib/i18n/locale.test.ts`.
 7. **React 19 & Next.js 16 Guardrails:**
@@ -39,10 +39,11 @@ Mobile-first meditation web application (**PWA**) designed for calm, distraction
   - Optional warm-up: `Off (0s)`, `5s`, `10s` before the opening bell.
   - Countdown and count-up timing are timestamp-based and drift-free; Screen Wake Lock is held during active sessions.
   - 7 synthesized bells (`None`, `Singing Bowl`, `Tibetan Healing Bowl`, `Deep Gong`, `Soft Chime`, `Crystal Bowl`, `Wood Block`) with independent **bell volume** (`bellVolume`, default `0.85`) and configurable closing bell strikes (`1×` or `3×`, `endBellStrikes`), plus interval chimes (`1–60` min, pause with timer) and 7 offline ambient soundscapes (`Silence`, `White Noise`, `Pink Noise`, `Brown Noise`, `Gentle Rain`, `Ocean Waves`, `Warm Drone`).
+  - **iOS Silent Mode Bypass:** `MeditationAudioEngine.unlock()` sets `navigator.audioSession.type = "playback"` (iOS Safari 16.4+) and plays a 50ms silent `<audio>` WAV once on user gesture (pre-16.4 fallback) so bells, ambient soundscapes, and breathing cues remain audible even when the hardware Silent switch is enabled.
   - OLED-friendly **Zen Dim Mode** (`ZenDimOverlay` — `Dim screen` pill + tap-anywhere-to-wake overlay) keeps Wake Lock active during Timer, Breathing, and Guided sessions.
 - **Guided Breathing (`src/lib/breathing/`, `BreathingPractice`, `BreathingSheet`):**
   - 100% public & offline-first with 4 rhythms: `Box` (`4-4-4-4`), `4-7-8` (`4-7-8`), `Coherent` (`5.5-5.5`), and `Custom` (`inhale 1–8s`, `holdIn 0–8s`, `exhale 1–8s`, `holdOut 0–8s`), duration `1–30` min (default `3` min).
-  - Eyes-closed guidance via Web Audio phase cues (`tone` = full-duration formant-filtered inhale/exhale breath sound | `chime` | `silent`; hold phases stay silent) + optional haptic vibration (`navigator.vibrate`, enabled by default on supported mobile devices) + optional ambient soundscape.
+  - Eyes-closed guidance via phase cues (`tone` = denoised CC0 human breath recordings `/audio/breath-inhale.mp3` & `/audio/breath-exhale.mp3` played via gesture-primed, pitch-preserving HTML5 `<audio>` dynamically scaled to the phase duration within WebKit's `[0.5, 2.0]` `playbackRate` range | `chime` | `silent`; hold phases stay silent) + optional haptic vibration (`navigator.vibrate`, enabled by default on supported mobile devices) + optional ambient soundscape.
   - Completion view saves automatically for signed-in users (`SessionMode.BREATHING` + `breathingPattern`, offline-queued when offline) and provides a one-tap **"Continue to Meditation"** bridge directly into the Timer.
 - **Practice Presets (`TimerPreset`, `src/lib/timer/presets.ts`, `PresetStrip`):**
   - Presets capture full timer configuration (duration, open-ended mode, warm-up, bells, closing strikes, bell volume, interval, ambient sound & volume).
@@ -83,13 +84,14 @@ Mobile-first meditation web application (**PWA**) designed for calm, distraction
 - `src/lib/i18n/` — Locale types & metadata (`types.ts`), resolver & helpers (`locale.ts` + `locale.test.ts`), and typed message bundles (`messages/en.ts`, `messages/pt-br.ts`).
 - `src/lib/timer/` — Timestamp-based countdown & open-ended timer engine (`engine.ts` + `engine.test.ts`), persisted preferences (`preferences.ts` + `preferences.test.ts`), named presets (`presets.ts` + `presets.test.ts`), and types (`types.ts`).
 - `src/lib/breathing/` — Timestamp-based guided breathing engine (`engine.ts` + `engine.test.ts`), persisted preferences (`preferences.ts` + `preferences.test.ts`), and types/presets (`types.ts`).
-- `src/lib/audio/` — Extensible bell & ambient sound catalog (`sounds.ts`) and Web Audio API synthesis engine with bell volume, 1×/3× strikes, and breathing cues (`engine.ts`).
+- `src/lib/audio/` — Extensible bell & ambient sound catalog (`sounds.ts`) and offline-first audio engine with bell volume, 1×/3× strikes, denoised CC0 human breath playback, and iOS Silent Mode bypass (`engine.ts` + `engine.test.ts`).
 - `src/lib/tracks/` — YouTube/SoundCloud/Direct Audio URL parser (`providers.ts` + `providers.test.ts`), oEmbed resolver (`oembed.ts`), drag-reorder helpers (`reorder.ts` + `reorder.test.ts`), and types (`types.ts`).
 - `src/lib/history/` — History statistics, period filter & monthly calendar engine (`stats.ts` + `stats.test.ts`), CSV/JSON export (`export.ts` + `export.test.ts`), client helpers with offline fallback (`client.ts`), and types (`types.ts`).
 - `src/lib/offline/` — Offline session queue & history cache (`queue.ts` + `queue.test.ts`) and reactive online status hook (`use-network-status.ts`).
 - `src/lib/pull-to-refresh.ts` + `pull-to-refresh.test.ts` — Pure rubber-band pull-to-refresh physics and tests.
 - `src/lib/wake-lock.ts` — Screen Wake Lock hook.
 - `src/components/` — `BodhiShell`, `BodhiLogo`, `ThemeProvider`, `I18nProvider`, `ServiceWorkerRegister`, `PullToRefresh`, `MeditationTimer`, `BreathingPractice`, `BreathingSheet`, `ZenDimOverlay`, `EarlyFinishCard`, `PresetStrip`, `SoundPickerSheet`, `GuidedTracks`, `GuidedSessionPlayer`, `MeditationHistory`, and `HistoryCalendar`.
+- `public/audio/` — Denoised CC0 human breath audio samples (`breath-inhale.mp3`, `breath-exhale.mp3`, derived from `Slow Breathing Woman.wav` by `helenavelikaja`, CC0 1.0 Public Domain), precached offline by `public/sw.js`.
 - `public/icons/` — Official Bodhi leaf SVG, transparent PNG favicon, and PWA PNG icons.
 
 ## Commands & Conventions
