@@ -6,6 +6,7 @@ import {
   THEME_STORAGE_KEY,
   ThemeProvider,
 } from "@/components/theme-provider";
+import { DEFAULT_LOCALE } from "@/lib/i18n/types";
 import "./globals.css";
 
 const plusJakarta = Plus_Jakarta_Sans({
@@ -61,7 +62,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang={DEFAULT_LOCALE} suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
       </head>
