@@ -319,7 +319,19 @@ export const ptBrMessages: Messages = {
       replay: "Ouvir novamente",
       openOriginal: "Abrir faixa original",
       ytLoadError:
-        "Não foi possível carregar o player do YouTube. Verifique sua conexão ou abra a faixa diretamente.",
+        "Não foi possível carregar o player do YouTube. Verifique sua conexão ou ouça no YouTube enquanto o Bodhi acompanha sua sessão.",
+      ytEmbedDisabledError:
+        "O criador deste vídeo desativou a reprodução externa. Ouça no YouTube enquanto o Bodhi acompanha sua sessão e toca o sino final.",
+      ytUnavailableError: "Este vídeo está indisponível ou privado no YouTube.",
+      ytConfigError:
+        "O YouTube bloqueou a reprodução incorporada neste navegador. Tente novamente ou ouça no YouTube enquanto o Bodhi acompanha sua sessão.",
+      openYouTubeAndTrack: "Abrir no YouTube e acompanhar",
+      openYouTubeAgain: "Abrir no YouTube novamente",
+      tryAgain: "Tentar novamente",
+      externalListening: "Ouvindo no YouTube",
+      completeSession: "Concluir sessão",
+      externalCompanionHint:
+        "Volte aqui ao terminar no YouTube e toque em Concluir sessão para tocar o sino final e salvar sua prática.",
       scLoadError:
         "Não foi possível carregar o player do SoundCloud. Verifique sua conexão ou abra a faixa diretamente.",
       directAudioError:

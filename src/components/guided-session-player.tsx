@@ -18,6 +18,8 @@ import {
   EyeOff,
   Headphones,
   Loader2,
+  Pause,
+  Play,
   RotateCcw,
   Square,
   Star,
@@ -53,6 +55,7 @@ import {
   saveTrackAudioOffline,
   subscribeOfflineGuided,
 } from "@/lib/offline/audio-cache";
+import { formatElapsedDisplay } from "@/lib/timer/engine";
 import {
   getTimerPreferencesServerSnapshot,
   getTimerPreferencesSnapshot,
@@ -64,14 +67,30 @@ import {
   isAudioStreamProvider,
 } from "@/lib/tracks/providers";
 import type { FavoriteTrackItem } from "@/lib/tracks/types";
+import {
+  buildYouTubePlayerVars,
+  classifyYouTubePlayerError,
+  isRetryableYouTubeError,
+  supportsExternalYouTubeCompanion,
+  type YouTubePlayerErrorKind,
+} from "@/lib/tracks/youtube-player";
 import { useWakeLock } from "@/lib/wake-lock";
 
 type PlaybackState = "loading" | "ready" | "playing" | "paused" | "completed";
+type PlayerErrorKey =
+  | "youtube"
+  | "youtube_embed_disabled"
+  | "youtube_unavailable"
+  | "youtube_config"
+  | "soundcloud"
+  | "direct_audio"
+  | "google_drive";
 
 interface YouTubePlayerInstance {
   playVideo: () => void;
   pauseVideo: () => void;
   seekTo: (seconds: number, allowSeekAhead?: boolean) => void;
+  getIframe?: () => HTMLIFrameElement | null;
   destroy: () => void;
 }
 
@@ -86,6 +105,7 @@ interface YouTubeAPI {
       events?: {
         onReady?: () => void;
         onStateChange?: (event: { data: number }) => void;
+        onError?: (event: { data: number }) => void;
       };
     }
   ) => YouTubePlayerInstance;
@@ -239,9 +259,12 @@ export function GuidedSessionPlayer({
   const [playbackState, setPlaybackState] = useState<PlaybackState>(
     isStreamAudio ? "ready" : "loading"
   );
-  const [playerErrorKey, setPlayerErrorKey] = useState<
-    "youtube" | "soundcloud" | "direct_audio" | "google_drive" | null
-  >(null);
+  const [playerErrorKey, setPlayerErrorKey] = useState<PlayerErrorKey | null>(
+    null
+  );
+  const [isExternalMode, setIsExternalMode] = useState<boolean>(false);
+  const [externalElapsedMs, setExternalElapsedMs] = useState<number>(0);
+  const [ytRetryNonce, setYtRetryNonce] = useState<number>(0);
   const [isDimmed, setIsDimmed] = useState<boolean>(false);
   const [offlineBlobUrl, setOfflineBlobUrl] = useState<string | null>(null);
   const [isTogglingOffline, setIsTogglingOffline] = useState<boolean>(false);
@@ -440,8 +463,14 @@ export function GuidedSessionPlayer({
     userId,
   ]);
 
-  // Unified Media Session API across Direct Audio, Google Drive, YouTube, and SoundCloud tracks
+  // Unified Media Session API across Direct Audio, Google Drive, YouTube, and SoundCloud tracks.
+  // Cleared during External Companion Mode so Bodhi never competes with the YouTube app's audio session.
   useEffect(() => {
+    if (isExternalMode) {
+      clearMediaSession();
+      return;
+    }
+
     setMediaSessionMetadata({
       title: track.title,
       artist: track.author ?? m.mediaSession.artist,
@@ -494,6 +523,7 @@ export function GuidedSessionPlayer({
       clearMediaSession();
     };
   }, [
+    isExternalMode,
     isStreamAudio,
     m.mediaSession.artist,
     track.author,
@@ -503,6 +533,7 @@ export function GuidedSessionPlayer({
 
   // Sync Media Session playbackState
   useEffect(() => {
+    if (isExternalMode) return;
     setMediaSessionPlaybackState(
       playbackState === "playing"
         ? "playing"
@@ -510,7 +541,28 @@ export function GuidedSessionPlayer({
           ? "paused"
           : "none"
     );
-  }, [playbackState]);
+  }, [isExternalMode, playbackState]);
+
+  // Drift-free count-up display for External Companion Mode (syncs immediately on app return)
+  useEffect(() => {
+    if (!isExternalMode || playbackState !== "playing") return;
+
+    const syncElapsed = () => {
+      const activeSegmentMs =
+        playSegmentStartRef.current !== null
+          ? Math.max(0, Date.now() - playSegmentStartRef.current)
+          : 0;
+      setExternalElapsedMs(accumulatedListenMsRef.current + activeSegmentMs);
+    };
+
+    const intervalId = window.setInterval(syncElapsed, 250);
+    document.addEventListener("visibilitychange", syncElapsed);
+
+    return () => {
+      window.clearInterval(intervalId);
+      document.removeEventListener("visibilitychange", syncElapsed);
+    };
+  }, [isExternalMode, playbackState]);
 
   // Mount YouTube IFrame Player API into an unmanaged child node so YouTube's
   // in-place iframe replacement never conflicts with React's unmount reconciliation.
@@ -518,6 +570,7 @@ export function GuidedSessionPlayer({
     if (track.provider !== "YOUTUBE") return;
     let cancelled = false;
     const host = ytHostRef.current;
+    if (!host) return;
 
     void loadYouTubeApi()
       .then((YT) => {
@@ -528,18 +581,26 @@ export function GuidedSessionPlayer({
         mountNode.className = "h-full w-full";
         host.appendChild(mountNode);
 
+        const applyIframeReferrerPolicy = () => {
+          const iframe =
+            ytPlayerRef.current?.getIframe?.() ?? host.querySelector("iframe");
+          iframe?.setAttribute(
+            "referrerpolicy",
+            "strict-origin-when-cross-origin"
+          );
+        };
+
         ytPlayerRef.current = new YT.Player(mountNode, {
           videoId: track.externalId,
           width: "100%",
           height: "100%",
-          playerVars: {
-            rel: 0,
-            modestbranding: 1,
-            playsinline: 1,
-          },
+          playerVars: buildYouTubePlayerVars(
+            typeof window !== "undefined" ? window.location.origin : null
+          ),
           events: {
             onReady: () => {
               if (!cancelled) {
+                applyIframeReferrerPolicy();
                 setPlaybackState("ready");
               }
             },
@@ -557,12 +618,39 @@ export function GuidedSessionPlayer({
                 handleTrackCompleted();
               }
             },
+            onError: (event) => {
+              if (cancelled) return;
+              flushListeningMs();
+              try {
+                ytPlayerRef.current?.destroy();
+              } catch {
+                // Ignore teardown errors
+              }
+              ytPlayerRef.current = null;
+              if (host) {
+                host.innerHTML = "";
+              }
+              const kind = classifyYouTubePlayerError(event.data);
+              const nextErrorKey: PlayerErrorKey =
+                kind === "embed_disabled"
+                  ? "youtube_embed_disabled"
+                  : kind === "video_unavailable"
+                    ? "youtube_unavailable"
+                    : kind === "config_error"
+                      ? "youtube_config"
+                      : "youtube";
+              setPlayerErrorKey(nextErrorKey);
+              setPlaybackState("ready");
+            },
           },
         });
+
+        applyIframeReferrerPolicy();
       })
       .catch(() => {
         if (!cancelled) {
           setPlayerErrorKey("youtube");
+          setPlaybackState("ready");
         }
       });
 
@@ -585,6 +673,7 @@ export function GuidedSessionPlayer({
     markPlayingStart,
     track.externalId,
     track.provider,
+    ytRetryNonce,
   ]);
 
   // Mount SoundCloud Widget API
@@ -671,9 +760,14 @@ export function GuidedSessionPlayer({
 
   const handleExitClick = useCallback(() => {
     if (playbackState !== "completed" && isAuthenticated) {
-      const elapsedSec = Math.floor(flushListeningMs() / 1000);
+      const elapsedMs = flushListeningMs();
+      const elapsedSec = Math.floor(elapsedMs / 1000);
       if (elapsedSec >= MIN_SAVEABLE_EARLY_STOP_SECONDS) {
-        pauseActivePlayer();
+        if (isExternalMode) {
+          setExternalElapsedMs(elapsedMs);
+        } else {
+          pauseActivePlayer();
+        }
         setPlaybackState("paused");
         setEarlyStopElapsedSec(elapsedSec);
         return;
@@ -683,6 +777,7 @@ export function GuidedSessionPlayer({
   }, [
     flushListeningMs,
     isAuthenticated,
+    isExternalMode,
     onExit,
     pauseActivePlayer,
     playbackState,
@@ -736,15 +831,60 @@ export function GuidedSessionPlayer({
     }
   }, [noteInput, onSessionUpdated, savedSessionId, userId]);
 
+  const handleStartExternalSession = useCallback(() => {
+    getAudioEngine().unlock({
+      bells: [closingBellSoundRef.current],
+    });
+    accumulatedListenMsRef.current = 0;
+    playSegmentStartRef.current = null;
+    sessionStartedAtRef.current = null;
+    setExternalElapsedMs(0);
+    setEarlyStopElapsedSec(null);
+    markPlayingStart();
+    setIsExternalMode(true);
+    setPlaybackState("playing");
+  }, [getAudioEngine, markPlayingStart]);
+
+  const handleToggleExternalPause = useCallback(() => {
+    if (playbackState === "playing") {
+      const elapsed = flushListeningMs();
+      setExternalElapsedMs(elapsed);
+      setPlaybackState("paused");
+    } else if (playbackState === "paused") {
+      getAudioEngine().unlock({
+        bells: [closingBellSoundRef.current],
+      });
+      markPlayingStart();
+      setEarlyStopElapsedSec(null);
+      setPlaybackState("playing");
+    }
+  }, [flushListeningMs, getAudioEngine, markPlayingStart, playbackState]);
+
+  const handleRetryYouTube = useCallback(() => {
+    setPlayerErrorKey(null);
+    setIsExternalMode(false);
+    setExternalElapsedMs(0);
+    setPlaybackState("loading");
+    setYtRetryNonce((prev) => prev + 1);
+  }, []);
+
   const handleReplay = useCallback(() => {
     getAudioEngine().unlock();
     accumulatedListenMsRef.current = 0;
     playSegmentStartRef.current = null;
     sessionStartedAtRef.current = null;
+    setExternalElapsedMs(0);
     setSavedSessionId(null);
     setNoteInput("");
     setNoteSaved(false);
     setEarlyStopElapsedSec(null);
+
+    if (isExternalMode) {
+      setIsExternalMode(false);
+      setPlaybackState("ready");
+      return;
+    }
+
     setPlaybackState("playing");
 
     if (track.provider === "YOUTUBE" && ytPlayerRef.current) {
@@ -757,29 +897,54 @@ export function GuidedSessionPlayer({
       directAudioRef.current.currentTime = 0;
       void directAudioRef.current.play();
     }
-  }, [getAudioEngine, isStreamAudio, track.provider]);
+  }, [getAudioEngine, isExternalMode, isStreamAudio, track.provider]);
 
   const statusLabel =
-    playbackState === "playing"
-      ? m.guided.player.listening
-      : playbackState === "paused"
-        ? m.guided.player.paused
-        : playbackState === "completed"
-          ? m.guided.player.completed
-          : playbackState === "loading"
-            ? m.guided.player.loading
-            : m.guided.player.ready;
+    isExternalMode && playbackState === "playing"
+      ? m.guided.player.externalListening
+      : playbackState === "playing"
+        ? m.guided.player.listening
+        : playbackState === "paused"
+          ? m.guided.player.paused
+          : playbackState === "completed"
+            ? m.guided.player.completed
+            : playbackState === "loading"
+              ? m.guided.player.loading
+              : m.guided.player.ready;
+
+  const youTubeErrorKind: YouTubePlayerErrorKind | null =
+    playerErrorKey === "youtube_embed_disabled"
+      ? "embed_disabled"
+      : playerErrorKey === "youtube_unavailable"
+        ? "video_unavailable"
+        : playerErrorKey === "youtube_config"
+          ? "config_error"
+          : playerErrorKey === "youtube"
+            ? "playback_error"
+            : null;
+
+  const canUseExternalCompanion =
+    youTubeErrorKind !== null &&
+    supportsExternalYouTubeCompanion(youTubeErrorKind);
+  const canRetryYouTube =
+    youTubeErrorKind !== null && isRetryableYouTubeError(youTubeErrorKind);
 
   const playerError =
-    playerErrorKey === "youtube"
-      ? m.guided.player.ytLoadError
-      : playerErrorKey === "soundcloud"
-        ? m.guided.player.scLoadError
-        : playerErrorKey === "google_drive"
-          ? m.guided.player.googleDriveError
-          : playerErrorKey === "direct_audio"
-            ? m.guided.player.directAudioError
-            : null;
+    playerErrorKey === "youtube_embed_disabled"
+      ? m.guided.player.ytEmbedDisabledError
+      : playerErrorKey === "youtube_unavailable"
+        ? m.guided.player.ytUnavailableError
+        : playerErrorKey === "youtube_config"
+          ? m.guided.player.ytConfigError
+          : playerErrorKey === "youtube"
+            ? m.guided.player.ytLoadError
+            : playerErrorKey === "soundcloud"
+              ? m.guided.player.scLoadError
+              : playerErrorKey === "google_drive"
+                ? m.guided.player.googleDriveError
+                : playerErrorKey === "direct_audio"
+                  ? m.guided.player.directAudioError
+                  : null;
 
   const onlineAudioSrc =
     track.provider === "GOOGLE_DRIVE"
@@ -942,22 +1107,102 @@ export function GuidedSessionPlayer({
             )}
           </div>
 
-          {/* Embedded Provider Player (YouTube / SoundCloud / Direct Audio HTML5) */}
+          {/* Embedded Provider Player / External Companion Mode */}
           <div className="overflow-hidden rounded-2xl border border-black/8 bg-[var(--surface)] shadow-xs dark:border-white/10">
-            {playerError ? (
-              <div className="flex flex-col items-center gap-3 p-6 text-center">
-                <p className="text-sm text-[var(--foreground-muted)]">
-                  {playerError}
-                </p>
+            {isExternalMode ? (
+              <div className="flex flex-col items-center gap-4 p-6 text-center">
+                <div className="flex h-14 w-14 items-center justify-center rounded-full bg-[var(--accent-soft)] text-[var(--accent)]">
+                  <Headphones className="h-7 w-7" />
+                </div>
+
+                <div>
+                  <p className="text-[11px] font-medium tracking-wide text-[var(--foreground-muted)] uppercase">
+                    {playbackState === "paused"
+                      ? m.guided.player.paused
+                      : m.guided.player.externalListening}
+                  </p>
+                  <p className="mt-1 font-mono text-4xl font-semibold tracking-tight text-[var(--foreground)] tabular-nums">
+                    {formatElapsedDisplay(externalElapsedMs)}
+                  </p>
+                </div>
+
+                <div className="grid w-full grid-cols-2 gap-2.5">
+                  <button
+                    type="button"
+                    onClick={handleToggleExternalPause}
+                    className="flex h-11 items-center justify-center gap-1.5 rounded-xl border border-black/8 bg-[var(--background)] px-3 text-xs font-medium text-[var(--foreground)] transition-colors hover:bg-[var(--surface-muted)] dark:border-white/10"
+                  >
+                    {playbackState === "playing" ? (
+                      <>
+                        <Pause className="h-3.5 w-3.5" />
+                        {m.timer.pause}
+                      </>
+                    ) : (
+                      <>
+                        <Play className="h-3.5 w-3.5 fill-current" />
+                        {m.timer.resume}
+                      </>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleTrackCompleted}
+                    className="flex h-11 items-center justify-center gap-1.5 rounded-xl bg-[var(--accent)] px-3 text-xs font-semibold text-[#fcfaf6] transition-colors hover:bg-[var(--accent-strong)] dark:text-[#151917]"
+                  >
+                    <Check className="h-3.5 w-3.5" />
+                    {m.guided.player.completeSession}
+                  </button>
+                </div>
+
                 <a
                   href={track.url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 rounded-xl bg-[var(--accent)] px-4 py-2 text-xs font-semibold text-[#fcfaf6] dark:text-[#151917]"
+                  className="inline-flex items-center gap-1 text-xs font-medium text-[var(--foreground-muted)] transition-colors hover:text-[var(--foreground)]"
                 >
-                  {m.guided.player.openOriginal}
-                  <ExternalLink className="h-3.5 w-3.5" />
+                  {m.guided.player.openYouTubeAgain}
+                  <ExternalLink className="h-3 w-3" />
                 </a>
+              </div>
+            ) : playerError ? (
+              <div className="flex flex-col items-center gap-3.5 p-6 text-center">
+                <p className="max-w-xs text-sm leading-relaxed text-[var(--foreground-muted)]">
+                  {playerError}
+                </p>
+                <div className="flex flex-wrap items-center justify-center gap-2">
+                  {canUseExternalCompanion ? (
+                    <a
+                      href={track.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={handleStartExternalSession}
+                      className="inline-flex items-center gap-1.5 rounded-xl bg-[var(--accent)] px-4 py-2.5 text-xs font-semibold text-[#fcfaf6] transition-colors hover:bg-[var(--accent-strong)] dark:text-[#151917]"
+                    >
+                      {m.guided.player.openYouTubeAndTrack}
+                      <ExternalLink className="h-3.5 w-3.5" />
+                    </a>
+                  ) : (
+                    <a
+                      href={track.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 rounded-xl bg-[var(--accent)] px-4 py-2 text-xs font-semibold text-[#fcfaf6] transition-colors hover:bg-[var(--accent-strong)] dark:text-[#151917]"
+                    >
+                      {m.guided.player.openOriginal}
+                      <ExternalLink className="h-3.5 w-3.5" />
+                    </a>
+                  )}
+                  {canRetryYouTube && (
+                    <button
+                      type="button"
+                      onClick={handleRetryYouTube}
+                      className="inline-flex items-center gap-1.5 rounded-xl border border-black/8 bg-[var(--background)] px-3.5 py-2.5 text-xs font-medium text-[var(--foreground)] transition-colors hover:bg-[var(--surface-muted)] dark:border-white/10"
+                    >
+                      <RotateCcw className="h-3.5 w-3.5" />
+                      {m.guided.player.tryAgain}
+                    </button>
+                  )}
+                </div>
               </div>
             ) : track.provider === "YOUTUBE" ? (
               <div className="relative aspect-video w-full bg-black">
@@ -1067,23 +1312,27 @@ export function GuidedSessionPlayer({
               onSave={() => void handleSaveEarlyStop()}
               onResume={() => setEarlyStopElapsedSec(null)}
             />
-          ) : (
+          ) : !playerError || isExternalMode ? (
             <p className="text-center text-xs text-[var(--foreground-muted)]">
-              {isStreamAudio
-                ? m.guided.player.lockScreenHint
-                : isWakeLockActive
-                  ? m.guided.player.wakeLockHint
-                  : m.guided.player.pressPlayHint}
+              {isExternalMode
+                ? m.guided.player.externalCompanionHint
+                : isStreamAudio
+                  ? m.guided.player.lockScreenHint
+                  : isWakeLockActive
+                    ? m.guided.player.wakeLockHint
+                    : m.guided.player.pressPlayHint}
             </p>
-          )}
+          ) : null}
         </div>
       )}
 
       {/* OLED-friendly Zen Dim Mode Overlay */}
       {isDimmed && playbackState !== "completed" && (
         <ZenDimOverlay
-          primaryText={track.title}
-          monospace={false}
+          primaryText={
+            isExternalMode ? formatElapsedDisplay(externalElapsedMs) : track.title
+          }
+          monospace={isExternalMode}
           onWake={() => setIsDimmed(false)}
         />
       )}
