@@ -1,6 +1,11 @@
+import { headers } from "next/headers";
 import NextAuth from "next-auth";
 import { NextResponse } from "next/server";
 import { authConfig, isAuthConfigured, isEmailAllowed } from "@/auth.config";
+import {
+  extractBearerToken,
+  verifyMobileAccessToken,
+} from "@/lib/mobile-token";
 import { prisma } from "@/lib/prisma";
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
@@ -90,8 +95,45 @@ export async function getOptionalSessionUser(): Promise<SessionUserSummary | nul
   }
 }
 
+async function readAuthorizationHeader(): Promise<string | null> {
+  try {
+    const hdrs = await headers();
+    return hdrs.get("authorization");
+  } catch {
+    return null;
+  }
+}
+
 export async function requireUser() {
-  if (!isAuthConfigured() || !process.env.DATABASE_URL?.trim()) {
+  if (!process.env.AUTH_SECRET?.trim() || !process.env.DATABASE_URL?.trim()) {
+    throw new Error("AUTH_NOT_CONFIGURED");
+  }
+
+  // 1. Native Mobile Bearer JWT authentication (fail closed if header is present)
+  const authHeader = await readAuthorizationHeader();
+  if (authHeader?.trim()) {
+    const bearerToken = extractBearerToken(authHeader);
+    if (!bearerToken) {
+      throw new Error("UNAUTHORIZED");
+    }
+
+    const payload = await verifyMobileAccessToken(bearerToken);
+    if (!payload) {
+      throw new Error("UNAUTHORIZED");
+    }
+
+    const dbUser = await prisma.user.findUnique({
+      where: { id: payload.userId },
+    });
+    if (!dbUser) {
+      throw new Error("UNAUTHORIZED");
+    }
+
+    return dbUser;
+  }
+
+  // 2. Web Auth.js cookie session authentication
+  if (!isAuthConfigured()) {
     throw new Error("AUTH_NOT_CONFIGURED");
   }
 
