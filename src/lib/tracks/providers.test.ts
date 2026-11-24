@@ -61,6 +61,27 @@ describe("track URL providers", () => {
       });
     });
 
+    it("preserves private SoundCloud secret tokens (s-...) and strips non-secret trailing segments", () => {
+      const privateTrack = parseTrackUrl(
+        "https://soundcloud.com/calm-artist/private-guided-sit/s-AbCdEf12345?si=xyz"
+      );
+      expect(privateTrack).toEqual({
+        provider: "SOUNDCLOUD",
+        externalId: "calm-artist/private-guided-sit/s-AbCdEf12345",
+        canonicalUrl:
+          "https://soundcloud.com/calm-artist/private-guided-sit/s-AbCdEf12345",
+        defaultThumbnailUrl: null,
+        fallbackTitle: "Private Guided Sit",
+      });
+
+      const withTrailingSegment = parseTrackUrl(
+        "https://soundcloud.com/calm-artist/morning-breath-session/recommended"
+      );
+      expect(withTrailingSegment?.canonicalUrl).toBe(
+        "https://soundcloud.com/calm-artist/morning-breath-session"
+      );
+    });
+
     it("rejects SoundCloud playlists, profile pages, and reserved routes", () => {
       expect(
         parseTrackUrl("https://soundcloud.com/calm-artist/sets/sleep-playlist")
