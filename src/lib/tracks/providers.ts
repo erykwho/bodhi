@@ -23,10 +23,13 @@ export const TRACK_PROVIDER_LABELS: Record<TrackProviderType, string> = {
   YOUTUBE: "YouTube",
   SOUNDCLOUD: "SoundCloud",
   DIRECT_AUDIO: "Audio",
+  GOOGLE_DRIVE: "Google Drive",
 };
 
 const YOUTUBE_ID_REGEX = /^[A-Za-z0-9_-]{11}$/;
 const DIRECT_AUDIO_EXT_REGEX = /\.(mp3|m4a|ogg|wav|aac|opus)$/i;
+const STRIP_AUDIO_EXT_REGEX = /\.(mp3|m4a|ogg|wav|aac|opus|flac|webm)$/i;
+const GOOGLE_DRIVE_FILE_ID_REGEX = /^[A-Za-z0-9_-]{10,128}$/;
 
 const YOUTUBE_HOSTS = new Set([
   "youtube.com",
@@ -43,6 +46,12 @@ const SOUNDCLOUD_HOSTS = new Set([
   "m.soundcloud.com",
 ]);
 
+const GOOGLE_DRIVE_HOSTS = new Set([
+  "drive.google.com",
+  "www.drive.google.com",
+  "drive.usercontent.google.com",
+]);
+
 const SOUNDCLOUD_RESERVED_SEGMENTS = new Set([
   "discover",
   "stream",
@@ -56,6 +65,118 @@ const SOUNDCLOUD_RESERVED_SEGMENTS = new Set([
   "messages",
   "notifications",
 ]);
+
+/**
+ * Returns true for track providers played natively through HTML5 `<audio>`
+ * and eligible for local offline caching in `bodhi-user-audio-v1`.
+ */
+export function isAudioStreamProvider(provider: TrackProviderType): boolean {
+  return provider === "DIRECT_AUDIO" || provider === "GOOGLE_DRIVE";
+}
+
+/**
+ * Builds the direct download endpoint for a publicly shared Google Drive file.
+ * Uses `drive.usercontent.google.com` with `confirm=t` to bypass large-file
+ * confirmation interstitials when the file is shared as "Anyone with the link".
+ */
+export function buildGoogleDriveDownloadUrl(fileId: string): string {
+  return `https://drive.usercontent.google.com/download?id=${encodeURIComponent(fileId)}&export=download&confirm=t`;
+}
+
+/**
+ * Extracts a clean display title from an HTTP `Content-Disposition` header,
+ * prioritizing RFC 5987 UTF-8 `filename*` values before falling back to `filename`.
+ */
+export function extractFilenameFromContentDisposition(
+  headerValue: string | null
+): string | null {
+  if (!headerValue) return null;
+
+  let rawName: string | null = null;
+
+  const utf8Match = headerValue.match(
+    /filename\*\s*=\s*(?:UTF-8|utf-8)''([^;]+)/i
+  );
+  if (utf8Match?.[1]) {
+    try {
+      rawName = decodeURIComponent(utf8Match[1].trim().replace(/^"|"$/g, ""));
+    } catch {
+      rawName = utf8Match[1].trim().replace(/^"|"$/g, "");
+    }
+  }
+
+  if (!rawName) {
+    const quotedMatch = headerValue.match(/filename\s*=\s*"([^"]+)"/i);
+    if (quotedMatch?.[1]) {
+      rawName = quotedMatch[1];
+    } else {
+      const bareMatch = headerValue.match(/filename\s*=\s*([^;]+)/i);
+      if (bareMatch?.[1]) {
+        rawName = bareMatch[1].trim();
+      }
+    }
+  }
+
+  if (!rawName) return null;
+
+  // Strip any directory separators and known audio file extension
+  const baseName = rawName.split(/[\\/]/).pop()?.trim() ?? "";
+  const withoutExt = baseName.replace(STRIP_AUDIO_EXT_REGEX, "").trim();
+  if (!withoutExt) return null;
+
+  // Only turn underscores/hyphens into spaces when the filename has no spaces
+  const readable = withoutExt.includes(" ")
+    ? withoutExt
+    : withoutExt.replace(/[_-]+/g, " ");
+
+  const normalized = readable.replace(/\s+/g, " ").trim();
+  return normalized || null;
+}
+
+function extractGoogleDriveFileId(parsed: URL): string | null {
+  const host = parsed.hostname.toLowerCase();
+  if (!GOOGLE_DRIVE_HOSTS.has(host)) return null;
+
+  const segments = parsed.pathname.split("/").filter(Boolean);
+
+  // Strip optional multi-account (`/u/0/...`) or Google Workspace (`/a/domain.com/...`) prefix
+  let normalized = segments;
+  if (
+    normalized.length >= 2 &&
+    (normalized[0] === "u" || normalized[0] === "a")
+  ) {
+    normalized = normalized.slice(2);
+  }
+
+  // Reject folders explicitly
+  if (normalized[0] === "drive" && normalized.includes("folders")) {
+    return null;
+  }
+
+  let candidate: string | null = null;
+
+  // /file/d/<FILE_ID>(/view|/edit|/preview|...)
+  if (
+    normalized.length >= 3 &&
+    normalized[0] === "file" &&
+    normalized[1] === "d"
+  ) {
+    candidate = normalized[2] ?? null;
+  } else if (
+    normalized.length === 1 &&
+    (normalized[0] === "open" ||
+      normalized[0] === "uc" ||
+      normalized[0] === "download")
+  ) {
+    candidate = parsed.searchParams.get("id");
+  }
+
+  if (!candidate || !GOOGLE_DRIVE_FILE_ID_REGEX.test(candidate)) {
+    return null;
+  }
+
+  return candidate;
+}
 
 function humanizeSlug(slug: string): string {
   try {
@@ -176,6 +297,18 @@ export function parseTrackUrl(rawInput: string): ParsedTrackUrl | null {
       canonicalUrl,
       defaultThumbnailUrl: null,
       fallbackTitle: humanizeSlug(trackSlug),
+    };
+  }
+
+  // Google Drive shared file links
+  const driveFileId = extractGoogleDriveFileId(parsed);
+  if (driveFileId) {
+    return {
+      provider: "GOOGLE_DRIVE",
+      externalId: driveFileId,
+      canonicalUrl: `https://drive.google.com/file/d/${driveFileId}/view`,
+      defaultThumbnailUrl: null,
+      fallbackTitle: "Google Drive Audio",
     };
   }
 

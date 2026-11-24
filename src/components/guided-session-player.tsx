@@ -58,7 +58,10 @@ import {
   subscribeTimerPreferences,
 } from "@/lib/timer/preferences";
 import type { BellStrikeCount } from "@/lib/timer/types";
-import { buildSoundCloudEmbedUrl } from "@/lib/tracks/providers";
+import {
+  buildSoundCloudEmbedUrl,
+  isAudioStreamProvider,
+} from "@/lib/tracks/providers";
 import type { FavoriteTrackItem } from "@/lib/tracks/types";
 import { useWakeLock } from "@/lib/wake-lock";
 
@@ -226,11 +229,13 @@ export function GuidedSessionPlayer({
   const closingBellVolume: number = timerPrefs.bellVolume;
   const closingBellName = m.sounds.bells[closingBellSoundId];
 
+  const isStreamAudio = isAudioStreamProvider(track.provider);
+
   const [playbackState, setPlaybackState] = useState<PlaybackState>(
-    track.provider === "DIRECT_AUDIO" ? "ready" : "loading"
+    isStreamAudio ? "ready" : "loading"
   );
   const [playerErrorKey, setPlayerErrorKey] = useState<
-    "youtube" | "soundcloud" | "direct_audio" | null
+    "youtube" | "soundcloud" | "direct_audio" | "google_drive" | null
   >(null);
   const [isDimmed, setIsDimmed] = useState<boolean>(false);
   const [offlineBlobUrl, setOfflineBlobUrl] = useState<string | null>(null);
@@ -295,9 +300,9 @@ export function GuidedSessionPlayer({
     };
   }, []);
 
-  // Resolve locally cached Blob URL for saved DIRECT_AUDIO tracks (Airplane Mode playback)
+  // Resolve locally cached Blob URL for saved audio tracks (Airplane Mode playback)
   useEffect(() => {
-    if (track.provider !== "DIRECT_AUDIO") return;
+    if (!isStreamAudio) return;
     let cancelled = false;
     let createdUrl: string | null = null;
 
@@ -319,10 +324,10 @@ export function GuidedSessionPlayer({
         URL.revokeObjectURL(createdUrl);
       }
     };
-  }, [isSavedOffline, track.id, track.provider]);
+  }, [isSavedOffline, isStreamAudio, track.id]);
 
   const handleToggleOfflineSave = useCallback(async () => {
-    if (track.provider !== "DIRECT_AUDIO") return;
+    if (!isStreamAudio) return;
     setOfflineError(null);
 
     if (isSavedOffline) {
@@ -338,7 +343,13 @@ export function GuidedSessionPlayer({
     } finally {
       setIsTogglingOffline(false);
     }
-  }, [isAuthenticated, isSavedOffline, m.guided.errOfflineDownload, track]);
+  }, [
+    isAuthenticated,
+    isSavedOffline,
+    isStreamAudio,
+    m.guided.errOfflineDownload,
+    track,
+  ]);
 
   const syncDirectAudioPosition = useCallback(() => {
     const el = directAudioRef.current;
@@ -374,7 +385,7 @@ export function GuidedSessionPlayer({
   }, []);
 
   const { isActive: isWakeLockActive } = useWakeLock(
-    playbackState === "playing" && track.provider !== "DIRECT_AUDIO"
+    playbackState === "playing" && !isStreamAudio
   );
 
   const handleTrackCompleted = useCallback(() => {
@@ -424,7 +435,7 @@ export function GuidedSessionPlayer({
     userId,
   ]);
 
-  // Unified Media Session API across Direct Audio, YouTube, and SoundCloud guided tracks
+  // Unified Media Session API across Direct Audio, Google Drive, YouTube, and SoundCloud tracks
   useEffect(() => {
     setMediaSessionMetadata({
       title: track.title,
@@ -432,7 +443,7 @@ export function GuidedSessionPlayer({
       album: "Bodhi",
     });
 
-    if (track.provider === "DIRECT_AUDIO") {
+    if (isStreamAudio) {
       setMediaSessionActionHandlers({
         onPlay: () => {
           void directAudioRef.current?.play();
@@ -477,7 +488,13 @@ export function GuidedSessionPlayer({
     return () => {
       clearMediaSession();
     };
-  }, [m.mediaSession.artist, track.author, track.provider, track.title]);
+  }, [
+    isStreamAudio,
+    m.mediaSession.artist,
+    track.author,
+    track.provider,
+    track.title,
+  ]);
 
   // Sync Media Session playbackState
   useEffect(() => {
@@ -731,11 +748,11 @@ export function GuidedSessionPlayer({
     } else if (track.provider === "SOUNDCLOUD" && scWidgetRef.current) {
       scWidgetRef.current.seekTo(0);
       scWidgetRef.current.play();
-    } else if (track.provider === "DIRECT_AUDIO" && directAudioRef.current) {
+    } else if (isStreamAudio && directAudioRef.current) {
       directAudioRef.current.currentTime = 0;
       void directAudioRef.current.play();
     }
-  }, [getAudioEngine, track.provider]);
+  }, [getAudioEngine, isStreamAudio, track.provider]);
 
   const statusLabel =
     playbackState === "playing"
@@ -753,9 +770,18 @@ export function GuidedSessionPlayer({
       ? m.guided.player.ytLoadError
       : playerErrorKey === "soundcloud"
         ? m.guided.player.scLoadError
-        : playerErrorKey === "direct_audio"
-          ? m.guided.player.directAudioError
-          : null;
+        : playerErrorKey === "google_drive"
+          ? m.guided.player.googleDriveError
+          : playerErrorKey === "direct_audio"
+            ? m.guided.player.directAudioError
+            : null;
+
+  const onlineAudioSrc =
+    track.provider === "GOOGLE_DRIVE"
+      ? `/api/tracks/${encodeURIComponent(track.id)}/audio`
+      : track.url;
+  const resolvedAudioSrc =
+    offlineBlobUrl ?? (!isOnline && isSavedOffline ? undefined : onlineAudioSrc);
 
   return (
     <div className="flex flex-1 flex-col justify-between gap-5 py-2">
@@ -920,7 +946,7 @@ export function GuidedSessionPlayer({
                 </div>
                 <audio
                   ref={directAudioRef}
-                  src={offlineBlobUrl ?? track.url}
+                  src={resolvedAudioSrc}
                   controls
                   preload="metadata"
                   onLoadedMetadata={syncDirectAudioPosition}
@@ -941,7 +967,13 @@ export function GuidedSessionPlayer({
                     );
                   }}
                   onEnded={() => handleTrackCompleted()}
-                  onError={() => setPlayerErrorKey("direct_audio")}
+                  onError={() =>
+                    setPlayerErrorKey(
+                      track.provider === "GOOGLE_DRIVE"
+                        ? "google_drive"
+                        : "direct_audio"
+                    )
+                  }
                   className="w-full"
                 />
 
@@ -1005,7 +1037,7 @@ export function GuidedSessionPlayer({
             />
           ) : (
             <p className="text-center text-xs text-[var(--foreground-muted)]">
-              {track.provider === "DIRECT_AUDIO"
+              {isStreamAudio
                 ? m.guided.player.lockScreenHint
                 : isWakeLockActive
                   ? m.guided.player.wakeLockHint

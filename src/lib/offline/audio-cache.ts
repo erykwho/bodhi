@@ -1,3 +1,4 @@
+import { isAudioStreamProvider } from "@/lib/tracks/providers";
 import type { FavoriteTrackItem } from "@/lib/tracks/types";
 
 export const OFFLINE_GUIDED_AUDIO_CACHE_NAME = "bodhi-user-audio-v1";
@@ -161,20 +162,23 @@ async function fetchAudioBlobForOffline(
   track: FavoriteTrackItem,
   isAuthenticated: boolean
 ): Promise<Blob> {
-  // 1. Try direct CORS fetch first (fastest, zero server bandwidth when allowed)
-  try {
-    const directRes = await fetch(track.url, { mode: "cors" });
-    if (directRes.ok) {
-      const blob = await directRes.blob();
-      if (blob.size > 0) {
-        return blob;
+  // 1. Try direct CORS fetch first for DIRECT_AUDIO (fastest, zero server bandwidth when allowed).
+  //    Google Drive URLs redirect through non-CORS download endpoints, so skip straight to the proxy.
+  if (track.provider === "DIRECT_AUDIO") {
+    try {
+      const directRes = await fetch(track.url, { mode: "cors" });
+      if (directRes.ok) {
+        const blob = await directRes.blob();
+        if (blob.size > 0) {
+          return blob;
+        }
       }
+    } catch {
+      // CORS blocked or network quirk — fall through to same-origin authenticated proxy
     }
-  } catch {
-    // CORS blocked or network quirk — fall through to same-origin authenticated proxy
   }
 
-  // 2. Fallback to Bodhi's authenticated same-origin proxy for user-owned DIRECT_AUDIO tracks
+  // 2. Fallback (or primary path for Google Drive) to Bodhi's authenticated same-origin proxy
   if (isAuthenticated) {
     const proxyRes = await fetch(
       `/api/tracks/${encodeURIComponent(track.id)}/audio`
@@ -192,15 +196,17 @@ async function fetchAudioBlobForOffline(
 }
 
 /**
- * Downloads a DIRECT_AUDIO track into the dedicated Cache Storage bucket
- * (`bodhi-user-audio-v1`) and records its offline metadata.
+ * Downloads a DIRECT_AUDIO or GOOGLE_DRIVE track into the dedicated Cache Storage
+ * bucket (`bodhi-user-audio-v1`) and records its offline metadata.
  */
 export async function saveTrackAudioOffline(
   track: FavoriteTrackItem,
   isAuthenticated: boolean
 ): Promise<SavedOfflineAudioMeta> {
-  if (track.provider !== "DIRECT_AUDIO") {
-    throw new Error("Only direct audio tracks can be saved offline");
+  if (!isAudioStreamProvider(track.provider)) {
+    throw new Error(
+      "Only direct audio and Google Drive tracks can be saved offline"
+    );
   }
   if (!isOfflineAudioStorageSupported()) {
     throw new Error("Offline storage is unavailable in this browser");

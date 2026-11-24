@@ -1,4 +1,8 @@
-import { parseTrackUrl } from "@/lib/tracks/providers";
+import {
+  buildGoogleDriveDownloadUrl,
+  extractFilenameFromContentDisposition,
+  parseTrackUrl,
+} from "@/lib/tracks/providers";
 import type { ResolvedTrackMetadata } from "@/lib/tracks/types";
 
 interface OEmbedResponse {
@@ -9,7 +13,8 @@ interface OEmbedResponse {
 
 /**
  * Resolves track metadata via official YouTube / SoundCloud oEmbed endpoints,
- * or returns parsed filename metadata directly for DIRECT_AUDIO URLs.
+ * lightweight Content-Disposition inspection for Google Drive shared files,
+ * or parsed filename metadata directly for DIRECT_AUDIO URLs.
  */
 export async function resolveTrackMetadata(
   rawUrl: string
@@ -31,6 +36,47 @@ export async function resolveTrackMetadata(
       externalId: parsed.externalId,
       title: parsed.fallbackTitle,
       author: hostAuthor,
+      thumbnailUrl: null,
+    };
+  }
+
+  if (parsed.provider === "GOOGLE_DRIVE") {
+    let resolvedTitle = parsed.fallbackTitle;
+    try {
+      const response = await fetch(
+        buildGoogleDriveDownloadUrl(parsed.externalId),
+        {
+          method: "GET",
+          redirect: "follow",
+          signal: AbortSignal.timeout(5000),
+          headers: {
+            Range: "bytes=0-0",
+            Accept: "audio/*,*/*;q=0.8",
+          },
+        }
+      );
+
+      // Cancel the body immediately so metadata lookup never downloads the full audio
+      void response.body?.cancel();
+
+      if (response.ok) {
+        const extracted = extractFilenameFromContentDisposition(
+          response.headers.get("content-disposition")
+        );
+        if (extracted) {
+          resolvedTitle = extracted;
+        }
+      }
+    } catch {
+      // Fall back to default Google Drive title when upstream times out or is unreachable
+    }
+
+    return {
+      provider: parsed.provider,
+      url: parsed.canonicalUrl,
+      externalId: parsed.externalId,
+      title: resolvedTitle,
+      author: "Google Drive",
       thumbnailUrl: null,
     };
   }

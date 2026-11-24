@@ -11,6 +11,7 @@ enum TrackProvider {
   YOUTUBE
   SOUNDCLOUD
   DIRECT_AUDIO
+  GOOGLE_DRIVE
 }
 
 enum SessionMode {

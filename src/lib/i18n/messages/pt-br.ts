@@ -210,21 +210,24 @@ export const ptBrMessages: Messages = {
       YOUTUBE: "YouTube",
       SOUNDCLOUD: "SoundCloud",
       DIRECT_AUDIO: "Áudio",
+      GOOGLE_DRIVE: "Google Drive",
     },
     offlineTitle: "Você está offline",
     offlineBody:
-      "Faixas do YouTube e SoundCloud precisam de internet. Salve faixas de áudio direto (.mp3/.m4a) offline ou use o Timer de Meditação quando quiser.",
+      "Faixas do YouTube e SoundCloud precisam de internet. Salve faixas de áudio direto ou do Google Drive offline, ou use o Timer de Meditação quando quiser.",
     offlineShowingSaved: "Offline · Exibindo faixas salvas neste dispositivo",
     openTimer: "Abrir Timer de Meditação",
     signedOutTitle: "Faixas Guiadas Favoritas",
     signedOutBody:
-      "Salve suas meditações favoritas do YouTube, SoundCloud ou áudio direto e ouça a faixa completa sem distrações, sincronizado entre dispositivos.",
+      "Salve suas meditações favoritas do YouTube, SoundCloud, Google Drive ou áudio direto e ouça a faixa completa sem distrações, sincronizado entre dispositivos.",
     authNotConfigured:
       "Configure as variáveis do Google OAuth e Neon Postgres para habilitar faixas favoritas na nuvem.",
     closingBell: "Sino final",
     addTrack: "Adicionar",
-    urlLabel: "Link do YouTube, SoundCloud ou Áudio",
-    urlPlaceholder: "Link do YouTube, SoundCloud ou .mp3 / .m4a direto",
+    urlLabel: "Link do YouTube, SoundCloud, Google Drive ou Áudio",
+    urlPlaceholder: "Link do YouTube, SoundCloud, Google Drive ou .mp3 / .m4a",
+    googleDriveShareHint:
+      'Defina o compartilhamento no Google Drive como "Qualquer pessoa com o link" para reproduzir e salvar offline.',
     titleLabel: "Título",
     titlePlaceholder: "Preenchido automaticamente (editável)",
     tagsLabel: "Tags (opcional)",
@@ -234,7 +237,7 @@ export const ptBrMessages: Messages = {
     noTracksTitle: "Nenhuma faixa favorita ainda",
     noTagMatchTitle: "Nenhuma faixa com esta tag",
     noTracksBody:
-      'Toque em "Adicionar" para salvar uma meditação guiada do YouTube, SoundCloud ou link .mp3/.m4a.',
+      'Toque em "Adicionar" para salvar uma meditação guiada do YouTube, SoundCloud, Google Drive ou link .mp3/.m4a.',
     noTagMatchBody: "Escolha outra tag ou toque em Todos para ver tudo.",
     holdAndDrag: "Segure e arraste para reordenar",
     editTrackTitlePlaceholder: "Título da faixa",
@@ -244,7 +247,7 @@ export const ptBrMessages: Messages = {
     downloadingOffline: "Baixando...",
     errOfflineDownload: "Não foi possível salvar este áudio offline.",
     errInvalidUrl:
-      "Cole um link válido do YouTube, SoundCloud ou áudio direto (.mp3/.m4a).",
+      "Cole um link válido do YouTube, SoundCloud, Google Drive ou áudio direto (.mp3/.m4a).",
     errFetchMetadata: "Não foi possível obter os dados da faixa.",
     errSaveTrack: "Não foi possível salvar a faixa favorita.",
     errEmptyTitle: "O título da faixa não pode ficar vazio.",
@@ -270,6 +273,8 @@ export const ptBrMessages: Messages = {
         "Não foi possível carregar o player do SoundCloud. Verifique sua conexão ou abra a faixa diretamente.",
       directAudioError:
         "Não foi possível reproduzir este áudio. Verifique se o link direto está acessível.",
+      googleDriveError:
+        'Não foi possível reproduzir este áudio do Google Drive. Verifique se o arquivo está compartilhado como "Qualquer pessoa com o link" e é um arquivo de áudio válido.',
       listenedFor: (duration: string) => `Você ouviu por ${duration}.`,
       lockScreenHint: "Compatível com tela bloqueada e controles de mídia.",
       wakeLockHint: "Tela ativa — reproduz a faixa completa do início ao fim.",

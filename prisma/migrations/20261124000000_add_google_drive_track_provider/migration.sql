@@ -1,0 +1,2 @@
+-- AlterEnum
+ALTER TYPE "TrackProvider" ADD VALUE IF NOT EXISTS 'GOOGLE_DRIVE';

@@ -211,21 +211,24 @@ export const enMessages = {
       YOUTUBE: "YouTube",
       SOUNDCLOUD: "SoundCloud",
       DIRECT_AUDIO: "Audio",
+      GOOGLE_DRIVE: "Google Drive",
     } satisfies Record<TrackProviderType, string>,
     offlineTitle: "You're Offline",
     offlineBody:
-      "Guided tracks from YouTube and SoundCloud require an internet connection. Save direct audio (.mp3/.m4a) tracks offline, or use the Meditation Timer anytime.",
+      "Guided tracks from YouTube and SoundCloud require an internet connection. Save direct audio or Google Drive tracks offline, or use the Meditation Timer anytime.",
     offlineShowingSaved: "Offline · Showing tracks saved on this device",
     openTimer: "Open Meditation Timer",
     signedOutTitle: "Favorite Guided Tracks",
     signedOutBody:
-      "Save your favorite YouTube, SoundCloud, or direct audio meditations and listen to the full track in a calm, distraction-free session synced across devices.",
+      "Save your favorite YouTube, SoundCloud, Google Drive, or direct audio meditations and listen to the full track in a calm, distraction-free session synced across devices.",
     authNotConfigured:
       "Configure Google OAuth and Neon Postgres environment variables to enable cloud-synced favorite tracks.",
     closingBell: "Closing bell",
     addTrack: "Add Track",
-    urlLabel: "YouTube, SoundCloud, or Audio URL",
-    urlPlaceholder: "YouTube, SoundCloud, or direct .mp3 / .m4a link",
+    urlLabel: "YouTube, SoundCloud, Google Drive, or Audio URL",
+    urlPlaceholder: "YouTube, SoundCloud, Google Drive, or .mp3 / .m4a link",
+    googleDriveShareHint:
+      'Set Google Drive sharing to "Anyone with the link" so Bodhi can stream and save it offline.',
     titleLabel: "Title",
     titlePlaceholder: "Auto-filled from track link (editable)",
     tagsLabel: "Tags (optional)",
@@ -235,7 +238,7 @@ export const enMessages = {
     noTracksTitle: "No favorite tracks yet",
     noTagMatchTitle: "No tracks match this tag",
     noTracksBody:
-      'Tap "Add Track" to save a YouTube, SoundCloud, or direct audio (.mp3/.m4a) guided meditation.',
+      'Tap "Add Track" to save a YouTube, SoundCloud, Google Drive, or direct audio (.mp3/.m4a) guided meditation.',
     noTagMatchBody: "Choose another tag or tap All to see all favorites.",
     holdAndDrag: "Hold and drag to reorder",
     editTrackTitlePlaceholder: "Track title",
@@ -245,7 +248,7 @@ export const enMessages = {
     downloadingOffline: "Downloading...",
     errOfflineDownload: "Could not save this audio file offline.",
     errInvalidUrl:
-      "Paste a valid YouTube, SoundCloud, or direct audio (.mp3/.m4a) URL.",
+      "Paste a valid YouTube, SoundCloud, Google Drive, or direct audio (.mp3/.m4a) URL.",
     errFetchMetadata: "Could not fetch track details.",
     errSaveTrack: "Failed to save favorite track.",
     errEmptyTitle: "Track title cannot be empty.",
@@ -271,6 +274,8 @@ export const enMessages = {
         "Unable to load the SoundCloud player. Check your connection or open the track directly.",
       directAudioError:
         "Unable to stream this audio file. Verify the direct link is publicly accessible.",
+      googleDriveError:
+        'Unable to stream this Google Drive audio. Make sure the file is shared as "Anyone with the link" and is a valid audio file.',
       listenedFor: (duration: string) => `You listened for ${duration}.`,
       lockScreenHint: "Supports lock-screen playback and media controls.",
       wakeLockHint: "Screen awake — plays full track from start to finish.",
