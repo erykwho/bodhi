@@ -330,6 +330,7 @@ export const ptBrMessages: Messages = {
       tryAgain: "Tentar novamente",
       externalListening: "Ouvindo no YouTube",
       completeSession: "Concluir sessão",
+      discardSession: "Descartar sessão",
       externalCompanionHint:
         "Volte aqui ao terminar no YouTube e toque em Concluir sessão para tocar o sino final e salvar sua prática.",
       scLoadError:
