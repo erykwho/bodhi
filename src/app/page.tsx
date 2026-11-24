@@ -28,7 +28,11 @@ export default async function HomePage(props: {
       const [trackRows, sessionRows, presetRows] = await Promise.all([
         prisma.favoriteTrack.findMany({
           where: { userId: user.id },
-          orderBy: [{ position: "asc" }, { createdAt: "desc" }],
+          orderBy: [
+            { isFavorite: "desc" },
+            { position: "asc" },
+            { createdAt: "desc" },
+          ],
         }),
         prisma.meditationSession.findMany({
           where: { userId: user.id },
@@ -51,6 +55,7 @@ export default async function HomePage(props: {
         author: track.author,
         thumbnailUrl: track.thumbnailUrl,
         tags: track.tags,
+        isFavorite: track.isFavorite,
         createdAt: track.createdAt.toISOString(),
       }));
 

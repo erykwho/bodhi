@@ -22,6 +22,7 @@ import {
   Pencil,
   Play,
   Plus,
+  Star,
   Tag,
   Timer,
   Trash2,
@@ -48,9 +49,12 @@ import {
   parseTrackUrl,
 } from "@/lib/tracks/providers";
 import {
-  computeTargetIndex,
+  applyFavoriteToggle,
+  computeGroupedTargetIndex,
+  getFavoriteGroupRange,
   hasOrderChanged,
   reorderItems,
+  sortTracksWithFavoritesFirst,
 } from "@/lib/tracks/reorder";
 import type {
   FavoriteTrackItem,
@@ -61,6 +65,11 @@ import { cn } from "@/lib/utils";
 const LONG_PRESS_DELAY_MS = 250;
 const TOUCH_CANCEL_THRESHOLD_PX = 8;
 const MOUSE_DRAG_THRESHOLD_PX = 6;
+
+type TrackFilter =
+  | { type: "favorites" }
+  | { type: "tag"; tag: string }
+  | null;
 
 interface DragSession {
   pointerId: number;
@@ -107,14 +116,14 @@ export function GuidedTracks({
     getOfflineGuidedServerSnapshot
   );
 
-  const [tracks, setTracks] = useState<FavoriteTrackItem[]>(initialTracks);
+  const [tracks, setTracks] = useState<FavoriteTrackItem[]>(() =>
+    sortTracksWithFavoritesFirst(initialTracks)
+  );
   const [activeTrack, setActiveTrack] = useState<FavoriteTrackItem | null>(
     null
   );
   const [closingBellEnabled, setClosingBellEnabled] = useState<boolean>(true);
-  const [selectedTagFilter, setSelectedTagFilter] = useState<string | null>(
-    null
-  );
+  const [selectedFilter, setSelectedFilter] = useState<TrackFilter>(null);
 
   // Add track form state
   const [isAdding, setIsAdding] = useState<boolean>(false);
@@ -127,6 +136,7 @@ export function GuidedTracks({
   const [isResolving, setIsResolving] = useState<boolean>(false);
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [togglingFavoriteIds, setTogglingFavoriteIds] = useState<string[]>([]);
   const [downloadingTrackId, setDownloadingTrackId] = useState<string | null>(
     null
   );
@@ -144,6 +154,7 @@ export function GuidedTracks({
   const [dragOffsetY, setDragOffsetY] = useState<number>(0);
 
   const tracksRef = useRef<FavoriteTrackItem[]>(tracks);
+  const togglingFavoriteRef = useRef<Set<string>>(new Set());
   const itemElementsRef = useRef<Map<string, HTMLLIElement>>(new Map());
   const dragSessionRef = useRef<DragSession | null>(null);
   const dragOffsetYRef = useRef<number>(0);
@@ -169,14 +180,31 @@ export function GuidedTracks({
 
   const offlinePlayableTracks = useMemo(() => {
     const source = tracks.length > 0 ? tracks : offlineGuided.tracks;
-    return source.filter(
-      (track) =>
-        track.provider === "DIRECT_AUDIO" &&
-        Boolean(offlineGuided.savedAudio[track.id])
+    return sortTracksWithFavoritesFirst(
+      source.filter(
+        (track) =>
+          track.provider === "DIRECT_AUDIO" &&
+          Boolean(offlineGuided.savedAudio[track.id])
+      )
     );
   }, [offlineGuided.savedAudio, offlineGuided.tracks, tracks]);
 
   const detectedProvider = parseTrackUrl(urlInput)?.provider ?? null;
+
+  const favoriteCount = useMemo(
+    () => tracks.filter((track) => track.isFavorite).length,
+    [tracks]
+  );
+  const otherCount = tracks.length - favoriteCount;
+  const hasFavorites = favoriteCount > 0;
+
+  const effectiveFilter = useMemo<TrackFilter>(
+    () =>
+      selectedFilter?.type === "favorites" && !hasFavorites
+        ? null
+        : selectedFilter,
+    [hasFavorites, selectedFilter]
+  );
 
   const availableTags = useMemo(() => {
     const seen = new Map<string, string>();
@@ -192,12 +220,35 @@ export function GuidedTracks({
   }, [tracks]);
 
   const displayedTracks = useMemo(() => {
-    if (!selectedTagFilter) return tracks;
-    const target = selectedTagFilter.toLowerCase();
+    if (!effectiveFilter) return tracks;
+    if (effectiveFilter.type === "favorites") {
+      return tracks.filter((track) => track.isFavorite);
+    }
+    const target = effectiveFilter.tag.toLowerCase();
     return tracks.filter((track) =>
       (track.tags ?? []).some((tag) => tag.toLowerCase() === target)
     );
-  }, [selectedTagFilter, tracks]);
+  }, [effectiveFilter, tracks]);
+
+  const displayedFavorites = useMemo(
+    () => displayedTracks.filter((track) => track.isFavorite),
+    [displayedTracks]
+  );
+
+  const displayedOthers = useMemo(
+    () => displayedTracks.filter((track) => !track.isFavorite),
+    [displayedTracks]
+  );
+
+  const showSectionDivider =
+    effectiveFilter?.type !== "favorites" &&
+    displayedFavorites.length > 0 &&
+    displayedOthers.length > 0;
+
+  const canDragAnyGroup =
+    effectiveFilter === null &&
+    editingTrackId === null &&
+    (favoriteCount >= 2 || otherCount >= 2);
 
   const resetForm = useCallback(() => {
     setUrlInput("");
@@ -305,11 +356,11 @@ export function GuidedTracks({
         setTracks((prev) => {
           const exists = prev.some((item) => item.id === savedTrack.id);
           if (exists) {
-            return prev.map((item) =>
-              item.id === savedTrack.id ? savedTrack : item
+            return sortTracksWithFavoritesFirst(
+              prev.map((item) => (item.id === savedTrack.id ? savedTrack : item))
             );
           }
-          return [...prev, savedTrack];
+          return sortTracksWithFavoritesFirst([...prev, savedTrack]);
         });
         resetForm();
       } catch {
@@ -400,6 +451,73 @@ export function GuidedTracks({
       m.guided.errEmptyTitle,
       m.guided.errUpdateTrack,
     ]
+  );
+
+  const handleToggleFavorite = useCallback(
+    async (track: FavoriteTrackItem) => {
+      if (togglingFavoriteRef.current.has(track.id)) return;
+
+      const previousTracks = tracksRef.current;
+      const nextIsFavorite = !track.isFavorite;
+      const optimisticTracks = applyFavoriteToggle(
+        previousTracks,
+        track.id,
+        nextIsFavorite
+      );
+
+      togglingFavoriteRef.current.add(track.id);
+      setTogglingFavoriteIds((prev) =>
+        prev.includes(track.id) ? prev : [...prev, track.id]
+      );
+      setErrorMessage(null);
+      tracksRef.current = optimisticTracks;
+      setTracks(optimisticTracks);
+      setActiveTrack((prev) =>
+        prev && prev.id === track.id
+          ? { ...prev, isFavorite: nextIsFavorite }
+          : prev
+      );
+
+      try {
+        const response = await fetch(`/api/tracks/${track.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ isFavorite: nextIsFavorite }),
+        });
+
+        const data = (await response.json()) as {
+          track?: FavoriteTrackItem;
+          error?: string;
+        };
+
+        if (!response.ok || !data.track) {
+          tracksRef.current = previousTracks;
+          setTracks(previousTracks);
+          setActiveTrack((prev) =>
+            prev && prev.id === track.id ? track : prev
+          );
+          setErrorMessage(data.error ?? m.guided.errFavoriteTrack);
+          return;
+        }
+
+        const updatedTrack = data.track;
+        setTracks((prev) =>
+          prev.map((item) => (item.id === updatedTrack.id ? updatedTrack : item))
+        );
+        setActiveTrack((prev) =>
+          prev && prev.id === updatedTrack.id ? updatedTrack : prev
+        );
+      } catch {
+        tracksRef.current = previousTracks;
+        setTracks(previousTracks);
+        setActiveTrack((prev) => (prev && prev.id === track.id ? track : prev));
+        setErrorMessage(m.guided.errFavoriteTrack);
+      } finally {
+        togglingFavoriteRef.current.delete(track.id);
+        setTogglingFavoriteIds((prev) => prev.filter((id) => id !== track.id));
+      }
+    },
+    [m.guided.errFavoriteTrack]
   );
 
   const handleDeleteTrack = useCallback(
@@ -581,9 +699,10 @@ export function GuidedTracks({
         };
       });
 
-      const targetIndex = computeTargetIndex(
+      const targetIndex = computeGroupedTargetIndex(
         event.clientY,
         itemRects,
+        currentList,
         currentIndex
       );
 
@@ -679,7 +798,11 @@ export function GuidedTracks({
 
   const handleTrackPointerDown = useCallback(
     (trackId: string, event: React.PointerEvent<HTMLLIElement>) => {
-      if (tracksRef.current.length < 2) return;
+      const currentList = tracksRef.current;
+      const trackIndex = currentList.findIndex((item) => item.id === trackId);
+      if (trackIndex === -1) return;
+      const { start, end } = getFavoriteGroupRange(currentList, trackIndex);
+      if (end - start + 1 < 2) return;
       if (event.pointerType === "mouse" && event.button !== 0) return;
       if (
         event.target instanceof HTMLElement &&
@@ -737,6 +860,8 @@ export function GuidedTracks({
         isAuthenticated={isAuthenticated}
         userId={userId}
         isOnline={isOnline}
+        isTogglingFavorite={togglingFavoriteIds.includes(activeTrack.id)}
+        onToggleFavorite={(track) => void handleToggleFavorite(track)}
         onToggleClosingBell={() => setClosingBellEnabled((prev) => !prev)}
         onExit={() => setActiveTrack(null)}
         onSessionSaved={onSessionSaved}
@@ -772,7 +897,12 @@ export function GuidedTracks({
               return (
                 <li
                   key={track.id}
-                  className="flex items-center gap-2.5 rounded-2xl border border-black/6 bg-[var(--surface)] p-3 shadow-xs transition-colors hover:border-[var(--accent)]/35 dark:border-white/10"
+                  className={cn(
+                    "flex items-center gap-2.5 rounded-2xl border p-3 shadow-xs transition-colors",
+                    track.isFavorite
+                      ? "border-[var(--warm-amber)]/40 bg-[color-mix(in_srgb,var(--surface)_94%,var(--warm-amber)_6%)] hover:border-[var(--warm-amber)]/55 dark:border-[var(--warm-amber)]/35 dark:bg-[color-mix(in_srgb,var(--surface)_92%,var(--warm-amber)_8%)]"
+                      : "border-black/6 bg-[var(--surface)] hover:border-[var(--accent)]/35 dark:border-white/10"
+                  )}
                 >
                   <button
                     type="button"
@@ -805,6 +935,15 @@ export function GuidedTracks({
                       </div>
                     </div>
                   </button>
+
+                  {track.isFavorite && (
+                    <span
+                      aria-label={m.guided.favoritesSection}
+                      className="flex h-7 w-7 shrink-0 items-center justify-center text-[var(--warm-amber)]"
+                    >
+                      <Star className="h-3.5 w-3.5 fill-current" />
+                    </span>
+                  )}
 
                   <button
                     type="button"
@@ -1037,7 +1176,7 @@ export function GuidedTracks({
                 {m.guided.saving}
               </>
             ) : (
-              m.guided.saveToFavorites
+              m.guided.saveTrack
             )}
           </button>
         </form>
@@ -1049,28 +1188,51 @@ export function GuidedTracks({
         </p>
       )}
 
-      {/* Single-row Tag Filter Bar (only when tags exist) */}
-      {availableTags.length > 0 && (
+      {/* Single-row Filter Bar (Favorites chip + Tags) */}
+      {(hasFavorites || availableTags.length > 0) && (
         <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           <button
             type="button"
-            onClick={() => setSelectedTagFilter(null)}
+            onClick={() => setSelectedFilter(null)}
             className={`shrink-0 rounded-full px-3 py-1 text-xs font-medium whitespace-nowrap transition-colors ${
-              selectedTagFilter === null
+              effectiveFilter === null
                 ? "bg-[var(--accent)] text-[#fcfaf6] dark:text-[#151917]"
                 : "border border-black/6 bg-[var(--surface)] text-[var(--foreground-muted)] hover:text-[var(--foreground)] dark:border-white/10"
             }`}
           >
             {m.common.all}
           </button>
+          {hasFavorites && (
+            <button
+              type="button"
+              onClick={() =>
+                setSelectedFilter(
+                  effectiveFilter?.type === "favorites"
+                    ? null
+                    : { type: "favorites" }
+                )
+              }
+              className={`inline-flex shrink-0 items-center gap-1 rounded-full px-3 py-1 text-xs font-medium whitespace-nowrap transition-colors ${
+                effectiveFilter?.type === "favorites"
+                  ? "bg-[var(--warm-amber)] text-[#fcfaf6] dark:text-[#151917]"
+                  : "border border-[var(--warm-amber)]/30 bg-[var(--surface)] text-[var(--warm-amber)] hover:bg-[var(--warm-amber)]/10"
+              }`}
+            >
+              <Star className="h-2.5 w-2.5 fill-current" />
+              {m.guided.favoritesFilter}
+            </button>
+          )}
           {availableTags.map((tag) => {
             const isSelected =
-              selectedTagFilter?.toLowerCase() === tag.toLowerCase();
+              effectiveFilter?.type === "tag" &&
+              effectiveFilter.tag.toLowerCase() === tag.toLowerCase();
             return (
               <button
                 key={tag}
                 type="button"
-                onClick={() => setSelectedTagFilter(isSelected ? null : tag)}
+                onClick={() =>
+                  setSelectedFilter(isSelected ? null : { type: "tag", tag })
+                }
                 className={`inline-flex shrink-0 items-center gap-1 rounded-full px-3 py-1 text-xs font-medium whitespace-nowrap transition-colors ${
                   isSelected
                     ? "bg-[var(--accent)] text-[#fcfaf6] dark:text-[#151917]"
@@ -1085,7 +1247,7 @@ export function GuidedTracks({
         </div>
       )}
 
-      {/* Favorite Tracks List */}
+      {/* Guided Tracks List */}
       {displayedTracks.length === 0 ? (
         <div className="flex flex-1 flex-col items-center justify-center rounded-3xl border border-dashed border-black/12 bg-[var(--surface)]/60 px-6 py-12 text-center dark:border-white/12">
           <Music2 className="h-7 w-7 text-[var(--foreground-muted)]" />
@@ -1102,14 +1264,23 @@ export function GuidedTracks({
         </div>
       ) : (
         <div className="flex flex-col gap-2">
-          <ul className="flex flex-col gap-2.5">
-            {displayedTracks.map((track) => {
+          {showSectionDivider && (
+            <div className="flex items-center gap-1.5 px-1 pt-0.5 text-[11px] font-medium tracking-wide text-[var(--warm-amber)] uppercase">
+              <Star className="h-3 w-3 fill-current" />
+              <span>{m.guided.favoritesSection}</span>
+            </div>
+          )}
+
+          {(() => {
+            const renderTrackCard = (track: FavoriteTrackItem) => {
               const isDragged = draggingId === track.id;
               const isEditing = editingTrackId === track.id;
+              const isTogglingFavorite = togglingFavoriteIds.includes(track.id);
+              const groupSize = track.isFavorite ? favoriteCount : otherCount;
               const canDrag =
-                selectedTagFilter === null &&
+                effectiveFilter === null &&
                 editingTrackId === null &&
-                tracks.length >= 2;
+                groupSize >= 2;
 
               return (
                 <li
@@ -1132,15 +1303,20 @@ export function GuidedTracks({
                       : undefined
                   }
                   className={cn(
-                    "relative flex flex-col gap-2.5 rounded-2xl border border-black/6 bg-[var(--surface)] p-3 shadow-xs transition-colors dark:border-white/10",
+                    "relative flex flex-col gap-2.5 rounded-2xl border p-3 shadow-xs transition-colors",
+                    track.isFavorite
+                      ? "border-[var(--warm-amber)]/40 bg-[color-mix(in_srgb,var(--surface)_94%,var(--warm-amber)_6%)] dark:border-[var(--warm-amber)]/35 dark:bg-[color-mix(in_srgb,var(--surface)_92%,var(--warm-amber)_8%)]"
+                      : "border-black/6 bg-[var(--surface)] dark:border-white/10",
                     !isEditing && "select-none",
                     isDragged
                       ? "z-20 cursor-grabbing border-[var(--accent)]/50 shadow-lg ring-2 ring-[var(--accent)]/30"
-                      : "hover:border-[var(--accent)]/35",
+                      : track.isFavorite
+                        ? "hover:border-[var(--warm-amber)]/60"
+                        : "hover:border-[var(--accent)]/35",
                     draggingId !== null && !isDragged && "opacity-85"
                   )}
                 >
-                  <div className="flex items-center gap-2.5">
+                  <div className="flex items-center gap-2">
                     <button
                       type="button"
                       onClick={() => {
@@ -1212,6 +1388,37 @@ export function GuidedTracks({
                       data-no-drag="true"
                       className="flex shrink-0 items-center gap-0.5"
                     >
+                      <button
+                        type="button"
+                        data-no-drag="true"
+                        onClick={() => void handleToggleFavorite(track)}
+                        disabled={isTogglingFavorite}
+                        aria-pressed={track.isFavorite}
+                        aria-label={
+                          track.isFavorite
+                            ? m.guided.removeFavoriteAria(track.title)
+                            : m.guided.addFavoriteAria(track.title)
+                        }
+                        title={
+                          track.isFavorite
+                            ? m.guided.removeFavoriteAria(track.title)
+                            : m.guided.addFavoriteAria(track.title)
+                        }
+                        className={cn(
+                          "flex h-7 w-7 items-center justify-center rounded-xl transition-colors disabled:opacity-50 sm:h-8 sm:w-8",
+                          track.isFavorite
+                            ? "text-[var(--warm-amber)] hover:bg-[var(--warm-amber)]/12"
+                            : "text-[var(--foreground-muted)] hover:bg-[var(--surface-muted)] hover:text-[var(--warm-amber)]"
+                        )}
+                      >
+                        <Star
+                          className={cn(
+                            "h-3.5 w-3.5",
+                            track.isFavorite && "fill-current"
+                          )}
+                        />
+                      </button>
+
                       {track.provider === "DIRECT_AUDIO" && (
                         <button
                           type="button"
@@ -1231,7 +1438,7 @@ export function GuidedTracks({
                                 : m.guided.saveOfflineAria(track.title)
                           }
                           className={cn(
-                            "flex h-8 w-8 items-center justify-center rounded-xl transition-colors disabled:opacity-50",
+                            "flex h-7 w-7 items-center justify-center rounded-xl transition-colors disabled:opacity-50 sm:h-8 sm:w-8",
                             offlineGuided.savedAudio[track.id]
                               ? "text-[var(--accent)] hover:bg-[var(--accent-soft)]"
                               : "text-[var(--foreground-muted)] hover:bg-[var(--surface-muted)] hover:text-[var(--foreground)]"
@@ -1256,7 +1463,7 @@ export function GuidedTracks({
                             : startEditingTrack(track)
                         }
                         aria-label={`${m.common.edit} ${track.title}`}
-                        className="flex h-8 w-8 items-center justify-center rounded-xl text-[var(--foreground-muted)] transition-colors hover:bg-[var(--surface-muted)] hover:text-[var(--foreground)]"
+                        className="flex h-7 w-7 items-center justify-center rounded-xl text-[var(--foreground-muted)] transition-colors hover:bg-[var(--surface-muted)] hover:text-[var(--foreground)] sm:h-8 sm:w-8"
                       >
                         {isEditing ? (
                           <X className="h-3.5 w-3.5" />
@@ -1271,7 +1478,7 @@ export function GuidedTracks({
                         onClick={() => void handleDeleteTrack(track.id)}
                         disabled={deletingId === track.id}
                         aria-label={`Remove ${track.title}`}
-                        className="flex h-8 w-8 items-center justify-center rounded-xl text-[var(--foreground-muted)] transition-colors hover:bg-red-500/10 hover:text-red-600 disabled:opacity-40 dark:hover:text-red-400"
+                        className="flex h-7 w-7 items-center justify-center rounded-xl text-[var(--foreground-muted)] transition-colors hover:bg-red-500/10 hover:text-red-600 disabled:opacity-40 dark:hover:text-red-400 sm:h-8 sm:w-8"
                       >
                         {deletingId === track.id ? (
                           <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -1368,10 +1575,33 @@ export function GuidedTracks({
                   )}
                 </li>
               );
-            })}
-          </ul>
+            };
 
-          {selectedTagFilter === null && tracks.length >= 2 && (
+            if (showSectionDivider) {
+              return (
+                <>
+                  <ul className="flex flex-col gap-2.5">
+                    {displayedFavorites.map(renderTrackCard)}
+                  </ul>
+                  <div
+                    role="separator"
+                    className="my-1 border-t border-black/8 dark:border-white/10"
+                  />
+                  <ul className="flex flex-col gap-2.5">
+                    {displayedOthers.map(renderTrackCard)}
+                  </ul>
+                </>
+              );
+            }
+
+            return (
+              <ul className="flex flex-col gap-2.5">
+                {displayedTracks.map(renderTrackCard)}
+              </ul>
+            );
+          })()}
+
+          {canDragAnyGroup && (
             <p className="pt-1 text-center text-[11px] text-[var(--foreground-muted)]/75">
               {m.guided.holdAndDrag}
             </p>
