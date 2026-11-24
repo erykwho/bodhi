@@ -320,7 +320,19 @@ export const enMessages = {
       replay: "Replay",
       openOriginal: "Open original track",
       ytLoadError:
-        "Unable to load the YouTube player. Check your connection or open the track directly.",
+        "Unable to load the YouTube player. Check your connection or listen on YouTube while Bodhi tracks your session.",
+      ytEmbedDisabledError:
+        "This video's creator disabled external playback. Listen on YouTube while Bodhi tracks your session and rings the closing bell.",
+      ytUnavailableError: "This video is unavailable or private on YouTube.",
+      ytConfigError:
+        "YouTube blocked embedded playback in this browser. Try again or listen on YouTube while Bodhi tracks your session.",
+      openYouTubeAndTrack: "Open on YouTube & Track",
+      openYouTubeAgain: "Open on YouTube again",
+      tryAgain: "Try again",
+      externalListening: "Listening on YouTube",
+      completeSession: "Complete Session",
+      externalCompanionHint:
+        "Return here when the meditation ends and tap Complete Session to ring the closing bell and save your practice.",
       scLoadError:
         "Unable to load the SoundCloud player. Check your connection or open the track directly.",
       directAudioError:

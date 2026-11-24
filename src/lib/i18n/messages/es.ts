@@ -320,7 +320,19 @@ export const esMessages: Messages = {
       replay: "Escuchar de nuevo",
       openOriginal: "Abrir pista original",
       ytLoadError:
-        "No se pudo cargar el reproductor de YouTube. Comprueba tu conexión o abre la pista directamente.",
+        "No se pudo cargar el reproductor de YouTube. Comprueba tu conexión o escúchalo en YouTube mientras Bodhi registra tu sesión.",
+      ytEmbedDisabledError:
+        "El creador de este video desactivó la reproducción externa. Escúchalo en YouTube mientras Bodhi registra tu sesión y toca la campana final.",
+      ytUnavailableError: "Este video no está disponible o es privado en YouTube.",
+      ytConfigError:
+        "YouTube bloqueó la reproducción integrada en este navegador. Inténtalo de nuevo o escúchalo en YouTube mientras Bodhi registra tu sesión.",
+      openYouTubeAndTrack: "Abrir en YouTube y seguir",
+      openYouTubeAgain: "Abrir en YouTube de nuevo",
+      tryAgain: "Intentar de nuevo",
+      externalListening: "Escuchando en YouTube",
+      completeSession: "Completar sesión",
+      externalCompanionHint:
+        "Vuelve aquí al terminar en YouTube y toca Completar sesión para tocar la campana final y guardar tu práctica.",
       scLoadError:
         "No se pudo cargar el reproductor de SoundCloud. Comprueba tu conexión o abre la pista directamente.",
       directAudioError:
