@@ -62,8 +62,8 @@ Mobile-first meditation web application (**PWA**) designed for calm, distraction
 - **Authentication (`src/lib/auth.ts`, `src/proxy.ts`):**
   - Auth.js v5 (`next-auth@beta`, JWT session) with Google OAuth 2.0.
   - `ALLOWED_EMAILS` is optional: if unset or empty, any Google account is allowed; if populated, only listed emails may sign in.
-- **Internationalization (`src/lib/i18n/`, `I18nProvider`):**
-  - Supports English (`en`, default) and Brazilian Portuguese (`pt-BR`), persisted in `localStorage` (`bodhi-locale`) with cross-tab sync, `<html lang>` updates, and `Intl.DateTimeFormat` locale-aware dates/calendars.
+- **Internationalization (`src/lib/i18n/`, `I18nProvider`, `LanguageSwitcher`, `LocaleFlag`):**
+  - Supports Brazilian Portuguese (`pt-BR`, default), English (`en`), and Spanish (`es`), persisted in `localStorage` (`bodhi-locale`) with cross-tab sync, `<html lang>` updates, inline circular SVG flags (Brazil, United States, Spain) in a compact popover menu, and `Intl.DateTimeFormat` locale-aware dates/calendars.
 
 ## Stack & Infrastructure
 
@@ -83,7 +83,7 @@ Mobile-first meditation web application (**PWA**) designed for calm, distraction
 - `prisma/schema.prisma` & `prisma/migrations/` — `User`, `FavoriteTrack`, `MeditationSession` (`TIMER | TRACK | BREATHING`), and `TimerPreset` models and versioned SQL migrations.
 - `scripts/vercel-db-sync.mjs` — Production-only `prisma migrate deploy` runner (with one-time `P3005` baseline transition and no `db push` fallback).
 - `src/app/` — App Router layout, global styles, Error Boundaries (`error.tsx`, `global-error.tsx`), PWA `manifest.ts`, server actions (`actions.ts`), main page, and REST API routes (`/api/health` with optional `?db=1` Neon check, `/api/auth/[...nextauth]`, `/api/tracks`, `/api/tracks/resolve`, `/api/tracks/reorder`, `/api/tracks/[id]`, `/api/tracks/[id]/audio`, `/api/sessions`, `/api/sessions/[id]`, `/api/presets`, `/api/presets/[id]`, plus Vitest security & contract tests).
-- `src/lib/i18n/` — Locale types & metadata (`types.ts`), resolver & helpers (`locale.ts` + `locale.test.ts`), and typed message bundles (`messages/en.ts`, `messages/pt-br.ts`).
+- `src/lib/i18n/` — Locale types & metadata (`types.ts`), resolver & helpers (`locale.ts` + `locale.test.ts`), and typed message bundles (`messages/en.ts`, `messages/pt-br.ts`, `messages/es.ts`).
 - `src/lib/timer/` — Timestamp-based countdown & open-ended timer engine (`engine.ts` + `engine.test.ts`), persisted preferences (`preferences.ts` + `preferences.test.ts`), named presets (`presets.ts` + `presets.test.ts`), and types (`types.ts`).
 - `src/lib/breathing/` — Timestamp-based guided breathing engine (`engine.ts` + `engine.test.ts`), persisted preferences (`preferences.ts` + `preferences.test.ts`), and types/presets (`types.ts`).
 - `src/lib/audio/` — Extensible bell & ambient sound catalog (`sounds.ts`) and offline-first audio engine with cached CC0 acoustic bells, seamless nature loops, synthesis fallbacks, bell volume, 1×/3× strikes, multi-sample nasal breath playback, and iOS Silent Mode bypass (`engine.ts` + `engine.test.ts`).
@@ -93,7 +93,7 @@ Mobile-first meditation web application (**PWA**) designed for calm, distraction
 - `src/lib/media-session.ts` + `media-session.test.ts` — Unified SSR-safe Media Session API utility for Timer, Open-Ended, Breathing, and Guided Tracks.
 - `src/lib/pull-to-refresh.ts` + `pull-to-refresh.test.ts` — Pure rubber-band pull-to-refresh physics and tests.
 - `src/lib/wake-lock.ts` — Screen Wake Lock hook.
-- `src/components/` — `BodhiShell`, `BodhiLogo`, `ThemeProvider`, `I18nProvider`, `ServiceWorkerRegister`, `PullToRefresh`, `MeditationTimer`, `BreathingPractice`, `BreathingSheet`, `ZenDimOverlay`, `EarlyFinishCard`, `PresetStrip`, `SoundPickerSheet`, `GuidedTracks`, `GuidedSessionPlayer`, `MeditationHistory`, and `HistoryCalendar`.
+- `src/components/` — `BodhiShell`, `BodhiLogo`, `ThemeProvider`, `I18nProvider`, `LanguageSwitcher`, `LocaleFlag`, `ServiceWorkerRegister`, `PullToRefresh`, `MeditationTimer`, `BreathingPractice`, `BreathingSheet`, `ZenDimOverlay`, `EarlyFinishCard`, `PresetStrip`, `SoundPickerSheet`, `GuidedTracks`, `GuidedSessionPlayer`, `MeditationHistory`, and `HistoryCalendar`.
 - `public/audio/` — 14 precached CC0 1.0 acoustic assets: 6 multi-sample nasal breath cues (`breath-{inhale,exhale}-{short,medium,long}.mp3` from `giddster` & `thomasXkiteXforXlife`), 6 acoustic bells (`bells/{singing-bowl,tibetan-healing-bowl,deep-gong,soft-chime,crystal-bowl,wood-block}.mp3` from `Qvantor`, `dersinnsspace`, `steffcaffrey`, `caiogracco`, `hollandm`), and 2 seamless stereo nature loops (`ambient/{gentle-rain,ocean-waves}.mp3` from `shelbyshark` & `SamsterBirdies`).
 - `public/icons/` — Official Bodhi leaf SVG, transparent PNG favicon, and PWA PNG icons.
 

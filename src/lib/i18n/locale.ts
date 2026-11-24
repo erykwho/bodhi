@@ -1,4 +1,5 @@
 import { enMessages, type Messages } from "@/lib/i18n/messages/en";
+import { esMessages } from "@/lib/i18n/messages/es";
 import { ptBrMessages } from "@/lib/i18n/messages/pt-br";
 import {
   DEFAULT_LOCALE,
@@ -7,8 +8,9 @@ import {
 } from "@/lib/i18n/types";
 
 const MESSAGES_BY_LOCALE: Record<Locale, Messages> = {
-  en: enMessages,
   "pt-BR": ptBrMessages,
+  en: enMessages,
+  es: esMessages,
 };
 
 export function isLocale(value: unknown): value is Locale {
@@ -30,5 +32,5 @@ export function getNextLocale(current: Locale): Locale {
 }
 
 export function getMessages(locale: Locale): Messages {
-  return MESSAGES_BY_LOCALE[locale] ?? enMessages;
+  return MESSAGES_BY_LOCALE[locale] ?? MESSAGES_BY_LOCALE[DEFAULT_LOCALE];
 }
