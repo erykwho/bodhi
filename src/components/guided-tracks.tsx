@@ -45,6 +45,7 @@ import {
 } from "@/lib/offline/audio-cache";
 import {
   SUGGESTED_TRACK_TAGS,
+  isAudioStreamProvider,
   normalizeTrackTags,
   parseTrackUrl,
 } from "@/lib/tracks/providers";
@@ -183,7 +184,7 @@ export function GuidedTracks({
     return sortTracksWithFavoritesFirst(
       source.filter(
         (track) =>
-          track.provider === "DIRECT_AUDIO" &&
+          isAudioStreamProvider(track.provider) &&
           Boolean(offlineGuided.savedAudio[track.id])
       )
     );
@@ -548,7 +549,7 @@ export function GuidedTracks({
 
   const handleToggleOfflineTrack = useCallback(
     async (track: FavoriteTrackItem) => {
-      if (track.provider !== "DIRECT_AUDIO") return;
+      if (!isAudioStreamProvider(track.provider)) return;
       setErrorMessage(null);
 
       if (offlineGuided.savedAudio[track.id]) {
@@ -1098,6 +1099,12 @@ export function GuidedTracks({
             )}
           </div>
 
+          {detectedProvider === "GOOGLE_DRIVE" && (
+            <p className="text-[11px] leading-relaxed text-[var(--foreground-muted)]">
+              {m.guided.googleDriveShareHint}
+            </p>
+          )}
+
           <div className="flex flex-col gap-1.5">
             <label
               htmlFor="track-title-input"
@@ -1354,7 +1361,7 @@ export function GuidedTracks({
                           <span className="shrink-0 rounded-md bg-[var(--surface-muted)] px-1.5 py-0.5 text-[10px] font-medium">
                             {m.guided.providers[track.provider]}
                           </span>
-                          {track.provider === "DIRECT_AUDIO" &&
+                          {isAudioStreamProvider(track.provider) &&
                             offlineGuided.savedAudio[track.id] && (
                               <span className="inline-flex shrink-0 items-center gap-1 rounded-md bg-[var(--accent-soft)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--accent)]">
                                 <CheckCircle2 className="h-2.5 w-2.5" />
@@ -1419,7 +1426,7 @@ export function GuidedTracks({
                         />
                       </button>
 
-                      {track.provider === "DIRECT_AUDIO" && (
+                      {isAudioStreamProvider(track.provider) && (
                         <button
                           type="button"
                           data-no-drag="true"

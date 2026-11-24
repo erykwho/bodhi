@@ -173,4 +173,63 @@ describe("offline guided audio cache", () => {
         ?.has(buildOfflineAudioCacheKey(SAMPLE_TRACK.id))
     ).toBe(false);
   });
+
+  it("saves GOOGLE_DRIVE tracks offline directly via the authenticated audio proxy", async () => {
+    const driveTrack: FavoriteTrackItem = {
+      id: "track-drive-1",
+      provider: "GOOGLE_DRIVE",
+      url: "https://drive.google.com/file/d/1aBcDeFgHiJkLmNoPqRsTuVwXyZ012345/view",
+      externalId: "1aBcDeFgHiJkLmNoPqRsTuVwXyZ012345",
+      title: "Morning Calm",
+      author: "Google Drive",
+      thumbnailUrl: null,
+      tags: ["Morning"],
+      isFavorite: false,
+      createdAt: "2026-11-24T00:00:00.000Z",
+    };
+
+    const lsStore = new Map<string, string>();
+    const cacheBuckets = new Map<string, Map<string, Response>>();
+
+    const fakeCaches = {
+      open: vi.fn(async (name: string) => {
+        let bucket = cacheBuckets.get(name);
+        if (!bucket) {
+          bucket = new Map();
+          cacheBuckets.set(name, bucket);
+        }
+        return {
+          put: vi.fn(async (key: string, res: Response) => {
+            bucket!.set(key, res);
+          }),
+          match: vi.fn(async (key: string) => bucket!.get(key)),
+          delete: vi.fn(async (key: string) => bucket!.delete(key)),
+        };
+      }),
+    };
+
+    (globalThis as unknown as { window: Record<string, unknown> }).window = {
+      localStorage: {
+        getItem: (k: string) => lsStore.get(k) ?? null,
+        setItem: (k: string, v: string) => lsStore.set(k, v),
+      },
+      caches: fakeCaches,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    };
+
+    const fetchMock = vi.fn(async (url: string | URL | Request) => {
+      expect(String(url)).toBe(`/api/tracks/${driveTrack.id}/audio`);
+      return new Response(new Uint8Array([9, 8, 7, 6]), {
+        status: 200,
+        headers: { "Content-Type": "audio/mpeg" },
+      });
+    });
+    globalThis.fetch = fetchMock as typeof fetch;
+
+    const meta = await saveTrackAudioOffline(driveTrack, true);
+    expect(meta.bytes).toBe(4);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(getOfflineGuidedSnapshot().savedAudio[driveTrack.id]?.bytes).toBe(4);
+  });
 });

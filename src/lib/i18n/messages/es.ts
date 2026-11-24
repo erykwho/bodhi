@@ -255,21 +255,24 @@ export const esMessages: Messages = {
       YOUTUBE: "YouTube",
       SOUNDCLOUD: "SoundCloud",
       DIRECT_AUDIO: "Audio",
+      GOOGLE_DRIVE: "Google Drive",
     },
     offlineTitle: "Estás sin conexión",
     offlineBody:
-      "Las pistas de YouTube y SoundCloud requieren conexión a internet. Guarda pistas de audio directo (.mp3/.m4a) offline o usa el Timer de Meditación en cualquier momento.",
+      "Las pistas de YouTube y SoundCloud requieren conexión a internet. Guarda pistas de audio directo o de Google Drive offline, o usa el Timer de Meditación en cualquier momento.",
     offlineShowingSaved: "Offline · Mostrando pistas guardadas en este dispositivo",
     openTimer: "Abrir Timer de Meditación",
     signedOutTitle: "Meditaciones Guiadas",
     signedOutBody:
-      "Guarda tus meditaciones de YouTube, SoundCloud o audio directo y escucha la pista completa sin distracciones, sincronizada entre dispositivos.",
+      "Guarda tus meditaciones de YouTube, SoundCloud, Google Drive o audio directo y escucha la pista completa sin distracciones, sincronizada entre dispositivos.",
     authNotConfigured:
       "Configura las variables de Google OAuth y Neon Postgres para habilitar meditaciones guiadas en la nube.",
     closingBell: "Campana final",
     addTrack: "Añadir",
-    urlLabel: "Enlace de YouTube, SoundCloud o Audio",
-    urlPlaceholder: "Enlace de YouTube, SoundCloud o .mp3 / .m4a directo",
+    urlLabel: "Enlace de YouTube, SoundCloud, Google Drive o Audio",
+    urlPlaceholder: "Enlace de YouTube, SoundCloud, Google Drive o .mp3 / .m4a",
+    googleDriveShareHint:
+      'Configura el acceso en Google Drive como "Cualquier persona con el enlace" para reproducir y guardar offline.',
     titleLabel: "Título",
     titlePlaceholder: "Completado automáticamente (editable)",
     tagsLabel: "Etiquetas (opcional)",
@@ -283,7 +286,7 @@ export const esMessages: Messages = {
     noTracksTitle: "Aún no hay meditaciones guiadas",
     noTagMatchTitle: "Ninguna pista coincide con este filtro",
     noTracksBody:
-      'Toca en "Añadir" para guardar una meditación guiada de YouTube, SoundCloud o enlace .mp3/.m4a.',
+      'Toca en "Añadir" para guardar una meditación guiada de YouTube, SoundCloud, Google Drive o enlace .mp3/.m4a.',
     noTagMatchBody: "Elige otro filtro o toca Todos para ver todas las pistas.",
     holdAndDrag: "Mantén pulsado y arrastra para reordenar",
     editTrackTitlePlaceholder: "Título de la pista",
@@ -293,7 +296,7 @@ export const esMessages: Messages = {
     downloadingOffline: "Descargando...",
     errOfflineDownload: "No se pudo guardar este audio sin conexión.",
     errInvalidUrl:
-      "Pega un enlace válido de YouTube, SoundCloud o audio directo (.mp3/.m4a).",
+      "Pega un enlace válido de YouTube, SoundCloud, Google Drive o audio directo (.mp3/.m4a).",
     errFetchMetadata: "No se pudieron obtener los datos de la pista.",
     errSaveTrack: "No se pudo guardar la meditación guiada.",
     errEmptyTitle: "El título de la pista no puede quedar vacío.",
@@ -322,6 +325,8 @@ export const esMessages: Messages = {
         "No se pudo cargar el reproductor de SoundCloud. Comprueba tu conexión o abre la pista directamente.",
       directAudioError:
         "No se pudo reproducir este audio. Verifica que el enlace directo sea accesible.",
+      googleDriveError:
+        'No se pudo reproducir este audio de Google Drive. Verifica que el archivo esté compartido como "Cualquier persona con el enlace" y sea un archivo de audio válido.',
       listenedFor: (duration: string) => `Escuchaste durante ${duration}.`,
       lockScreenHint: "Compatible con pantalla bloqueada y controles multimedia.",
       wakeLockHint:
