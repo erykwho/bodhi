@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
+  type ReactNode,
 } from "react";
 import {
   Check,
@@ -30,6 +31,7 @@ import {
 } from "@/components/breathing-sheet";
 import { EarlyFinishCard } from "@/components/early-finish-card";
 import { useI18n } from "@/components/i18n-provider";
+import { RetentionBreathing } from "@/components/retention-breathing";
 import { SoundPickerSheet } from "@/components/sound-picker-sheet";
 import { ZenDimOverlay } from "@/components/zen-dim-overlay";
 import { MeditationAudioEngine } from "@/lib/audio/engine";
@@ -112,7 +114,60 @@ interface BreathingPracticeProps {
   onContinueToMeditation?: () => void;
 }
 
-export function BreathingPractice({
+export function BreathingPractice(props: BreathingPracticeProps) {
+  const { m } = useI18n();
+  const prefs = useSyncExternalStore(
+    subscribeBreathingPreferences,
+    getBreathingPreferencesSnapshot,
+    getBreathingPreferencesServerSnapshot
+  );
+
+  const modeToggle = (
+    <div
+      role="tablist"
+      aria-label={m.breathing.modeAria}
+      className="inline-flex items-center gap-0.5 rounded-full border border-black/6 bg-[var(--surface-muted)]/85 p-0.5 dark:border-white/10"
+    >
+      {(
+        [
+          { id: "rhythmic", label: m.breathing.modeRhythmic },
+          { id: "retention", label: m.breathing.modeRetention },
+        ] as const
+      ).map((option) => {
+        const isSelected = prefs.mode === option.id;
+        return (
+          <button
+            key={option.id}
+            type="button"
+            role="tab"
+            aria-selected={isSelected}
+            onClick={() => updateBreathingPreferences({ mode: option.id })}
+            className={`rounded-full px-3.5 py-1 text-xs font-medium transition-all ${
+              isSelected
+                ? "bg-[var(--surface)] text-[var(--foreground)] shadow-xs"
+                : "text-[var(--foreground-muted)] hover:text-[var(--foreground)]"
+            }`}
+          >
+            {option.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+
+  if (prefs.mode === "retention") {
+    return <RetentionBreathing modeToggle={modeToggle} {...props} />;
+  }
+
+  return <RhythmicBreathingPractice modeToggle={modeToggle} {...props} />;
+}
+
+interface RhythmicBreathingPracticeProps extends BreathingPracticeProps {
+  modeToggle: ReactNode;
+}
+
+function RhythmicBreathingPractice({
+  modeToggle,
   isAuthenticated = false,
   userId = null,
   meditationDurationMinutes,
@@ -122,7 +177,7 @@ export function BreathingPractice({
   onSessionSaved,
   onSessionUpdated,
   onContinueToMeditation,
-}: BreathingPracticeProps) {
+}: RhythmicBreathingPracticeProps) {
   const { m } = useI18n();
   const prefs = useSyncExternalStore(
     subscribeBreathingPreferences,
@@ -706,8 +761,11 @@ export function BreathingPractice({
               </div>
             </div>
 
+            {/* Rhythmic | Retention switcher directly below the dial */}
+            <div className="mt-3.5">{modeToggle}</div>
+
             {/* Single-row 4 Breathing Pattern Chips */}
-            <div className="mt-5 grid w-full grid-cols-4 gap-1.5">
+            <div className="mt-3 grid w-full grid-cols-4 gap-1.5">
               {BREATHING_PATTERN_IDS.map((id) => {
                 const isSelected = patternId === id;
                 return (

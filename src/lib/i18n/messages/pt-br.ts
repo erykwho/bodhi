@@ -204,6 +204,50 @@ export const ptBrMessages: Messages = {
     continueToMeditation: (durationLabel: string) =>
       `Seguir para Meditação (${durationLabel})`,
     continueToOpenMeditation: "Seguir para Meditação Livre",
+    modeAria: "Estilo de respiração",
+    modeRhythmic: "Rítmica",
+    modeRetention: "Retenção",
+    retentionLabel: "Retenção",
+    roundsCount: (count: number) => `${count} ${count === 1 ? "round" : "rounds"}`,
+    decreaseRoundsAria: "Diminuir 1 round",
+    increaseRoundsAria: "Aumentar 1 round",
+    paceLabels: {
+      slow: "Lento",
+      standard: "Normal",
+      fast: "Rápido",
+    },
+    slotProtocol: "Protocolo",
+    protocolSummary: (breaths: number, recoverySec: number) =>
+      `${breaths} resp. · ${recoverySec}s recup.`,
+    retentionSheetTitle: "Protocolo de Retenção",
+    retentionSheetSubtitle: "Respirações cíclicas, apneia sem ar e recuperação",
+    breathsPerRoundLabel: "Respirações por round",
+    recoveryHoldLabel: "Retenção de recuperação",
+    minuteChimeLabel: "Sino a cada minuto na retenção",
+    minuteChimeSubtitle: "Toque suave a cada 60s para marcar o tempo sem abrir os olhos",
+    safetyNoticeShort: "Pratique sentado ou deitado · nunca na água ou dirigindo",
+    safetyNoticeTitle: "Aviso de segurança",
+    safetyNoticeBody:
+      "Pratique sempre sentado ou deitado em um local seguro. Nunca faça na água, perto de água, dirigindo ou em pé, e interrompa se sentir desconforto.",
+    beginRetention: "Iniciar Retenção",
+    roundProgress: (current: number, total: number) =>
+      `Round ${current} de ${total}`,
+    breathProgress: (current: number, total: number) => `${current} / ${total}`,
+    lastBreathHint: "Última respiração — solte o ar",
+    skipToHold: "Segurar agora",
+    stageHoldEmpty: "Retenção",
+    holdTapHint: "Toque quando quiser inspirar",
+    inhaleAndRecover: "Inspirar e Recuperar",
+    stageRecoveryInhale: "Inspire fundo",
+    stageRecoveryHold: "Segure cheio",
+    stageRecoveryExhale: "Solte o ar",
+    mediaRetentionTitle: (round: number, total: number) =>
+      `Respiração de Retenção · Round ${round}/${total}`,
+    retentionCompletedSummary: (duration: string, rounds: number) =>
+      `${duration} · ${rounds} ${rounds === 1 ? "round concluído" : "rounds concluídos"}`,
+    roundHoldTag: (round: number, time: string) => `R${round} ${time}`,
+    bestHoldLabel: (time: string) => `Melhor ${time}`,
+    avgHoldLabel: (time: string) => `Média ${time}`,
   },
   guided: {
     providers: {

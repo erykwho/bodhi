@@ -119,6 +119,46 @@ test.describe("Bodhi E2E Smoke Suite (Mobile PWA)", () => {
       page.getByRole("button", { name: "Begin Breathing" })
     ).toBeVisible();
 
+    // Switch to Retention breathing mode and verify dial alignment + protocol flow
+    await page.getByRole("tab", { name: "Retention", exact: true }).click();
+    await expect(page.getByLabel("3 × 30")).toBeVisible();
+    const retentionBox = await timerDial.boundingBox();
+    expect(retentionBox).not.toBeNull();
+    expect(
+      Math.abs((retentionBox?.y ?? 0) - (timerBox?.y ?? 0))
+    ).toBeLessThanOrEqual(2);
+
+    // Customize rounds, pace, and protocol sheet
+    await page.getByRole("button", { name: "Increase rounds by 1" }).click();
+    await expect(page.getByLabel("4 × 30")).toBeVisible();
+    await page.getByRole("button", { name: "Fast", exact: true }).click();
+    await page.getByRole("button", { name: /^Protocol/ }).click();
+    await page.getByRole("button", { name: "20", exact: true }).click();
+    await page.getByRole("button", { name: "Done", exact: true }).click();
+    await expect(page.getByLabel("4 × 20")).toBeVisible();
+
+    // Start Retention session -> skip to empty-lung hold -> trigger recovery -> Zen Dim -> finish
+    await page.getByRole("button", { name: "Begin Retention" }).click();
+    await expect(page.getByRole("button", { name: "Hold now" })).toBeVisible();
+
+    await page.getByRole("button", { name: "Hold now" }).click();
+    await expect(
+      page.getByRole("button", { name: "Inhale & Recover" }).first()
+    ).toBeVisible();
+
+    await page.getByRole("button", { name: "Inhale & Recover" }).last().click();
+    await expect(page.getByText("Deep inhale")).toBeVisible();
+
+    await page.getByRole("button", { name: "Dim screen" }).click();
+    await expect(wakeOverlay).toBeVisible();
+    await wakeOverlay.click();
+    await expect(wakeOverlay).toBeHidden();
+
+    await page.getByRole("button", { name: "Finish" }).click();
+    await expect(
+      page.getByRole("button", { name: "Begin Retention" })
+    ).toBeVisible();
+
     expect(errors).toEqual([]);
   });
 

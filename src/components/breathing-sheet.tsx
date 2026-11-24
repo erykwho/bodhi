@@ -1,30 +1,46 @@
 "use client";
 
 import { useEffect } from "react";
-import { Check, Minus, Play, Plus, Vibrate, X } from "lucide-react";
+import {
+  Bell,
+  Check,
+  Minus,
+  Play,
+  Plus,
+  ShieldAlert,
+  Vibrate,
+  X,
+} from "lucide-react";
 import { useI18n } from "@/components/i18n-provider";
 import {
   BREATHING_CUE_MODES,
+  DEFAULT_RETENTION_CONFIG,
   MAX_EXHALE_PHASE_SEC,
   MAX_HOLD_PHASE_SEC,
   MAX_INHALE_PHASE_SEC,
+  MAX_RECOVERY_HOLD_SEC,
   MIN_ACTIVE_PHASE_SEC,
+  MIN_RECOVERY_HOLD_SEC,
+  RETENTION_BREATH_PRESETS,
   type BreathingCueMode,
   type BreathingRhythm,
+  type RetentionConfig,
 } from "@/lib/breathing/types";
 
-export type BreathingSheetSlot = "cues" | "custom";
+export type BreathingSheetSlot = "cues" | "custom" | "retention";
 
 interface BreathingSheetProps {
   slot: BreathingSheetSlot | null;
   cueMode: BreathingCueMode;
   hapticsEnabled: boolean;
   customRhythm: BreathingRhythm;
+  retentionConfig?: RetentionConfig;
   onClose: () => void;
   onSelectCueMode: (mode: BreathingCueMode) => void;
   onPreviewCueMode: (mode: BreathingCueMode) => void;
   onToggleHaptics: (enabled: boolean) => void;
   onChangeCustomRhythm: (rhythm: BreathingRhythm) => void;
+  onChangeRetentionConfig?: (config: RetentionConfig) => void;
 }
 
 export function BreathingSheet({
@@ -32,11 +48,13 @@ export function BreathingSheet({
   cueMode,
   hapticsEnabled,
   customRhythm,
+  retentionConfig = DEFAULT_RETENTION_CONFIG,
   onClose,
   onSelectCueMode,
   onPreviewCueMode,
   onToggleHaptics,
   onChangeCustomRhythm,
+  onChangeRetentionConfig,
 }: BreathingSheetProps) {
   const { m } = useI18n();
 
@@ -64,11 +82,15 @@ export function BreathingSheet({
   const title =
     slot === "cues"
       ? m.breathing.cuesSheetTitle
-      : m.breathing.customSheetTitle;
+      : slot === "retention"
+        ? m.breathing.retentionSheetTitle
+        : m.breathing.customSheetTitle;
   const subtitle =
     slot === "cues"
       ? m.breathing.cuesSheetSubtitle
-      : m.breathing.customSheetSubtitle;
+      : slot === "retention"
+        ? m.breathing.retentionSheetSubtitle
+        : m.breathing.customSheetSubtitle;
 
   const phaseRows: Array<{
     key: keyof BreathingRhythm;
@@ -223,6 +245,142 @@ export function BreathingSheet({
                     }`}
                   />
                 </button>
+              </div>
+            </div>
+          ) : slot === "retention" ? (
+            <div className="flex flex-col gap-3">
+              {/* Breaths per round presets */}
+              <div className="flex flex-col gap-2 rounded-2xl border border-black/6 bg-[var(--background)]/70 px-4 py-3 dark:border-white/8">
+                <span className="text-sm font-medium text-[var(--foreground)]">
+                  {m.breathing.breathsPerRoundLabel}
+                </span>
+                <div className="grid grid-cols-3 gap-2">
+                  {RETENTION_BREATH_PRESETS.map((count) => {
+                    const isSelected = retentionConfig.breathsPerRound === count;
+                    return (
+                      <button
+                        key={count}
+                        type="button"
+                        onClick={() =>
+                          onChangeRetentionConfig?.({
+                            ...retentionConfig,
+                            breathsPerRound: count,
+                          })
+                        }
+                        className={`h-9 rounded-xl font-mono text-sm font-medium tabular-nums transition-colors ${
+                          isSelected
+                            ? "bg-[var(--accent)] text-[#fcfaf6] dark:text-[#151917]"
+                            : "border border-black/8 bg-[var(--surface)] text-[var(--foreground)] hover:bg-[var(--surface-muted)] dark:border-white/10"
+                        }`}
+                      >
+                        {count}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Recovery hold duration stepper */}
+              <div className="flex items-center justify-between gap-3 rounded-2xl border border-black/6 bg-[var(--background)]/70 px-4 py-3 dark:border-white/8">
+                <span className="text-sm font-medium text-[var(--foreground)]">
+                  {m.breathing.recoveryHoldLabel}
+                </span>
+                <div className="flex items-center gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      onChangeRetentionConfig?.({
+                        ...retentionConfig,
+                        recoveryHoldSec: Math.max(
+                          MIN_RECOVERY_HOLD_SEC,
+                          retentionConfig.recoveryHoldSec - 1
+                        ),
+                      })
+                    }
+                    disabled={
+                      retentionConfig.recoveryHoldSec <= MIN_RECOVERY_HOLD_SEC
+                    }
+                    aria-label={`${m.breathing.recoveryHoldLabel} -1s`}
+                    className="flex h-8 w-8 items-center justify-center rounded-full bg-[var(--surface)] text-[var(--foreground-muted)] transition-colors hover:text-[var(--foreground)] disabled:opacity-35"
+                  >
+                    <Minus className="h-3.5 w-3.5" />
+                  </button>
+                  <span className="min-w-[2.75rem] text-center font-mono text-sm font-medium text-[var(--foreground)] tabular-nums">
+                    {m.breathing.secondsShort(retentionConfig.recoveryHoldSec)}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      onChangeRetentionConfig?.({
+                        ...retentionConfig,
+                        recoveryHoldSec: Math.min(
+                          MAX_RECOVERY_HOLD_SEC,
+                          retentionConfig.recoveryHoldSec + 1
+                        ),
+                      })
+                    }
+                    disabled={
+                      retentionConfig.recoveryHoldSec >= MAX_RECOVERY_HOLD_SEC
+                    }
+                    aria-label={`${m.breathing.recoveryHoldLabel} +1s`}
+                    className="flex h-8 w-8 items-center justify-center rounded-full bg-[var(--surface)] text-[var(--foreground-muted)] transition-colors hover:text-[var(--foreground)] disabled:opacity-35"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Minute chime toggle during empty-lung hold */}
+              <div className="flex items-center justify-between gap-3 rounded-2xl border border-black/6 bg-[var(--background)]/70 px-4 py-3 dark:border-white/8">
+                <div className="flex items-center gap-2.5">
+                  <Bell className="h-4 w-4 shrink-0 text-[var(--foreground-muted)]" />
+                  <div>
+                    <p className="text-sm font-medium text-[var(--foreground)]">
+                      {m.breathing.minuteChimeLabel}
+                    </p>
+                    <p className="text-[11px] text-[var(--foreground-muted)]">
+                      {m.breathing.minuteChimeSubtitle}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={retentionConfig.retentionMinuteChime}
+                  aria-label={m.breathing.minuteChimeLabel}
+                  onClick={() =>
+                    onChangeRetentionConfig?.({
+                      ...retentionConfig,
+                      retentionMinuteChime: !retentionConfig.retentionMinuteChime,
+                    })
+                  }
+                  className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${
+                    retentionConfig.retentionMinuteChime
+                      ? "bg-[var(--accent)]"
+                      : "bg-black/15 dark:bg-white/20"
+                  }`}
+                >
+                  <span
+                    className={`inline-block h-5 w-5 transform rounded-full bg-white shadow-xs transition-transform ${
+                      retentionConfig.retentionMinuteChime
+                        ? "translate-x-5.5"
+                        : "translate-x-0.5"
+                    }`}
+                  />
+                </button>
+              </div>
+
+              {/* Safety reminder */}
+              <div className="flex items-start gap-2.5 rounded-2xl border border-[var(--warm-amber)]/25 bg-[var(--warm-amber)]/8 px-3.5 py-3">
+                <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-[var(--warm-amber)]" />
+                <div className="text-left">
+                  <p className="text-xs font-semibold text-[var(--foreground)]">
+                    {m.breathing.safetyNoticeTitle}
+                  </p>
+                  <p className="mt-0.5 text-[11px] leading-relaxed text-[var(--foreground-muted)]">
+                    {m.breathing.safetyNoticeBody}
+                  </p>
+                </div>
               </div>
             </div>
           ) : (

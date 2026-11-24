@@ -14,7 +14,7 @@ describe("breathing preferences", () => {
     );
   });
 
-  it("parses valid preferences and clamps out-of-range values", () => {
+  it("parses legacy v1 payloads without mode or retention fields using safe defaults", () => {
     const parsed = parseBreathingPreferences({
       patternId: "4-7-8",
       customRhythm: {
@@ -31,6 +31,7 @@ describe("breathing preferences", () => {
     });
 
     expect(parsed).toEqual({
+      mode: "rhythmic",
       patternId: "4-7-8",
       customRhythm: {
         inhaleSec: 5,
@@ -39,23 +40,62 @@ describe("breathing preferences", () => {
         holdOutSec: 1,
       },
       durationMinutes: 6,
+      retention: DEFAULT_BREATHING_PREFERENCES.retention,
       cueMode: "chime",
       hapticsEnabled: false,
       ambientSound: "ocean-waves",
       ambientVolume: 0.4,
     });
+  });
+
+  it("parses valid retention preferences and clamps out-of-range values", () => {
+    const parsed = parseBreathingPreferences({
+      mode: "retention",
+      retention: {
+        rounds: 4,
+        breathsPerRound: 40,
+        pace: "fast",
+        recoveryHoldSec: 18,
+        retentionMinuteChime: false,
+      },
+    });
+
+    expect(parsed.mode).toBe("retention");
+    expect(parsed.retention).toEqual({
+      rounds: 4,
+      breathsPerRound: 40,
+      pace: "fast",
+      recoveryHoldSec: 18,
+      retentionMinuteChime: false,
+    });
 
     const sanitized = parseBreathingPreferences({
+      mode: "unknown-mode",
       patternId: "unknown",
       durationMinutes: 120,
+      retention: {
+        rounds: 99,
+        breathsPerRound: 3,
+        pace: "turbo",
+        recoveryHoldSec: 120,
+        retentionMinuteChime: "nope",
+      },
       cueMode: "loud",
       hapticsEnabled: "yes",
       ambientSound: "forest",
       ambientVolume: 2.5,
     });
 
+    expect(sanitized.mode).toBe("rhythmic");
     expect(sanitized.patternId).toBe(DEFAULT_BREATHING_PREFERENCES.patternId);
     expect(sanitized.durationMinutes).toBe(30);
+    expect(sanitized.retention).toEqual({
+      rounds: 5,
+      breathsPerRound: 15,
+      pace: "standard",
+      recoveryHoldSec: 20,
+      retentionMinuteChime: true,
+    });
     expect(sanitized.cueMode).toBe(DEFAULT_BREATHING_PREFERENCES.cueMode);
     expect(sanitized.hapticsEnabled).toBe(true);
     expect(sanitized.ambientSound).toBe("silence");
