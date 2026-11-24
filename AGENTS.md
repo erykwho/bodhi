@@ -18,7 +18,7 @@ Mobile-first meditation web application (**PWA**) designed for calm, distraction
 ## Production Invariants (Never Break)
 
 1. **Public & Offline-First Timer:** The Meditation Timer, Web Audio bells, and ambient soundscapes MUST remain 100% usable without signing in and without an internet connection (Airplane Mode).
-2. **Strict Multi-Tenant Data Isolation:** Every authenticated API route (`/api/tracks/**`, `/api/sessions/**`, `/api/presets/**`) MUST verify the user session (return `401` when unauthenticated), validate inputs with Zod (return `400` on invalid payloads), and scope every read, update, and delete query by `userId` (zero IDOR).
+2. **Strict Multi-Tenant Data Isolation:** Every authenticated API route (`/api/tracks/**`, `/api/sessions/**`, `/api/presets/**`, `/api/account`, `/api/mobile/bootstrap`) MUST verify the user session (Web Auth.js cookie OR Mobile Bearer HS256 JWT; return `401` when unauthenticated), validate inputs with Zod (return `400` on invalid payloads), and scope every read, update, and delete query by `userId` (zero IDOR).
 3. **Zero-Downtime Database Migrations (Expand-and-Contract):**
    - Production database updates run exclusively via **Prisma Migrations** (`prisma migrate deploy` in `scripts/vercel-db-sync.mjs`). Never re-enable `prisma db push` in production.
    - Never drop or rename an existing column, table, or enum value in a single deploy. Always use *expand-and-contract* (add nullable/default column first → deploy compatible app code → backfill/migrate → remove legacy column in a subsequent release) so 1-click Vercel rollbacks remain safe.
@@ -63,15 +63,17 @@ Mobile-first meditation web application (**PWA**) designed for calm, distraction
   - Active sessions across all modes provide a `Finish` button; the early-finish save prompt (`EarlyFinishCard`, with Save to History, Discard, and Keep going) triggers when active practice duration is `>= MIN_SAVEABLE_EARLY_STOP_SECONDS` (`10` seconds).
   - Signed-in Timer, Breathing, and offline-saved Guided Track sessions completed offline are queued locally (`Pending sync`), merged into the History view, and flushed automatically to `/api/sessions` upon reconnect.
   - History provides period filters (`7d | 30d | All`), total time, current and all-time longest streak (`Best Xd`), session count, monthly practice calendar/heatmap with tap-to-filter, inline manual logging (`+ Log`), reflection notes, and RFC-4180 CSV / JSON export.
-- **Authentication (`src/lib/auth.ts`, `src/proxy.ts`):**
-  - Auth.js v5 (`next-auth@beta`, JWT session) with Google OAuth 2.0.
-  - `ALLOWED_EMAILS` is optional: if unset or empty, any Google account is allowed; if populated, only listed emails may sign in.
+- **Authentication (`src/lib/auth.ts`, `src/lib/mobile-token.ts`, `src/lib/mobile-auth.ts`, `src/proxy.ts`):**
+  - Dual-mode authentication: Auth.js v5 (`next-auth@beta`, JWT cookie session) with Google OAuth 2.0 on Web, plus HS256 Bearer Access JWTs (`15m`) and SHA-256 hashed rotating `MobileRefreshToken`s (`30d`, with reuse-attack session revocation) on native iOS/Android via `/api/mobile/auth/{google,apple,refresh,logout}` verifying Google/Apple ID tokens against official JWKS.
+  - `User` stores nullable unique `appleSub` and `googleSub` so Sign in with Apple works reliably across subsequent logins where Apple omits email/name.
+  - `ALLOWED_EMAILS` is optional: if unset or empty, any Google/Apple account is allowed; if populated, only listed emails may sign in.
+  - **Store Compliance:** `DELETE /api/account` permanently deletes the authenticated user and cascades all user data; `/privacy` and `/support` are public static pages.
 - **Internationalization (`src/lib/i18n/`, `I18nProvider`, `LanguageSwitcher`, `LocaleFlag`):**
   - Supports Brazilian Portuguese (`pt-BR`, default), English (`en`), and Spanish (`es`), persisted in `localStorage` (`bodhi-locale`) with cross-tab sync, `<html lang>` updates, inline circular SVG flags (Brazil, United States, Spain) in a compact popover menu, and `Intl.DateTimeFormat` locale-aware dates/calendars.
 
 ## Stack & Infrastructure
 
-- **Framework:** Next.js 16 (App Router, TypeScript, Turbopack), React 19, Tailwind CSS v4, Lucide icons, Zod.
+- **Framework:** Next.js 16 (App Router, TypeScript, Turbopack), React 19, Tailwind CSS v4, Lucide icons, Zod, `jose`.
 - **Package Manager:** `pnpm` (v12 workspace with `packages/*` and `apps/*`, enabling `allowBuilds` for Prisma and esbuild in `pnpm-workspace.yaml`).
 - **Database:** Neon PostgreSQL + Prisma v6 (`prisma/schema.prisma`, versioned `prisma/migrations/`, synced automatically via `prisma migrate deploy` in `scripts/vercel-db-sync.mjs` on `VERCEL_ENV=production`).
 - **Observability:** Sentry (`@sentry/nextjs`, org `bodhi-09`, project `bodhi`), enabled automatically when `NEXT_PUBLIC_SENTRY_DSN` is set (no-op in dev/CI without DSN; PII off by default in SDK v11; source maps uploaded on build when `SENTRY_AUTH_TOKEN` is configured).
@@ -85,9 +87,9 @@ Mobile-first meditation web application (**PWA**) designed for calm, distraction
 - `e2e/smoke.spec.ts` & `playwright.config.ts` — Mobile PWA Playwright E2E smoke tests (Timer, Open-Ended, Guided Breathing, 3× bell, Zen Dim, Sound Picker, local Presets, i18n, theme persistence, navigation, `/api/health`, 14 cached `/audio/` assets, offline mode).
 - `sentry.server.config.ts`, `sentry.edge.config.ts`, `src/instrumentation.ts`, `src/instrumentation-client.ts` — Conditional Sentry SDK initialization and `onRequestError` / router transition hooks.
 - `public/sw.js` — Offline PWA Service Worker (`bodhi-offline-v6`, preserving `bodhi-user-audio-v1`).
-- `prisma/schema.prisma` & `prisma/migrations/` — `User`, `FavoriteTrack`, `MeditationSession` (`TIMER | TRACK | BREATHING`), and `TimerPreset` models and versioned SQL migrations.
+- `prisma/schema.prisma` & `prisma/migrations/` — `User` (with nullable `appleSub`, `googleSub`), `MobileRefreshToken`, `FavoriteTrack`, `MeditationSession` (`TIMER | TRACK | BREATHING`), and `TimerPreset` models and versioned SQL migrations.
 - `scripts/vercel-db-sync.mjs` — Production-only `prisma migrate deploy` runner (with one-time `P3005` baseline transition and no `db push` fallback).
-- `src/app/` — App Router layout, global styles, Error Boundaries (`error.tsx`, `global-error.tsx`), PWA `manifest.ts`, server actions (`actions.ts`), main page, and REST API routes (`/api/health` with optional `?db=1` Neon check, `/api/auth/[...nextauth]`, `/api/tracks`, `/api/tracks/resolve`, `/api/tracks/reorder`, `/api/tracks/[id]`, `/api/tracks/[id]/audio`, `/api/sessions`, `/api/sessions/[id]`, `/api/presets`, `/api/presets/[id]`, plus Vitest security & contract tests).
+- `src/app/` — App Router layout, global styles, Error Boundaries (`error.tsx`, `global-error.tsx`), PWA `manifest.ts`, server actions (`actions.ts`), main page, public `/privacy` & `/support` pages, and REST API routes (`/api/health` with optional `?db=1` Neon check, `/api/auth/[...nextauth]`, `/api/mobile/auth/{google,apple,refresh,logout}`, `/api/mobile/bootstrap`, `/api/account`, `/api/tracks/**`, `/api/sessions/**`, `/api/presets/**`, plus Vitest security & contract tests).
 - `src/lib/` — Web platform adapters (`localStorage`, Web Audio API `MeditationAudioEngine`, browser file download, `MediaSession`, Screen Wake Lock, Cache Storage offline audio manager) and thin re-exports from `@bodhi/core/*` plus Vitest unit tests.
 - `src/components/` — `BodhiShell`, `BodhiLogo`, `ThemeProvider`, `I18nProvider`, `LanguageSwitcher`, `LocaleFlag`, `ServiceWorkerRegister`, `PullToRefresh`, `MeditationTimer`, `BreathingPractice`, `RetentionBreathing`, `BreathingSheet`, `ZenDimOverlay`, `EarlyFinishCard`, `PresetStrip`, `SoundPickerSheet`, `GuidedTracks`, `GuidedSessionPlayer`, `MeditationHistory`, and `HistoryCalendar`.
 - `public/audio/` — 14 precached CC0 1.0 acoustic assets: 6 multi-sample nasal breath cues (`breath-{inhale,exhale}-{short,medium,long}.mp3` from `giddster` & `thomasXkiteXforXlife`), 6 acoustic bells (`bells/{singing-bowl,tibetan-healing-bowl,deep-gong,soft-chime,crystal-bowl,wood-block}.mp3` from `Qvantor`, `dersinnsspace`, `steffcaffrey`, `caiogracco`, `hollandm`), and 2 seamless stereo nature loops (`ambient/{gentle-rain,ocean-waves}.mp3` from `shelbyshark` & `SamsterBirdies`).
