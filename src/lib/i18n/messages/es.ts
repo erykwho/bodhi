@@ -326,16 +326,17 @@ export const esMessages: Messages = {
       ytUnavailableError: "Este video no está disponible o es privado en YouTube.",
       ytConfigError:
         "YouTube bloqueó la reproducción integrada en este navegador. Inténtalo de nuevo o escúchalo en YouTube mientras Bodhi registra tu sesión.",
-      openYouTubeAndTrack: "Abrir en YouTube y seguir",
-      openYouTubeAgain: "Abrir en YouTube de nuevo",
+      openExternalAndTrack: (provider: string) =>
+        `Abrir en ${provider} y seguir`,
+      openExternalAgain: (provider: string) => `Abrir en ${provider} de nuevo`,
       tryAgain: "Intentar de nuevo",
-      externalListening: "Escuchando en YouTube",
+      externalListening: (provider: string) => `Escuchando en ${provider}`,
       completeSession: "Completar sesión",
       discardSession: "Descartar sesión",
-      externalCompanionHint:
-        "Vuelve aquí al terminar en YouTube y toca Completar sesión para tocar la campana final y guardar tu práctica.",
+      externalCompanionHint: (provider: string) =>
+        `Vuelve aquí al terminar en ${provider} y toca Completar sesión para tocar la campana final y guardar tu práctica.`,
       scLoadError:
-        "No se pudo cargar el reproductor de SoundCloud. Comprueba tu conexión o abre la pista directamente.",
+        "No se pudo reproducir esta pista en el reproductor de SoundCloud. Inténtalo de nuevo o escúchala en SoundCloud mientras Bodhi registra tu sesión y toca la campana final.",
       directAudioError:
         "No se pudo reproducir este audio. Verifica que el enlace directo sea accesible.",
       googleDriveError:

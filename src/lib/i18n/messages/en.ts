@@ -326,16 +326,17 @@ export const enMessages = {
       ytUnavailableError: "This video is unavailable or private on YouTube.",
       ytConfigError:
         "YouTube blocked embedded playback in this browser. Try again or listen on YouTube while Bodhi tracks your session.",
-      openYouTubeAndTrack: "Open on YouTube & Track",
-      openYouTubeAgain: "Open on YouTube again",
+      openExternalAndTrack: (provider: string) =>
+        `Open on ${provider} & Track`,
+      openExternalAgain: (provider: string) => `Open on ${provider} again`,
       tryAgain: "Try again",
-      externalListening: "Listening on YouTube",
+      externalListening: (provider: string) => `Listening on ${provider}`,
       completeSession: "Complete Session",
       discardSession: "Discard session",
-      externalCompanionHint:
-        "Return here when the meditation ends and tap Complete Session to ring the closing bell and save your practice.",
+      externalCompanionHint: (provider: string) =>
+        `Return here when the meditation ends on ${provider} and tap Complete Session to ring the closing bell and save your practice.`,
       scLoadError:
-        "Unable to load the SoundCloud player. Check your connection or open the track directly.",
+        "Unable to play this track in the SoundCloud player. Try again or listen on SoundCloud while Bodhi tracks your session and rings the closing bell.",
       directAudioError:
         "Unable to stream this audio file. Verify the direct link is publicly accessible.",
       googleDriveError:

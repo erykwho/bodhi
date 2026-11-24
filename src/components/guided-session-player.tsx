@@ -132,6 +132,7 @@ interface SoundCloudAPI {
       PLAY: string;
       PAUSE: string;
       FINISH: string;
+      ERROR?: string;
     };
   };
 }
@@ -265,7 +266,7 @@ export function GuidedSessionPlayer({
   );
   const [isExternalMode, setIsExternalMode] = useState<boolean>(false);
   const [externalElapsedMs, setExternalElapsedMs] = useState<number>(0);
-  const [ytRetryNonce, setYtRetryNonce] = useState<number>(0);
+  const [embedRetryNonce, setEmbedRetryNonce] = useState<number>(0);
   const [isDimmed, setIsDimmed] = useState<boolean>(false);
   const [offlineBlobUrl, setOfflineBlobUrl] = useState<string | null>(null);
   const [isTogglingOffline, setIsTogglingOffline] = useState<boolean>(false);
@@ -674,13 +675,14 @@ export function GuidedSessionPlayer({
     markPlayingStart,
     track.externalId,
     track.provider,
-    ytRetryNonce,
+    embedRetryNonce,
   ]);
 
   // Mount SoundCloud Widget API
   useEffect(() => {
     if (track.provider !== "SOUNDCLOUD") return;
     let cancelled = false;
+    if (!scIframeRef.current) return;
 
     void loadScriptOnce(
       "https://w.soundcloud.com/player/api.js",
@@ -713,10 +715,19 @@ export function GuidedSessionPlayer({
         widget.bind(Events.FINISH, () => {
           if (!cancelled) handleTrackCompleted();
         });
+        if (Events.ERROR) {
+          widget.bind(Events.ERROR, () => {
+            if (cancelled) return;
+            flushListeningMs();
+            setPlayerErrorKey("soundcloud");
+            setPlaybackState("ready");
+          });
+        }
       })
       .catch(() => {
         if (!cancelled) {
           setPlayerErrorKey("soundcloud");
+          setPlaybackState("ready");
         }
       });
 
@@ -730,6 +741,9 @@ export function GuidedSessionPlayer({
           widget.unbind(Events.PLAY);
           widget.unbind(Events.PAUSE);
           widget.unbind(Events.FINISH);
+          if (Events.ERROR) {
+            widget.unbind(Events.ERROR);
+          }
         } catch {
           // Ignore teardown errors if the iframe is already detached
         }
@@ -737,6 +751,7 @@ export function GuidedSessionPlayer({
       scWidgetRef.current = null;
     };
   }, [
+    embedRetryNonce,
     flushListeningMs,
     getAudioEngine,
     handleTrackCompleted,
@@ -871,12 +886,12 @@ export function GuidedSessionPlayer({
     onExit();
   }, [onExit]);
 
-  const handleRetryYouTube = useCallback(() => {
+  const handleRetryEmbed = useCallback(() => {
     setPlayerErrorKey(null);
     setIsExternalMode(false);
     setExternalElapsedMs(0);
     setPlaybackState("loading");
-    setYtRetryNonce((prev) => prev + 1);
+    setEmbedRetryNonce((prev) => prev + 1);
   }, []);
 
   const handleReplay = useCallback(() => {
@@ -910,9 +925,11 @@ export function GuidedSessionPlayer({
     }
   }, [getAudioEngine, isExternalMode, isStreamAudio, track.provider]);
 
+  const providerName = m.guided.providers[track.provider];
+
   const statusLabel =
     isExternalMode && playbackState === "playing"
-      ? m.guided.player.externalListening
+      ? m.guided.player.externalListening(providerName)
       : playbackState === "playing"
         ? m.guided.player.listening
         : playbackState === "paused"
@@ -935,10 +952,12 @@ export function GuidedSessionPlayer({
             : null;
 
   const canUseExternalCompanion =
-    youTubeErrorKind !== null &&
-    supportsExternalYouTubeCompanion(youTubeErrorKind);
-  const canRetryYouTube =
-    youTubeErrorKind !== null && isRetryableYouTubeError(youTubeErrorKind);
+    playerErrorKey === "soundcloud" ||
+    (youTubeErrorKind !== null &&
+      supportsExternalYouTubeCompanion(youTubeErrorKind));
+  const canRetryEmbed =
+    playerErrorKey === "soundcloud" ||
+    (youTubeErrorKind !== null && isRetryableYouTubeError(youTubeErrorKind));
 
   const playerError =
     playerErrorKey === "youtube_embed_disabled"
@@ -1130,7 +1149,7 @@ export function GuidedSessionPlayer({
                   <p className="text-[11px] font-medium tracking-wide text-[var(--foreground-muted)] uppercase">
                     {playbackState === "paused"
                       ? m.guided.player.paused
-                      : m.guided.player.externalListening}
+                      : m.guided.player.externalListening(providerName)}
                   </p>
                   <p className="mt-1 font-mono text-4xl font-semibold tracking-tight text-[var(--foreground)] tabular-nums">
                     {formatElapsedDisplay(externalElapsedMs)}
@@ -1172,7 +1191,7 @@ export function GuidedSessionPlayer({
                     rel="noopener noreferrer"
                     className="inline-flex items-center gap-1 text-xs font-medium text-[var(--foreground-muted)] transition-colors hover:text-[var(--foreground)]"
                   >
-                    {m.guided.player.openYouTubeAgain}
+                    {m.guided.player.openExternalAgain(providerName)}
                     <ExternalLink className="h-3 w-3" />
                   </a>
                   {earlyStopElapsedSec === null && (
@@ -1201,7 +1220,7 @@ export function GuidedSessionPlayer({
                       onClick={handleStartExternalSession}
                       className="inline-flex items-center gap-1.5 rounded-xl bg-[var(--accent)] px-4 py-2.5 text-xs font-semibold text-[#fcfaf6] transition-colors hover:bg-[var(--accent-strong)] dark:text-[#151917]"
                     >
-                      {m.guided.player.openYouTubeAndTrack}
+                      {m.guided.player.openExternalAndTrack(providerName)}
                       <ExternalLink className="h-3.5 w-3.5" />
                     </a>
                   ) : (
@@ -1215,10 +1234,10 @@ export function GuidedSessionPlayer({
                       <ExternalLink className="h-3.5 w-3.5" />
                     </a>
                   )}
-                  {canRetryYouTube && (
+                  {canRetryEmbed && (
                     <button
                       type="button"
-                      onClick={handleRetryYouTube}
+                      onClick={handleRetryEmbed}
                       className="inline-flex items-center gap-1.5 rounded-xl border border-black/8 bg-[var(--background)] px-3.5 py-2.5 text-xs font-medium text-[var(--foreground)] transition-colors hover:bg-[var(--surface-muted)] dark:border-white/10"
                     >
                       <RotateCcw className="h-3.5 w-3.5" />
@@ -1233,6 +1252,7 @@ export function GuidedSessionPlayer({
               </div>
             ) : track.provider === "SOUNDCLOUD" ? (
               <iframe
+                key={embedRetryNonce}
                 ref={scIframeRef}
                 title={track.title}
                 src={buildSoundCloudEmbedUrl(track.url)}
@@ -1338,7 +1358,7 @@ export function GuidedSessionPlayer({
           ) : !playerError || isExternalMode ? (
             <p className="text-center text-xs text-[var(--foreground-muted)]">
               {isExternalMode
-                ? m.guided.player.externalCompanionHint
+                ? m.guided.player.externalCompanionHint(providerName)
                 : isStreamAudio
                   ? m.guided.player.lockScreenHint
                   : isWakeLockActive

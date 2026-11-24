@@ -27,6 +27,7 @@ export const TRACK_PROVIDER_LABELS: Record<TrackProviderType, string> = {
 };
 
 const YOUTUBE_ID_REGEX = /^[A-Za-z0-9_-]{11}$/;
+const SOUNDCLOUD_SECRET_TOKEN_REGEX = /^s-[A-Za-z0-9_-]{4,64}$/;
 const DIRECT_AUDIO_EXT_REGEX = /\.(mp3|m4a|ogg|wav|aac|opus)$/i;
 const STRIP_AUDIO_EXT_REGEX = /\.(mp3|m4a|ogg|wav|aac|opus|flac|webm)$/i;
 const GOOGLE_DRIVE_FILE_ID_REGEX = /^[A-Za-z0-9_-]{10,128}$/;
@@ -288,7 +289,13 @@ export function parseTrackUrl(rawInput: string): ParsedTrackUrl | null {
     }
 
     const trackSlug = segments[1];
-    const externalId = `${segments[0]}/${trackSlug}`;
+    const secretToken =
+      segments.length >= 3 && SOUNDCLOUD_SECRET_TOKEN_REGEX.test(segments[2])
+        ? segments[2]
+        : null;
+    const externalId = secretToken
+      ? `${segments[0]}/${trackSlug}/${secretToken}`
+      : `${segments[0]}/${trackSlug}`;
     const canonicalUrl = `https://soundcloud.com/${externalId}`;
 
     return {
