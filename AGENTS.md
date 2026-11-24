@@ -72,44 +72,37 @@ Mobile-first meditation web application (**PWA**) designed for calm, distraction
 ## Stack & Infrastructure
 
 - **Framework:** Next.js 16 (App Router, TypeScript, Turbopack), React 19, Tailwind CSS v4, Lucide icons, Zod.
-- **Package Manager:** `pnpm` (v12, with `pnpm-workspace.yaml` enabling `allowBuilds` for Prisma and esbuild).
+- **Package Manager:** `pnpm` (v12 workspace with `packages/*` and `apps/*`, enabling `allowBuilds` for Prisma and esbuild in `pnpm-workspace.yaml`).
 - **Database:** Neon PostgreSQL + Prisma v6 (`prisma/schema.prisma`, versioned `prisma/migrations/`, synced automatically via `prisma migrate deploy` in `scripts/vercel-db-sync.mjs` on `VERCEL_ENV=production`).
 - **Observability:** Sentry (`@sentry/nextjs`, org `bodhi-09`, project `bodhi`), enabled automatically when `NEXT_PUBLIC_SENTRY_DSN` is set (no-op in dev/CI without DSN; PII off by default in SDK v11; source maps uploaded on build when `SENTRY_AUTH_TOKEN` is configured).
-- **CI/CD & Hosting:** GitHub Actions (`.github/workflows/ci.yml` running `prisma validate`, `pnpm test`, `pnpm lint`, `pnpm build`, and `pnpm test:e2e`) + Vercel (continuous deployment from `master`, protected branch requiring PR + passing checks).
+- **CI/CD & Hosting:** GitHub Actions (`.github/workflows/ci.yml` running `prisma validate`, `pnpm typecheck:core`, `pnpm test`, `pnpm lint`, `pnpm build`, and `pnpm test:e2e`) + Vercel (continuous deployment from `master`, protected branch requiring PR + passing checks).
 
 ## Directory Structure (V10)
 
-- `.github/workflows/ci.yml` — GitHub Actions CI (`CI` job: Prisma validate, Vitest, ESLint, Next.js build, Playwright E2E smoke tests).
+- `.github/workflows/ci.yml` — GitHub Actions CI (`CI` job: Prisma validate, `@bodhi/core` typecheck, Vitest, ESLint, Next.js build, Playwright E2E smoke tests).
 - `.github/dependabot.yml` — Grouped weekly Dependabot updates for `npm`/`pnpm` dependencies and GitHub Actions.
+- `packages/core/` (`@bodhi/core`) — Platform-agnostic, DOM-free shared TypeScript domain package (enforced by `packages/core/src/dom-free.test.ts`) reused by Web (`src/lib/*`) and React Native: timer/breathing/retention engines, sound & breath catalogs + `MeditationAudioPort`, history stats & CSV/JSON serializers, track URL parsers/reordering/YouTube error classifier, `KeyValueStorage` + offline session queue, i18n types/messages (`en`, `pt-BR`, `es`), design tokens (`theme/tokens.ts`), and typed platform-agnostic REST API client (`api/client.ts`).
 - `e2e/smoke.spec.ts` & `playwright.config.ts` — Mobile PWA Playwright E2E smoke tests (Timer, Open-Ended, Guided Breathing, 3× bell, Zen Dim, Sound Picker, local Presets, i18n, theme persistence, navigation, `/api/health`, 14 cached `/audio/` assets, offline mode).
 - `sentry.server.config.ts`, `sentry.edge.config.ts`, `src/instrumentation.ts`, `src/instrumentation-client.ts` — Conditional Sentry SDK initialization and `onRequestError` / router transition hooks.
 - `public/sw.js` — Offline PWA Service Worker (`bodhi-offline-v6`, preserving `bodhi-user-audio-v1`).
 - `prisma/schema.prisma` & `prisma/migrations/` — `User`, `FavoriteTrack`, `MeditationSession` (`TIMER | TRACK | BREATHING`), and `TimerPreset` models and versioned SQL migrations.
 - `scripts/vercel-db-sync.mjs` — Production-only `prisma migrate deploy` runner (with one-time `P3005` baseline transition and no `db push` fallback).
 - `src/app/` — App Router layout, global styles, Error Boundaries (`error.tsx`, `global-error.tsx`), PWA `manifest.ts`, server actions (`actions.ts`), main page, and REST API routes (`/api/health` with optional `?db=1` Neon check, `/api/auth/[...nextauth]`, `/api/tracks`, `/api/tracks/resolve`, `/api/tracks/reorder`, `/api/tracks/[id]`, `/api/tracks/[id]/audio`, `/api/sessions`, `/api/sessions/[id]`, `/api/presets`, `/api/presets/[id]`, plus Vitest security & contract tests).
-- `src/lib/i18n/` — Locale types & metadata (`types.ts`), resolver & helpers (`locale.ts` + `locale.test.ts`), and typed message bundles (`messages/en.ts`, `messages/pt-br.ts`, `messages/es.ts`).
-- `src/lib/timer/` — Timestamp-based countdown & open-ended timer engine (`engine.ts` + `engine.test.ts`), persisted preferences (`preferences.ts` + `preferences.test.ts`), named presets (`presets.ts` + `presets.test.ts`), and types (`types.ts`).
-- `src/lib/breathing/` — Timestamp-based rhythmic breathing engine (`engine.ts` + `engine.test.ts`), round-based retention breathing engine (`retention-engine.ts` + `retention-engine.test.ts`), persisted preferences (`preferences.ts` + `preferences.test.ts`), and types/presets (`types.ts`).
-- `src/lib/audio/` — Extensible bell & ambient sound catalog (`sounds.ts`) and offline-first audio engine with cached CC0 acoustic bells, seamless nature loops, synthesis fallbacks, bell volume, 1×/3× strikes, multi-sample nasal breath playback, and iOS Silent Mode bypass (`engine.ts` + `engine.test.ts`).
-- `src/lib/tracks/` — YouTube/SoundCloud/Google Drive/Direct Audio URL parser (`providers.ts` + `providers.test.ts`), oEmbed & Drive metadata resolver (`oembed.ts` + `oembed.test.ts`), YouTube IFrame error classifier & `playerVars` helper (`youtube-player.ts` + `youtube-player.test.ts`), drag-reorder helpers (`reorder.ts` + `reorder.test.ts`), and types (`types.ts`).
-- `src/lib/history/` — History statistics, period filter & monthly calendar engine (`stats.ts` + `stats.test.ts`), CSV/JSON export (`export.ts` + `export.test.ts`), client helpers with offline fallback (`client.ts`), and types (`types.ts`).
-- `src/lib/offline/` — Offline session queue & history cache (`queue.ts` + `queue.test.ts`), offline guided `DIRECT_AUDIO` & `GOOGLE_DRIVE` Cache Storage manager (`audio-cache.ts` + `audio-cache.test.ts`), and reactive online status hook (`use-network-status.ts`).
-- `src/lib/media-session.ts` + `media-session.test.ts` — Unified SSR-safe Media Session API utility for Timer, Open-Ended, Breathing, and Guided Tracks.
-- `src/lib/pull-to-refresh.ts` + `pull-to-refresh.test.ts` — Pure rubber-band pull-to-refresh physics and tests.
-- `src/lib/wake-lock.ts` — Screen Wake Lock hook.
+- `src/lib/` — Web platform adapters (`localStorage`, Web Audio API `MeditationAudioEngine`, browser file download, `MediaSession`, Screen Wake Lock, Cache Storage offline audio manager) and thin re-exports from `@bodhi/core/*` plus Vitest unit tests.
 - `src/components/` — `BodhiShell`, `BodhiLogo`, `ThemeProvider`, `I18nProvider`, `LanguageSwitcher`, `LocaleFlag`, `ServiceWorkerRegister`, `PullToRefresh`, `MeditationTimer`, `BreathingPractice`, `RetentionBreathing`, `BreathingSheet`, `ZenDimOverlay`, `EarlyFinishCard`, `PresetStrip`, `SoundPickerSheet`, `GuidedTracks`, `GuidedSessionPlayer`, `MeditationHistory`, and `HistoryCalendar`.
 - `public/audio/` — 14 precached CC0 1.0 acoustic assets: 6 multi-sample nasal breath cues (`breath-{inhale,exhale}-{short,medium,long}.mp3` from `giddster` & `thomasXkiteXforXlife`), 6 acoustic bells (`bells/{singing-bowl,tibetan-healing-bowl,deep-gong,soft-chime,crystal-bowl,wood-block}.mp3` from `Qvantor`, `dersinnsspace`, `steffcaffrey`, `caiogracco`, `hollandm`), and 2 seamless stereo nature loops (`ambient/{gentle-rain,ocean-waves}.mp3` from `shelbyshark` & `SamsterBirdies`).
 - `public/icons/` — Official Bodhi leaf SVG, transparent PNG favicon, and PWA PNG icons.
 
 ## Commands & Conventions
 
-- `pnpm test` — Run unit tests (Vitest). Always add or update tests when changing pure domain logic in `src/lib/`.
+- `pnpm typecheck:core` — Typecheck `@bodhi/core` without DOM runtime coupling.
+- `pnpm test` — Run unit tests (Vitest) across `src/` and `packages/core/`. Always add or update tests when changing pure domain logic in `packages/core/` or `src/lib/`.
 - `pnpm test:e2e` — Run Playwright mobile PWA E2E smoke tests (`e2e/smoke.spec.ts`) against the production Next.js server (`pnpm build` first).
 - `pnpm lint` — Run ESLint checks.
 - `pnpm build` — Run `prisma generate && node scripts/vercel-db-sync.mjs && next build`.
 - `pnpm db:migrate` — Create and apply a new Prisma migration locally (`prisma migrate dev`). Always commit generated files in `prisma/migrations/`.
 - `pnpm db:migrate:deploy` — Apply pending migrations in production/staging environments.
-- **Pre-PR Verification:** Always validate `prisma validate`, `pnpm test`, `pnpm lint`, `pnpm build`, and `pnpm test:e2e` before opening a PR.
+- **Pre-PR Verification:** Always validate `prisma validate`, `pnpm typecheck:core`, `pnpm test`, `pnpm lint`, `pnpm build`, and `pnpm test:e2e` before opening a PR.
 - **Git Commit Author (required for Vercel Hobby):** Before creating any commit, ensure:
   - `git config user.name "Eryk Humberto Oliveira Alves"`
   - `git config user.email "erykwho@gmail.com"`
