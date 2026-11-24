@@ -39,6 +39,9 @@ jobs:
       - name: Typecheck @bodhi/core
         run: pnpm typecheck:core
 
+      - name: Typecheck @bodhi/mobile
+        run: pnpm typecheck:mobile
+
       - name: Run unit tests
         run: pnpm test
 
