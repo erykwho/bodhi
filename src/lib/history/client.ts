@@ -1,27 +1,14 @@
 import type {
   MeditationSessionItem,
-  SessionModeType,
+  SaveSessionPayload,
 } from "@/lib/history/types";
 import {
   enqueuePendingSession,
   isPendingSessionId,
   updatePendingSessionNote,
 } from "@/lib/offline/queue";
-import type { TrackProviderType } from "@/lib/tracks/types";
 
-export interface SaveSessionPayload {
-  mode: SessionModeType;
-  trackId?: string | null;
-  trackTitle?: string | null;
-  trackProvider?: TrackProviderType | null;
-  breathingPattern?: string | null;
-  plannedDurationSec?: number | null;
-  actualDurationSec: number;
-  completed: boolean;
-  note?: string | null;
-  startedAt?: string;
-  endedAt?: string;
-}
+export type { SaveSessionPayload };
 
 /**
  * Posts a session to Neon PostgreSQL via /api/sessions.

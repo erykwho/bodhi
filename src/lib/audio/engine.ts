@@ -1,10 +1,35 @@
 import {
+  BREATH_AUDIO_CATALOG,
+  computeBreathPlaybackRate,
+  MAX_BREATH_PLAYBACK_RATE,
+  MIN_BREATH_PLAYBACK_RATE,
+  MULTI_STRIKE_SPACING_MS,
+  selectBreathDurationTier,
+  type AudioUnlockOptions,
+  type BreathDurationTier,
+  type BreathSampleKind,
+  type BreathUnlockOptions,
+  type MeditationAudioPort,
+} from "@bodhi/core/audio";
+import {
   getAmbientSoundOption,
   getBellSoundOption,
   type AmbientSoundId,
   type BellSoundId,
 } from "@/lib/audio/sounds";
 import type { BreathingCueMode, BreathingPhase } from "@/lib/breathing/types";
+
+export {
+  BREATH_AUDIO_CATALOG,
+  computeBreathPlaybackRate,
+  MAX_BREATH_PLAYBACK_RATE,
+  MIN_BREATH_PLAYBACK_RATE,
+  selectBreathDurationTier,
+  type AudioUnlockOptions,
+  type BreathDurationTier,
+  type BreathUnlockOptions,
+  type MeditationAudioPort,
+};
 
 type WebkitWindow = Window & {
   webkitAudioContext?: typeof AudioContext;
@@ -15,25 +40,6 @@ type NavigatorWithAudioSession = Navigator & {
     type: string;
   };
 };
-
-type BreathSampleKind = "inhale" | "exhale";
-
-export type BreathDurationTier = "short" | "medium" | "long";
-
-export interface BreathUnlockOptions {
-  inhaleSec?: number;
-  exhaleSec?: number;
-}
-
-export interface AudioUnlockOptions extends BreathUnlockOptions {
-  bells?: BellSoundId[];
-  ambientSound?: AmbientSoundId;
-}
-
-interface BreathSampleSpec {
-  src: string;
-  nominalDurationSec: number;
-}
 
 interface ActiveAmbientGraph {
   sources: AudioScheduledSourceNode[];
@@ -48,70 +54,6 @@ interface ActiveBreathBufferCue {
   cleanupTimer: ReturnType<typeof setTimeout> | null;
 }
 
-const MULTI_STRIKE_SPACING_MS = 2100;
-
-/**
- * With 3 duration-matched nasal breath samples centered at ~1.47s / ~3.70s / ~6.22s
- * (pre-stretched offline with formant-preserving librubberband), Web Audio API
- * AudioBufferSourceNode playbackRate stays in the natural [0.73x, 1.50x] range across
- * 1s–8s (0.91x–0.94x on 4s Box, 1.12x–1.14x on 5.5s Coherent, 0.78x on 8s 4-7-8 exhale)
- * while completely avoiding iOS Safari AVPlayer seek/preservesPitch silent bugs.
- */
-export const MIN_BREATH_PLAYBACK_RATE = 0.5;
-export const MAX_BREATH_PLAYBACK_RATE = 2.0;
-
-export const BREATH_AUDIO_CATALOG: Record<
-  BreathSampleKind,
-  Record<BreathDurationTier, BreathSampleSpec>
-> = {
-  inhale: {
-    short: {
-      src: "/audio/breath-inhale-short.mp3",
-      nominalDurationSec: 1.45,
-    },
-    medium: {
-      src: "/audio/breath-inhale-medium.mp3",
-      nominalDurationSec: 3.66,
-    },
-    long: {
-      src: "/audio/breath-inhale-long.mp3",
-      nominalDurationSec: 6.18,
-    },
-  },
-  exhale: {
-    short: {
-      src: "/audio/breath-exhale-short.mp3",
-      nominalDurationSec: 1.48,
-    },
-    medium: {
-      src: "/audio/breath-exhale-medium.mp3",
-      nominalDurationSec: 3.75,
-    },
-    long: {
-      src: "/audio/breath-exhale-long.mp3",
-      nominalDurationSec: 6.27,
-    },
-  },
-};
-
-/**
- * Selects the closest natural breath sample tier for a phase duration so
- * Web Audio playbackRate stays close to 1.0x without sounding artificial:
- * - <= 2.2s: short nasal sample (giddster, ~1.47s)
- * - <= 4.6s: medium studio nasal sample (thomasXkiteXforXlife, ~3.70s)
- * - > 4.6s: long multi-take studio nasal sample (thomasXkiteXforXlife, ~6.22s)
- */
-export function selectBreathDurationTier(
-  targetPhaseDurationSec: number
-): BreathDurationTier {
-  if (!Number.isFinite(targetPhaseDurationSec) || targetPhaseDurationSec <= 0) {
-    return "medium";
-  }
-  if (targetPhaseDurationSec <= 2.2) return "short";
-  if (targetPhaseDurationSec <= 4.6) return "medium";
-  return "long";
-}
-
 /**
  * Valid 50ms silent 8kHz mono PCM WAV played once on user gesture to switch
  * pre-iOS 16.4 Safari AVAudioSession from "ambient" to "playback" so Web Audio
@@ -121,37 +63,13 @@ const SILENT_UNLOCK_WAV_DATA_URI =
   "data:audio/wav;base64,UklGRrQBAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YZABAACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA";
 
 /**
- * Computes the playbackRate required to span a breath sample across
- * `targetPhaseDurationSec`, safely clamped to [0.5, 2.0].
- */
-export function computeBreathPlaybackRate(
-  sampleDurationSec: number,
-  targetPhaseDurationSec: number
-): number {
-  if (
-    !Number.isFinite(sampleDurationSec) ||
-    sampleDurationSec <= 0 ||
-    !Number.isFinite(targetPhaseDurationSec) ||
-    targetPhaseDurationSec <= 0
-  ) {
-    return 1;
-  }
-
-  const rawRate = sampleDurationSec / targetPhaseDurationSec;
-  return Math.min(
-    MAX_BREATH_PLAYBACK_RATE,
-    Math.max(MIN_BREATH_PLAYBACK_RATE, rawRate)
-  );
-}
-
-/**
  * Self-contained offline-first Web Audio API engine for meditation bells,
  * ambient soundscapes, and decoded in-RAM multi-sample CC0 human nasal breath cues.
  * Configures iOS "playback" audio session so all practice audio plays reliably
  * even when the device's hardware Silent switch is enabled — without relying on
  * HTML5 <audio> (AVPlayer) for recurring breathing phase playback.
  */
-export class MeditationAudioEngine {
+export class MeditationAudioEngine implements MeditationAudioPort {
   private ctx: AudioContext | null = null;
   private whiteNoiseBuffer: AudioBuffer | null = null;
   private pinkNoiseBuffer: AudioBuffer | null = null;
