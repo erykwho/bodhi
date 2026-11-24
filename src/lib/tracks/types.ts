@@ -9,6 +9,7 @@ export interface FavoriteTrackItem {
   author: string | null;
   thumbnailUrl: string | null;
   tags: string[];
+  isFavorite: boolean;
   createdAt: string;
 }
 

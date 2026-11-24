@@ -21,6 +21,7 @@ const SAMPLE_TRACK: FavoriteTrackItem = {
   author: "Bodhi Audio",
   thumbnailUrl: null,
   tags: ["Sleep"],
+  isFavorite: true,
   createdAt: "2026-11-22T00:00:00.000Z",
 };
 
@@ -67,6 +68,42 @@ describe("offline guided audio cache", () => {
     const snap = getOfflineGuidedSnapshot();
     expect(snap.tracks).toEqual([]);
     expect(snap.savedAudio).toEqual({});
+  });
+
+  it("defaults missing isFavorite to false when reading legacy cached snapshots", () => {
+    const store = new Map<string, string>([
+      [
+        OFFLINE_GUIDED_STORAGE_KEY,
+        JSON.stringify({
+          tracks: [
+            {
+              id: "legacy-track",
+              provider: "DIRECT_AUDIO",
+              url: "https://cdn.example.com/legacy.mp3",
+              externalId: "https://cdn.example.com/legacy.mp3",
+              title: "Legacy Track",
+              author: null,
+              thumbnailUrl: null,
+              createdAt: "2026-10-01T00:00:00.000Z",
+            },
+          ],
+          savedAudio: {},
+        }),
+      ],
+    ]);
+    (globalThis as unknown as { window: Record<string, unknown> }).window = {
+      localStorage: {
+        getItem: (k: string) => store.get(k) ?? null,
+        setItem: (k: string, v: string) => store.set(k, v),
+      },
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    };
+
+    const snap = getOfflineGuidedSnapshot();
+    expect(snap.tracks).toHaveLength(1);
+    expect(snap.tracks[0].isFavorite).toBe(false);
+    expect(snap.tracks[0].tags).toEqual([]);
   });
 
   it("falls back to authenticated proxy when direct CORS fetch fails, stores in Cache Storage, reads blob URL, and cleans up on remove", async () => {

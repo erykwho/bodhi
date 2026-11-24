@@ -54,13 +54,19 @@ function parseSnapshot(raw: string | null): OfflineGuidedSnapshot {
   try {
     const parsed = JSON.parse(raw) as Partial<OfflineGuidedSnapshot>;
     const tracks = Array.isArray(parsed.tracks)
-      ? parsed.tracks.filter(
-          (item): item is FavoriteTrackItem =>
-            Boolean(item) &&
-            typeof item.id === "string" &&
-            typeof item.title === "string" &&
-            typeof item.url === "string"
-        )
+      ? parsed.tracks
+          .filter(
+            (item): item is FavoriteTrackItem =>
+              Boolean(item) &&
+              typeof item.id === "string" &&
+              typeof item.title === "string" &&
+              typeof item.url === "string"
+          )
+          .map((item) => ({
+            ...item,
+            tags: Array.isArray(item.tags) ? item.tags : [],
+            isFavorite: Boolean(item.isFavorite),
+          }))
       : [];
     const savedAudio: Record<string, SavedOfflineAudioMeta> = {};
     if (parsed.savedAudio && typeof parsed.savedAudio === "object") {

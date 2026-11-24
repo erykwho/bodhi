@@ -109,7 +109,7 @@ describe("API /api/tracks/**", () => {
   });
 
   describe("GET & POST /api/tracks", () => {
-    it("scopes GET queries strictly by userId", async () => {
+    it("scopes GET queries strictly by userId and orders favorites first", async () => {
       const createdAt = new Date("2026-01-10T10:00:00.000Z");
       prismaMock.favoriteTrack.findMany.mockResolvedValue([
         {
@@ -122,6 +122,7 @@ describe("API /api/tracks/**", () => {
           author: "Bodhi",
           thumbnailUrl: null,
           tags: ["Morning"],
+          isFavorite: true,
           createdAt,
         },
       ]);
@@ -130,12 +131,19 @@ describe("API /api/tracks/**", () => {
       expect(res.status).toBe(200);
       expect(prismaMock.favoriteTrack.findMany).toHaveBeenCalledWith({
         where: { userId: USER_A.id },
-        orderBy: [{ position: "asc" }, { createdAt: "desc" }],
+        orderBy: [
+          { isFavorite: "desc" },
+          { position: "asc" },
+          { createdAt: "desc" },
+        ],
       });
 
-      const data = (await res.json()) as { tracks: Array<{ id: string }> };
+      const data = (await res.json()) as {
+        tracks: Array<{ id: string; isFavorite: boolean }>;
+      };
       expect(data.tracks).toHaveLength(1);
       expect(data.tracks[0].id).toBe("t1");
+      expect(data.tracks[0].isFavorite).toBe(true);
     });
 
     it("rejects empty or unsupported URLs with 400", async () => {
@@ -153,7 +161,7 @@ describe("API /api/tracks/**", () => {
       expect(prismaMock.favoriteTrack.upsert).not.toHaveBeenCalled();
     });
 
-    it("creates a favorite track scoped to the authenticated user", async () => {
+    it("creates a guided track scoped to the authenticated user at the end of non-favorites", async () => {
       const createdAt = new Date("2026-01-10T10:00:00.000Z");
       prismaMock.favoriteTrack.aggregate.mockResolvedValue({
         _max: { position: 2 },
@@ -168,6 +176,7 @@ describe("API /api/tracks/**", () => {
         author: null,
         thumbnailUrl: null,
         tags: ["Sleep"],
+        isFavorite: false,
         createdAt,
       });
 
@@ -181,6 +190,10 @@ describe("API /api/tracks/**", () => {
       );
 
       expect(res.status).toBe(201);
+      expect(prismaMock.favoriteTrack.aggregate).toHaveBeenCalledWith({
+        where: { userId: USER_A.id, isFavorite: false },
+        _max: { position: true },
+      });
       expect(prismaMock.favoriteTrack.upsert).toHaveBeenCalledWith(
         expect.objectContaining({
           create: expect.objectContaining({
@@ -191,17 +204,73 @@ describe("API /api/tracks/**", () => {
           }),
         })
       );
+      const data = (await res.json()) as { track: { isFavorite: boolean } };
+      expect(data.track.isFavorite).toBe(false);
     });
   });
 
-  describe("PATCH & DELETE /api/tracks/[id] (IDOR protection)", () => {
-    it("returns 400 when PATCH payload has neither title nor tags", async () => {
+  describe("PATCH & DELETE /api/tracks/[id] (IDOR protection & favorites)", () => {
+    it("returns 400 when PATCH payload has neither title, tags, nor isFavorite", async () => {
       const res = await PATCH(
         jsonRequest("http://localhost/api/tracks/t1", "PATCH", {}),
         { params: Promise.resolve({ id: "t1" }) }
       );
       expect(res.status).toBe(400);
       expect(prismaMock.favoriteTrack.findFirst).not.toHaveBeenCalled();
+    });
+
+    it("toggles isFavorite and places the track at the top of its destination group", async () => {
+      const createdAt = new Date("2026-01-10T10:00:00.000Z");
+      prismaMock.favoriteTrack.findFirst.mockResolvedValue({
+        id: "t1",
+        userId: USER_A.id,
+        provider: "YOUTUBE",
+        url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+        externalId: "dQw4w9WgXcQ",
+        title: "Morning Breath",
+        author: "Bodhi",
+        thumbnailUrl: null,
+        tags: [],
+        isFavorite: false,
+        position: 4,
+        createdAt,
+      });
+      prismaMock.favoriteTrack.aggregate.mockResolvedValue({
+        _min: { position: 0 },
+      });
+      prismaMock.favoriteTrack.update.mockResolvedValue({
+        id: "t1",
+        userId: USER_A.id,
+        provider: "YOUTUBE",
+        url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+        externalId: "dQw4w9WgXcQ",
+        title: "Morning Breath",
+        author: "Bodhi",
+        thumbnailUrl: null,
+        tags: [],
+        isFavorite: true,
+        position: -1,
+        createdAt,
+      });
+
+      const res = await PATCH(
+        jsonRequest("http://localhost/api/tracks/t1", "PATCH", {
+          isFavorite: true,
+        }),
+        { params: Promise.resolve({ id: "t1" }) }
+      );
+
+      expect(res.status).toBe(200);
+      expect(prismaMock.favoriteTrack.aggregate).toHaveBeenCalledWith({
+        where: { userId: USER_A.id, isFavorite: true },
+        _min: { position: true },
+      });
+      expect(prismaMock.favoriteTrack.update).toHaveBeenCalledWith({
+        where: { id: "t1" },
+        data: { isFavorite: true, position: -1 },
+      });
+      const data = (await res.json()) as { track: { isFavorite: boolean } };
+      expect(data.track.isFavorite).toBe(true);
     });
 
     it("returns 404 on PATCH when track belongs to another user", async () => {
@@ -249,27 +318,33 @@ describe("API /api/tracks/**", () => {
       expect(res.status).toBe(400);
     });
 
-    it("ignores foreign track IDs and only reorders tracks owned by the user", async () => {
+    it("ignores foreign track IDs and preserves favorite vs non-favorite group separation", async () => {
       prismaMock.favoriteTrack.findMany.mockResolvedValue([
-        { id: "t1" },
-        { id: "t2" },
+        { id: "f1", isFavorite: true },
+        { id: "f2", isFavorite: true },
+        { id: "t1", isFavorite: false },
+        { id: "t2", isFavorite: false },
       ]);
       prismaMock.favoriteTrack.update.mockImplementation((args) => args);
       prismaMock.$transaction.mockResolvedValue([]);
 
       const res = await REORDER_PATCH(
         jsonRequest("http://localhost/api/tracks/reorder", "PATCH", {
-          orderedIds: ["foreign-track", "t2", "t1"],
+          orderedIds: ["foreign-track", "t2", "f2", "t1", "f1"],
         })
       );
 
       expect(res.status).toBe(200);
       const data = (await res.json()) as { orderedIds: string[] };
-      expect(data.orderedIds).toEqual(["t2", "t1"]);
+      expect(data.orderedIds).toEqual(["f2", "f1", "t2", "t1"]);
       expect(prismaMock.favoriteTrack.findMany).toHaveBeenCalledWith({
         where: { userId: USER_A.id },
-        select: { id: true },
-        orderBy: [{ position: "asc" }, { createdAt: "desc" }],
+        select: { id: true, isFavorite: true },
+        orderBy: [
+          { isFavorite: "desc" },
+          { position: "asc" },
+          { createdAt: "desc" },
+        ],
       });
     });
   });
