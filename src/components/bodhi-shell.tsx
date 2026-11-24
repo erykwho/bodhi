@@ -17,6 +17,7 @@ import { signInWithGoogle, signOutUser } from "@/app/actions";
 import { BodhiLogo } from "@/components/bodhi-logo";
 import { GuidedTracks } from "@/components/guided-tracks";
 import { useI18n } from "@/components/i18n-provider";
+import { LanguageSwitcher } from "@/components/language-switcher";
 import { MeditationHistory } from "@/components/meditation-history";
 import { MeditationTimer } from "@/components/meditation-timer";
 import { PullToRefresh } from "@/components/pull-to-refresh";
@@ -24,7 +25,6 @@ import { useTheme } from "@/components/theme-provider";
 import type { SessionUserSummary } from "@/lib/auth";
 import { saveMeditationSession } from "@/lib/history/client";
 import type { MeditationSessionItem } from "@/lib/history/types";
-import { LOCALE_META } from "@/lib/i18n/types";
 import {
   isPendingSessionId,
   mergeSessionsWithPending,
@@ -58,7 +58,7 @@ export function BodhiShell({
   authError = null,
 }: BodhiShellProps) {
   const { theme, toggleTheme } = useTheme();
-  const { locale, toggleLocale, m } = useI18n();
+  const { m } = useI18n();
   const isOnline = useOnlineStatus();
 
   const [mode, setMode] = useState<AppMode>("timer");
@@ -277,15 +277,7 @@ export function BodhiShell({
               )
             )}
 
-            <button
-              type="button"
-              onClick={toggleLocale}
-              aria-label={m.common.switchLanguage}
-              title={`${m.common.switchLanguage} (${LOCALE_META[locale].nativeLabel})`}
-              className="flex h-9 min-w-9 items-center justify-center rounded-full border border-black/6 bg-[var(--surface)] px-2 text-[11px] font-semibold tracking-wide text-[var(--foreground-muted)] transition-colors hover:text-[var(--foreground)] dark:border-white/10"
-            >
-              {LOCALE_META[locale].shortLabel}
-            </button>
+            <LanguageSwitcher />
 
             <button
               type="button"
