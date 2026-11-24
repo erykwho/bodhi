@@ -10,6 +10,7 @@
     "test": "vitest run",
     "test:e2e": "playwright test",
     "typecheck:core": "pnpm --filter @bodhi/core typecheck",
+    "typecheck:mobile": "pnpm --filter @bodhi/mobile typecheck",
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
     "db:migrate": "prisma migrate dev",

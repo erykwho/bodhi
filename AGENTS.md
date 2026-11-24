@@ -77,13 +77,14 @@ Mobile-first meditation web application (**PWA**) designed for calm, distraction
 - **Package Manager:** `pnpm` (v12 workspace with `packages/*` and `apps/*`, enabling `allowBuilds` for Prisma and esbuild in `pnpm-workspace.yaml`).
 - **Database:** Neon PostgreSQL + Prisma v6 (`prisma/schema.prisma`, versioned `prisma/migrations/`, synced automatically via `prisma migrate deploy` in `scripts/vercel-db-sync.mjs` on `VERCEL_ENV=production`).
 - **Observability:** Sentry (`@sentry/nextjs`, org `bodhi-09`, project `bodhi`), enabled automatically when `NEXT_PUBLIC_SENTRY_DSN` is set (no-op in dev/CI without DSN; PII off by default in SDK v11; source maps uploaded on build when `SENTRY_AUTH_TOKEN` is configured).
-- **CI/CD & Hosting:** GitHub Actions (`.github/workflows/ci.yml` running `prisma validate`, `pnpm typecheck:core`, `pnpm test`, `pnpm lint`, `pnpm build`, and `pnpm test:e2e`) + Vercel (continuous deployment from `master`, protected branch requiring PR + passing checks).
+- **CI/CD & Hosting:** GitHub Actions (`.github/workflows/ci.yml` running `prisma validate`, `pnpm typecheck:core`, `pnpm typecheck:mobile`, `pnpm test`, `pnpm lint`, `pnpm build`, and `pnpm test:e2e`) + Vercel (continuous deployment from `master`, protected branch requiring PR + passing checks) + EAS Build (`apps/mobile/eas.json`).
 
 ## Directory Structure (V10)
 
-- `.github/workflows/ci.yml` — GitHub Actions CI (`CI` job: Prisma validate, `@bodhi/core` typecheck, Vitest, ESLint, Next.js build, Playwright E2E smoke tests).
+- `.github/workflows/ci.yml` — GitHub Actions CI (`CI` job: Prisma validate, `@bodhi/core` & `@bodhi/mobile` typecheck, Vitest, ESLint, Next.js build, Playwright E2E smoke tests).
 - `.github/dependabot.yml` — Grouped weekly Dependabot updates for `npm`/`pnpm` dependencies and GitHub Actions.
-- `packages/core/` (`@bodhi/core`) — Platform-agnostic, DOM-free shared TypeScript domain package (enforced by `packages/core/src/dom-free.test.ts`) reused by Web (`src/lib/*`) and React Native: timer/breathing/retention engines, sound & breath catalogs + `MeditationAudioPort`, history stats & CSV/JSON serializers, track URL parsers/reordering/YouTube error classifier, `KeyValueStorage` + offline session queue, i18n types/messages (`en`, `pt-BR`, `es`), design tokens (`theme/tokens.ts`), and typed platform-agnostic REST API client (`api/client.ts`).
+- `packages/core/` (`@bodhi/core`) — Platform-agnostic, DOM-free shared TypeScript domain package (enforced by `packages/core/src/dom-free.test.ts`) reused by Web (`src/lib/*`) and React Native (`apps/mobile/`): timer/breathing/retention engines, sound & breath catalogs + `MeditationAudioPort`, history stats & CSV/JSON serializers, track URL parsers/reordering/YouTube error classifier, `KeyValueStorage` + offline session queue, i18n types/messages (`en`, `pt-BR`, `es`), design tokens (`theme/tokens.ts`), and typed platform-agnostic REST API client (`api/client.ts`).
+- `apps/mobile/` (`@bodhi/mobile`) — Native iOS & Android React Native + Expo SDK 58 (CNG / EAS Build) application sharing `@bodhi/core` and the Vercel backend API: `NativeMeditationAudioEngine` (`react-native-audio-api` C++ DSP + iOS `AVAudioSession` Silent Mode bypass + `allowHaptics: true` + silent background keep-alive + Lock Screen controls + all 14 bundled CC0 audio assets), `expo-sqlite/kv-store`, `expo-secure-store`, `expo-file-system` permanent offline guided audio downloads, `expo-brightness` OLED Zen Dim, Taptic Engine breathing haptics, `expo-notifications` offline daily practice reminders, Mindful Minutes health hook, Sign in with Apple + Google Sign-In + account deletion, full Timer/Open/Breathing/Retention/Guided/History/Settings screens, and Maestro E2E smoke flow (`maestro/smoke.yaml`). See `docs/mobile-release.md`.
 - `e2e/smoke.spec.ts` & `playwright.config.ts` — Mobile PWA Playwright E2E smoke tests (Timer, Open-Ended, Guided Breathing, 3× bell, Zen Dim, Sound Picker, local Presets, i18n, theme persistence, navigation, `/api/health`, 14 cached `/audio/` assets, offline mode).
 - `sentry.server.config.ts`, `sentry.edge.config.ts`, `src/instrumentation.ts`, `src/instrumentation-client.ts` — Conditional Sentry SDK initialization and `onRequestError` / router transition hooks.
 - `public/sw.js` — Offline PWA Service Worker (`bodhi-offline-v6`, preserving `bodhi-user-audio-v1`).
@@ -98,13 +99,14 @@ Mobile-first meditation web application (**PWA**) designed for calm, distraction
 ## Commands & Conventions
 
 - `pnpm typecheck:core` — Typecheck `@bodhi/core` without DOM runtime coupling.
+- `pnpm typecheck:mobile` — Typecheck `@bodhi/mobile` (React Native / Expo SDK 58).
 - `pnpm test` — Run unit tests (Vitest) across `src/` and `packages/core/`. Always add or update tests when changing pure domain logic in `packages/core/` or `src/lib/`.
 - `pnpm test:e2e` — Run Playwright mobile PWA E2E smoke tests (`e2e/smoke.spec.ts`) against the production Next.js server (`pnpm build` first).
 - `pnpm lint` — Run ESLint checks.
 - `pnpm build` — Run `prisma generate && node scripts/vercel-db-sync.mjs && next build`.
 - `pnpm db:migrate` — Create and apply a new Prisma migration locally (`prisma migrate dev`). Always commit generated files in `prisma/migrations/`.
 - `pnpm db:migrate:deploy` — Apply pending migrations in production/staging environments.
-- **Pre-PR Verification:** Always validate `prisma validate`, `pnpm typecheck:core`, `pnpm test`, `pnpm lint`, `pnpm build`, and `pnpm test:e2e` before opening a PR.
+- **Pre-PR Verification:** Always validate `prisma validate`, `pnpm typecheck:core`, `pnpm typecheck:mobile`, `pnpm test`, `pnpm lint`, `pnpm build`, and `pnpm test:e2e` before opening a PR.
 - **Git Commit Author (required for Vercel Hobby):** Before creating any commit, ensure:
   - `git config user.name "Eryk Humberto Oliveira Alves"`
   - `git config user.email "erykwho@gmail.com"`

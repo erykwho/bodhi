@@ -1,0 +1,20 @@
+appId: app.bodhi.meditation
+---
+- launchApp:
+    clearState: true
+- assertVisible: "Bodhi"
+- assertVisible: "10:00"
+- tapOn: "5m"
+- assertVisible: "05:00"
+- tapOn: "Begin Session"
+- assertVisible: "Pause"
+- tapOn: "Dim screen"
+- assertVisible: "Tap anywhere to wake"
+- tapOn: "Tap anywhere to wake"
+- tapOn: "Finish"
+- tapOn: "Breathe"
+- assertVisible: "Box 4-4-4-4"
+- tapOn: "Retention"
+- assertVisible: "3×30"
+- tapOn: "Guided"
+- tapOn: "History"
