@@ -205,6 +205,50 @@ export const esMessages: Messages = {
     continueToMeditation: (durationLabel: string) =>
       `Seguir a Meditación (${durationLabel})`,
     continueToOpenMeditation: "Seguir a Meditación Libre",
+    modeAria: "Estilo de respiración",
+    modeRhythmic: "Rítmica",
+    modeRetention: "Retención",
+    retentionLabel: "Retención",
+    roundsCount: (count: number) => `${count} ${count === 1 ? "ronda" : "rondas"}`,
+    decreaseRoundsAria: "Disminuir 1 ronda",
+    increaseRoundsAria: "Aumentar 1 ronda",
+    paceLabels: {
+      slow: "Lento",
+      standard: "Normal",
+      fast: "Rápido",
+    },
+    slotProtocol: "Protocolo",
+    protocolSummary: (breaths: number, recoverySec: number) =>
+      `${breaths} resp. · ${recoverySec}s recup.`,
+    retentionSheetTitle: "Protocolo de Retención",
+    retentionSheetSubtitle: "Respiraciones cíclicas, apnea sin aire y recuperación",
+    breathsPerRoundLabel: "Respiraciones por ronda",
+    recoveryHoldLabel: "Retención de recuperación",
+    minuteChimeLabel: "Campana cada minuto en retención",
+    minuteChimeSubtitle: "Toque suave cada 60s para marcar el tiempo con ojos cerrados",
+    safetyNoticeShort: "Practica sentado o acostado · nunca en el agua ni conduciendo",
+    safetyNoticeTitle: "Aviso de seguridad",
+    safetyNoticeBody:
+      "Practica siempre sentado o acostado en un lugar seguro. Nunca lo hagas en el agua, cerca del agua, conduciendo o de pie, y detente si sientes mareo o incomodidad.",
+    beginRetention: "Iniciar Retención",
+    roundProgress: (current: number, total: number) =>
+      `Ronda ${current} de ${total}`,
+    breathProgress: (current: number, total: number) => `${current} / ${total}`,
+    lastBreathHint: "Última respiración — suelta el aire",
+    skipToHold: "Mantener ahora",
+    stageHoldEmpty: "Retención",
+    holdTapHint: "Toca cuando quieras inhalar",
+    inhaleAndRecover: "Inhalar y Recuperar",
+    stageRecoveryInhale: "Inhala profundo",
+    stageRecoveryHold: "Mantén lleno",
+    stageRecoveryExhale: "Suelta el aire",
+    mediaRetentionTitle: (round: number, total: number) =>
+      `Respiración de Retención · Ronda ${round}/${total}`,
+    retentionCompletedSummary: (duration: string, rounds: number) =>
+      `${duration} · ${rounds} ${rounds === 1 ? "ronda completada" : "rondas completadas"}`,
+    roundHoldTag: (round: number, time: string) => `R${round} ${time}`,
+    bestHoldLabel: (time: string) => `Mejor ${time}`,
+    avgHoldLabel: (time: string) => `Media ${time}`,
   },
   guided: {
     providers: {

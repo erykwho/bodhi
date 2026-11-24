@@ -121,6 +121,46 @@ test.describe("Bodhi E2E Smoke Suite (Mobile PWA)", () => {
       page.getByRole("button", { name: "Iniciar Respiração" })
     ).toBeVisible();
 
+    // Switch to Retention breathing mode and verify dial alignment + protocol flow
+    await page.getByRole("tab", { name: "Retenção", exact: true }).click();
+    await expect(page.getByLabel("3 × 30")).toBeVisible();
+    const retentionBox = await timerDial.boundingBox();
+    expect(retentionBox).not.toBeNull();
+    expect(
+      Math.abs((retentionBox?.y ?? 0) - (timerBox?.y ?? 0))
+    ).toBeLessThanOrEqual(2);
+
+    // Customize rounds, pace, and protocol sheet
+    await page.getByRole("button", { name: "Aumentar 1 round" }).click();
+    await expect(page.getByLabel("4 × 30")).toBeVisible();
+    await page.getByRole("button", { name: "Rápido", exact: true }).click();
+    await page.getByRole("button", { name: /^Protocolo/ }).click();
+    await page.getByRole("button", { name: "20", exact: true }).click();
+    await page.getByRole("button", { name: "Concluir", exact: true }).click();
+    await expect(page.getByLabel("4 × 20")).toBeVisible();
+
+    // Start Retention session -> skip to empty-lung hold -> trigger recovery -> Zen Dim -> finish
+    await page.getByRole("button", { name: "Iniciar Retenção" }).click();
+    await expect(page.getByRole("button", { name: "Segurar agora" })).toBeVisible();
+
+    await page.getByRole("button", { name: "Segurar agora" }).click();
+    await expect(
+      page.getByRole("button", { name: "Inspirar e Recuperar" }).first()
+    ).toBeVisible();
+
+    await page.getByRole("button", { name: "Inspirar e Recuperar" }).last().click();
+    await expect(page.getByText("Inspire fundo")).toBeVisible();
+
+    await page.getByRole("button", { name: "Escurecer tela" }).click();
+    await expect(wakeOverlay).toBeVisible();
+    await wakeOverlay.click();
+    await expect(wakeOverlay).toBeHidden();
+
+    await page.getByRole("button", { name: "Encerrar" }).click();
+    await expect(
+      page.getByRole("button", { name: "Iniciar Retenção" })
+    ).toBeVisible();
+
     expect(errors).toEqual([]);
   });
 
