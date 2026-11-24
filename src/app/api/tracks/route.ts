@@ -18,7 +18,11 @@ export async function GET() {
     const user = await requireUser();
     const tracks = await prisma.favoriteTrack.findMany({
       where: { userId: user.id },
-      orderBy: [{ position: "asc" }, { createdAt: "desc" }],
+      orderBy: [
+        { isFavorite: "desc" },
+        { position: "asc" },
+        { createdAt: "desc" },
+      ],
     });
 
     return NextResponse.json({
@@ -31,6 +35,7 @@ export async function GET() {
         author: track.author,
         thumbnailUrl: track.thumbnailUrl,
         tags: track.tags,
+        isFavorite: track.isFavorite,
         createdAt: track.createdAt.toISOString(),
       })),
     });
@@ -87,7 +92,7 @@ export async function POST(request: Request) {
     const normalizedTags = normalizeTrackTags(tags ?? []);
 
     const lastPosition = await prisma.favoriteTrack.aggregate({
-      where: { userId: user.id },
+      where: { userId: user.id, isFavorite: false },
       _max: { position: true },
     });
     const nextPosition =
@@ -132,6 +137,7 @@ export async function POST(request: Request) {
           author: saved.author,
           thumbnailUrl: saved.thumbnailUrl,
           tags: saved.tags,
+          isFavorite: saved.isFavorite,
           createdAt: saved.createdAt.toISOString(),
         },
       },

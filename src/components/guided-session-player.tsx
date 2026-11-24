@@ -20,6 +20,7 @@ import {
   Loader2,
   RotateCcw,
   Square,
+  Star,
 } from "lucide-react";
 import { BodhiLogo } from "@/components/bodhi-logo";
 import { EarlyFinishCard } from "@/components/early-finish-card";
@@ -190,6 +191,8 @@ interface GuidedSessionPlayerProps {
   isAuthenticated?: boolean;
   userId?: string | null;
   isOnline?: boolean;
+  isTogglingFavorite?: boolean;
+  onToggleFavorite?: (track: FavoriteTrackItem) => void;
   onToggleClosingBell: () => void;
   onExit: () => void;
   onSessionSaved?: (session: MeditationSessionItem) => void;
@@ -202,6 +205,8 @@ export function GuidedSessionPlayer({
   isAuthenticated = false,
   userId = null,
   isOnline = true,
+  isTogglingFavorite = false,
+  onToggleFavorite,
   onToggleClosingBell,
   onExit,
   onSessionSaved,
@@ -800,12 +805,39 @@ export function GuidedSessionPlayer({
           ) : (
             <>
               <ArrowLeft className="h-3.5 w-3.5" />
-              {m.guided.player.favorites}
+              {m.guided.player.backToGuided}
             </>
           )}
         </button>
 
         <div className="flex items-center gap-2">
+          {isAuthenticated && isOnline && onToggleFavorite && (
+            <button
+              type="button"
+              onClick={() => onToggleFavorite(track)}
+              disabled={isTogglingFavorite}
+              aria-pressed={track.isFavorite}
+              aria-label={
+                track.isFavorite
+                  ? m.guided.removeFavoriteAria(track.title)
+                  : m.guided.addFavoriteAria(track.title)
+              }
+              title={
+                track.isFavorite
+                  ? m.guided.player.favorited
+                  : m.guided.player.favorite
+              }
+              className={`flex h-8 w-8 items-center justify-center rounded-full border transition-colors disabled:opacity-50 ${
+                track.isFavorite
+                  ? "border-[var(--warm-amber)]/35 bg-[var(--warm-amber)]/12 text-[var(--warm-amber)] hover:bg-[var(--warm-amber)]/20"
+                  : "border-black/8 bg-[var(--surface)] text-[var(--foreground-muted)] hover:text-[var(--foreground)] dark:border-white/10"
+              }`}
+            >
+              <Star
+                className={`h-3.5 w-3.5 ${track.isFavorite ? "fill-current" : ""}`}
+              />
+            </button>
+          )}
           <span className="inline-flex items-center gap-1.5 rounded-full bg-[var(--accent-soft)] px-3 py-1 text-[11px] font-medium tracking-wide text-[var(--accent)] uppercase">
             <span
               className={`h-1.5 w-1.5 rounded-full bg-[var(--accent)] ${

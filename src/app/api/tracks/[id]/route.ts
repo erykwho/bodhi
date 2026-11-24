@@ -8,10 +8,17 @@ const updateTrackSchema = z
   .object({
     title: z.string().trim().min(1, "Title cannot be empty").max(160).optional(),
     tags: z.array(z.string().max(40)).max(10).optional(),
+    isFavorite: z.boolean().optional(),
   })
-  .refine((data) => data.title !== undefined || data.tags !== undefined, {
-    message: "Provide a title or tags to update",
-  });
+  .refine(
+    (data) =>
+      data.title !== undefined ||
+      data.tags !== undefined ||
+      data.isFavorite !== undefined,
+    {
+      message: "Provide a title, tags, or favorite status to update",
+    }
+  );
 
 export async function PATCH(
   request: Request,
@@ -38,6 +45,21 @@ export async function PATCH(
       return NextResponse.json({ error: "Track not found" }, { status: 404 });
     }
 
+    let nextPosition: number | undefined;
+    if (
+      parsed.data.isFavorite !== undefined &&
+      parsed.data.isFavorite !== existing.isFavorite
+    ) {
+      const firstInDestinationGroup = await prisma.favoriteTrack.aggregate({
+        where: { userId: user.id, isFavorite: parsed.data.isFavorite },
+        _min: { position: true },
+      });
+      nextPosition =
+        firstInDestinationGroup._min.position !== null
+          ? firstInDestinationGroup._min.position - 1
+          : 0;
+    }
+
     const updated = await prisma.favoriteTrack.update({
       where: { id: existing.id },
       data: {
@@ -45,6 +67,10 @@ export async function PATCH(
         ...(parsed.data.tags !== undefined
           ? { tags: normalizeTrackTags(parsed.data.tags) }
           : {}),
+        ...(parsed.data.isFavorite !== undefined
+          ? { isFavorite: parsed.data.isFavorite }
+          : {}),
+        ...(nextPosition !== undefined ? { position: nextPosition } : {}),
       },
     });
 
@@ -58,6 +84,7 @@ export async function PATCH(
         author: updated.author,
         thumbnailUrl: updated.thumbnailUrl,
         tags: updated.tags,
+        isFavorite: updated.isFavorite,
         createdAt: updated.createdAt.toISOString(),
       },
     });
