@@ -1,4 +1,8 @@
-export type TrackProviderType = "YOUTUBE" | "SOUNDCLOUD" | "DIRECT_AUDIO";
+export type TrackProviderType =
+  | "YOUTUBE"
+  | "SOUNDCLOUD"
+  | "DIRECT_AUDIO"
+  | "GOOGLE_DRIVE";
 
 export interface FavoriteTrackItem {
   id: string;

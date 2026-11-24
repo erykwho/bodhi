@@ -69,7 +69,7 @@ export async function POST(request: Request) {
       return NextResponse.json(
         {
           error:
-            "Unsupported URL. Paste a valid YouTube, SoundCloud, or direct audio (.mp3/.m4a) link.",
+            "Unsupported URL. Paste a valid YouTube, SoundCloud, Google Drive, or direct audio (.mp3/.m4a) link.",
         },
         { status: 400 }
       );

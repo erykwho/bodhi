@@ -1,8 +1,13 @@
 import { NextResponse } from "next/server";
 import { authErrorResponse, requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import {
+  buildGoogleDriveDownloadUrl,
+  isAudioStreamProvider,
+} from "@/lib/tracks/providers";
 
 const MAX_OFFLINE_AUDIO_BYTES = 50 * 1024 * 1024; // 50 MB safety cap
+const VALID_RANGE_HEADER_REGEX = /^bytes=(\d+-\d*|-\d+)$/;
 
 const BLOCKED_HOSTNAMES = new Set([
   "localhost",
@@ -64,12 +69,39 @@ export function isSafePublicAudioUrl(rawUrl: string): boolean {
   return true;
 }
 
+function parseContentRangeTotalBytes(contentRange: string | null): number | null {
+  if (!contentRange) return null;
+  const match = contentRange.match(/\/(\d+)$/);
+  if (!match?.[1]) return null;
+  const total = Number.parseInt(match[1], 10);
+  return Number.isFinite(total) ? total : null;
+}
+
+function createByteLimitedStream(
+  source: ReadableStream<Uint8Array>,
+  maxBytes: number
+): ReadableStream<Uint8Array> {
+  let totalBytes = 0;
+  const limiter = new TransformStream<Uint8Array, Uint8Array>({
+    transform(chunk, controller) {
+      totalBytes += chunk.byteLength;
+      if (totalBytes > maxBytes) {
+        controller.error(new Error("Audio stream exceeded 50 MB limit"));
+        return;
+      }
+      controller.enqueue(chunk);
+    },
+  });
+  return source.pipeThrough(limiter);
+}
+
 /**
- * Authenticated, multi-tenant-scoped audio proxy enabling offline download of
- * user-owned DIRECT_AUDIO tracks even when the upstream host omits CORS headers.
+ * Authenticated, multi-tenant-scoped audio proxy enabling streaming (with HTTP
+ * 206 Range support) and offline download of user-owned DIRECT_AUDIO and
+ * GOOGLE_DRIVE tracks even when the upstream host omits CORS headers.
  */
 export async function GET(
-  _request: Request,
+  request: Request,
   context: { params: Promise<{ id: string }> }
 ) {
   try {
@@ -84,28 +116,54 @@ export async function GET(
       return NextResponse.json({ error: "Track not found." }, { status: 404 });
     }
 
-    if (track.provider !== "DIRECT_AUDIO") {
+    if (!isAudioStreamProvider(track.provider)) {
       return NextResponse.json(
-        { error: "Only direct audio tracks can be saved offline." },
+        {
+          error:
+            "Only direct audio and Google Drive tracks can be streamed or saved offline.",
+        },
         { status: 400 }
       );
     }
 
-    if (!isSafePublicAudioUrl(track.url)) {
+    const upstreamTargetUrl =
+      track.provider === "GOOGLE_DRIVE"
+        ? buildGoogleDriveDownloadUrl(track.externalId)
+        : track.url;
+
+    if (!isSafePublicAudioUrl(upstreamTargetUrl)) {
       return NextResponse.json(
         { error: "Unsupported audio host." },
         { status: 400 }
       );
     }
 
-    const upstream = await fetch(track.url, {
+    const upstreamHeaders: Record<string, string> = {
+      Accept: "audio/*,*/*;q=0.8",
+    };
+
+    const incomingRange = request.headers.get("range")?.trim() ?? null;
+    if (incomingRange && VALID_RANGE_HEADER_REGEX.test(incomingRange)) {
+      upstreamHeaders.Range = incomingRange;
+    }
+
+    const upstream = await fetch(upstreamTargetUrl, {
       redirect: "follow",
-      headers: {
-        Accept: "audio/*,*/*;q=0.8",
-      },
+      headers: upstreamHeaders,
     });
 
+    if (upstream.status === 416) {
+      void upstream.body?.cancel();
+      const rangeHeaders = new Headers({ "Cache-Control": "private, no-store" });
+      const contentRange = upstream.headers.get("content-range");
+      if (contentRange) {
+        rangeHeaders.set("Content-Range", contentRange);
+      }
+      return new NextResponse(null, { status: 416, headers: rangeHeaders });
+    }
+
     if (!upstream.ok) {
+      void upstream.body?.cancel();
       return NextResponse.json(
         { error: "Failed to fetch upstream audio." },
         { status: 502 }
@@ -114,6 +172,7 @@ export async function GET(
 
     // Re-check final redirected URL against SSRF rules
     if (upstream.url && !isSafePublicAudioUrl(upstream.url)) {
+      void upstream.body?.cancel();
       return NextResponse.json(
         { error: "Unsupported audio redirect target." },
         { status: 400 }
@@ -127,6 +186,7 @@ export async function GET(
         Number.isFinite(declaredBytes) &&
         declaredBytes > MAX_OFFLINE_AUDIO_BYTES
       ) {
+        void upstream.body?.cancel();
         return NextResponse.json(
           { error: "Audio file exceeds the 50 MB offline limit." },
           { status: 413 }
@@ -134,18 +194,67 @@ export async function GET(
       }
     }
 
+    const contentRangeHeader = upstream.headers.get("content-range");
+    const totalRangeBytes = parseContentRangeTotalBytes(contentRangeHeader);
+    if (totalRangeBytes !== null && totalRangeBytes > MAX_OFFLINE_AUDIO_BYTES) {
+      void upstream.body?.cancel();
+      return NextResponse.json(
+        { error: "Audio file exceeds the 50 MB offline limit." },
+        { status: 413 }
+      );
+    }
+
     const contentType =
-      upstream.headers.get("content-type")?.split(";")[0]?.trim() ||
+      upstream.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() ||
       "audio/mpeg";
     const isAudioMime =
       contentType.startsWith("audio/") ||
       contentType === "application/octet-stream" ||
       contentType === "application/ogg";
     if (!isAudioMime) {
+      void upstream.body?.cancel();
+      if (track.provider === "GOOGLE_DRIVE" && contentType.includes("html")) {
+        return NextResponse.json(
+          {
+            error:
+              "Google Drive file is not publicly accessible or is not an audio file. Set sharing to 'Anyone with the link'.",
+          },
+          { status: 403 }
+        );
+      }
       return NextResponse.json(
         { error: "Upstream resource is not an audio file." },
         { status: 415 }
       );
+    }
+
+    const responseHeaders = new Headers({
+      "Content-Type": contentType,
+      "Cache-Control": "private, no-store",
+    });
+
+    if (contentLengthHeader) {
+      responseHeaders.set("Content-Length", contentLengthHeader);
+    }
+    if (contentRangeHeader) {
+      responseHeaders.set("Content-Range", contentRangeHeader);
+    }
+    const acceptRanges = upstream.headers.get("accept-ranges");
+    if (acceptRanges) {
+      responseHeaders.set("Accept-Ranges", acceptRanges);
+    } else if (upstream.status === 206) {
+      responseHeaders.set("Accept-Ranges", "bytes");
+    }
+
+    if (upstream.body) {
+      const limitedStream = createByteLimitedStream(
+        upstream.body,
+        MAX_OFFLINE_AUDIO_BYTES
+      );
+      return new NextResponse(limitedStream, {
+        status: upstream.status === 206 ? 206 : 200,
+        headers: responseHeaders,
+      });
     }
 
     const arrayBuffer = await upstream.arrayBuffer();
@@ -156,13 +265,10 @@ export async function GET(
       );
     }
 
+    responseHeaders.set("Content-Length", String(arrayBuffer.byteLength));
     return new NextResponse(arrayBuffer, {
-      status: 200,
-      headers: {
-        "Content-Type": contentType,
-        "Content-Length": String(arrayBuffer.byteLength),
-        "Cache-Control": "private, no-store",
-      },
+      status: upstream.status === 206 ? 206 : 200,
+      headers: responseHeaders,
     });
   } catch (error) {
     const authRes = authErrorResponse(error);

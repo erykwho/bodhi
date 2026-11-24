@@ -428,6 +428,7 @@ describe("API /api/tracks/**", () => {
         id: "t-mp3",
         userId: USER_A.id,
         provider: "DIRECT_AUDIO",
+        externalId: "cdn.example.com/meditation.mp3",
         url: "https://cdn.example.com/meditation.mp3",
       });
       const fetchSpy = vi
@@ -447,6 +448,104 @@ describe("API /api/tracks/**", () => {
       expect(res.headers.get("Content-Type")).toBe("audio/mpeg");
       expect(res.headers.get("Cache-Control")).toBe("private, no-store");
       expect((await res.arrayBuffer()).byteLength).toBe(4);
+      fetchSpy.mockRestore();
+    });
+
+    it("streams GOOGLE_DRIVE tracks with HTTP 206 Range forwarding", async () => {
+      const fileId = "1aBcDeFgHiJkLmNoPqRsTuVwXyZ012345";
+      prismaMock.favoriteTrack.findFirst.mockResolvedValueOnce({
+        id: "t-drive",
+        userId: USER_A.id,
+        provider: "GOOGLE_DRIVE",
+        externalId: fileId,
+        url: `https://drive.google.com/file/d/${fileId}/view`,
+      });
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        new Response(new Uint8Array([10, 20]), {
+          status: 206,
+          headers: {
+            "Content-Type": "audio/mpeg",
+            "Content-Length": "2",
+            "Content-Range": "bytes 0-1/100",
+            "Accept-Ranges": "bytes",
+          },
+        })
+      );
+
+      const res = await AUDIO_GET(
+        new Request("http://localhost/api/tracks/t-drive/audio", {
+          headers: { Range: "bytes=0-1" },
+        }),
+        { params: Promise.resolve({ id: "t-drive" }) }
+      );
+      expect(fetchSpy).toHaveBeenCalledWith(
+        `https://drive.usercontent.google.com/download?id=${fileId}&export=download&confirm=t`,
+        expect.objectContaining({
+          redirect: "follow",
+          headers: expect.objectContaining({ Range: "bytes=0-1" }),
+        })
+      );
+      expect(res.status).toBe(206);
+      expect(res.headers.get("Content-Range")).toBe("bytes 0-1/100");
+      expect(res.headers.get("Accept-Ranges")).toBe("bytes");
+      expect(res.headers.get("Cache-Control")).toBe("private, no-store");
+      expect(new Uint8Array(await res.arrayBuffer())).toEqual(
+        new Uint8Array([10, 20])
+      );
+      fetchSpy.mockRestore();
+    });
+
+    it("returns 403 when a GOOGLE_DRIVE file returns HTML (not publicly shared)", async () => {
+      const fileId = "1aBcDeFgHiJkLmNoPqRsTuVwXyZ012345";
+      prismaMock.favoriteTrack.findFirst.mockResolvedValueOnce({
+        id: "t-drive-private",
+        userId: USER_A.id,
+        provider: "GOOGLE_DRIVE",
+        externalId: fileId,
+        url: `https://drive.google.com/file/d/${fileId}/view`,
+      });
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        new Response("<html>Sign in</html>", {
+          status: 200,
+          headers: { "Content-Type": "text/html; charset=utf-8" },
+        })
+      );
+
+      const res = await AUDIO_GET(
+        new Request("http://localhost/api/tracks/t-drive-private/audio"),
+        { params: Promise.resolve({ id: "t-drive-private" }) }
+      );
+      expect(res.status).toBe(403);
+      fetchSpy.mockRestore();
+    });
+
+    it("returns 413 when upstream Content-Range total exceeds 50 MB", async () => {
+      const fileId = "1aBcDeFgHiJkLmNoPqRsTuVwXyZ012345";
+      prismaMock.favoriteTrack.findFirst.mockResolvedValueOnce({
+        id: "t-drive-huge",
+        userId: USER_A.id,
+        provider: "GOOGLE_DRIVE",
+        externalId: fileId,
+        url: `https://drive.google.com/file/d/${fileId}/view`,
+      });
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+        new Response(new Uint8Array([1, 2]), {
+          status: 206,
+          headers: {
+            "Content-Type": "audio/mpeg",
+            "Content-Length": "2",
+            "Content-Range": `bytes 0-1/${60 * 1024 * 1024}`,
+          },
+        })
+      );
+
+      const res = await AUDIO_GET(
+        new Request("http://localhost/api/tracks/t-drive-huge/audio", {
+          headers: { Range: "bytes=0-1" },
+        }),
+        { params: Promise.resolve({ id: "t-drive-huge" }) }
+      );
+      expect(res.status).toBe(413);
       fetchSpy.mockRestore();
     });
   });
