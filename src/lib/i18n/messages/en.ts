@@ -331,6 +331,7 @@ export const enMessages = {
       tryAgain: "Try again",
       externalListening: "Listening on YouTube",
       completeSession: "Complete Session",
+      discardSession: "Discard session",
       externalCompanionHint:
         "Return here when the meditation ends and tap Complete Session to ring the closing bell and save your practice.",
       scLoadError:

@@ -331,6 +331,7 @@ export const esMessages: Messages = {
       tryAgain: "Intentar de nuevo",
       externalListening: "Escuchando en YouTube",
       completeSession: "Completar sesión",
+      discardSession: "Descartar sesión",
       externalCompanionHint:
         "Vuelve aquí al terminar en YouTube y toca Completar sesión para tocar la campana final y guardar tu práctica.",
       scLoadError:

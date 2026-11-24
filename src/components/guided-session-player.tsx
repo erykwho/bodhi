@@ -23,6 +23,7 @@ import {
   RotateCcw,
   Square,
   Star,
+  X,
 } from "lucide-react";
 import { BodhiLogo } from "@/components/bodhi-logo";
 import { EarlyFinishCard } from "@/components/early-finish-card";
@@ -860,6 +861,16 @@ export function GuidedSessionPlayer({
     }
   }, [flushListeningMs, getAudioEngine, markPlayingStart, playbackState]);
 
+  const handleDiscardExternalSession = useCallback(() => {
+    accumulatedListenMsRef.current = 0;
+    playSegmentStartRef.current = null;
+    sessionStartedAtRef.current = null;
+    setExternalElapsedMs(0);
+    setEarlyStopElapsedSec(null);
+    setIsDimmed(false);
+    onExit();
+  }, [onExit]);
+
   const handleRetryYouTube = useCallback(() => {
     setPlayerErrorKey(null);
     setIsExternalMode(false);
@@ -1154,15 +1165,27 @@ export function GuidedSessionPlayer({
                   </button>
                 </div>
 
-                <a
-                  href={track.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 text-xs font-medium text-[var(--foreground-muted)] transition-colors hover:text-[var(--foreground)]"
-                >
-                  {m.guided.player.openYouTubeAgain}
-                  <ExternalLink className="h-3 w-3" />
-                </a>
+                <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2">
+                  <a
+                    href={track.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 text-xs font-medium text-[var(--foreground-muted)] transition-colors hover:text-[var(--foreground)]"
+                  >
+                    {m.guided.player.openYouTubeAgain}
+                    <ExternalLink className="h-3 w-3" />
+                  </a>
+                  {earlyStopElapsedSec === null && (
+                    <button
+                      type="button"
+                      onClick={handleDiscardExternalSession}
+                      className="inline-flex items-center gap-1 text-xs font-medium text-[var(--foreground-muted)] transition-colors hover:text-red-600 dark:hover:text-red-400"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                      {m.guided.player.discardSession}
+                    </button>
+                  )}
+                </div>
               </div>
             ) : playerError ? (
               <div className="flex flex-col items-center gap-3.5 p-6 text-center">
