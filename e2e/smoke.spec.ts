@@ -287,7 +287,7 @@ test.describe("Bodhi E2E Smoke Suite (Mobile PWA)", () => {
 
     await page.getByRole("button", { name: "Guiadas" }).click();
     await expect(
-      page.getByRole("heading", { name: "Faixas Guiadas Favoritas" })
+      page.getByRole("heading", { name: "Meditações Guiadas" })
     ).toBeVisible();
 
     await page.getByRole("button", { name: "Histórico" }).click();

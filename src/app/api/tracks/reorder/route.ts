@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { authErrorResponse, requireUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { mergeTrackOrder } from "@/lib/tracks/reorder";
+import { mergeGroupedTrackOrder } from "@/lib/tracks/reorder";
 
 const reorderTracksSchema = z.object({
   orderedIds: z
@@ -26,24 +26,32 @@ export async function PATCH(request: Request) {
 
     const existing = await prisma.favoriteTrack.findMany({
       where: { userId: user.id },
-      select: { id: true },
-      orderBy: [{ position: "asc" }, { createdAt: "desc" }],
+      select: { id: true, isFavorite: true },
+      orderBy: [
+        { isFavorite: "desc" },
+        { position: "asc" },
+        { createdAt: "desc" },
+      ],
     });
 
-    const finalIds = mergeTrackOrder(
-      parsed.data.orderedIds,
-      existing.map((track) => track.id)
-    );
+    const { favoriteIds, otherIds, orderedIds: finalIds } =
+      mergeGroupedTrackOrder(parsed.data.orderedIds, existing);
 
     if (finalIds.length > 0) {
-      await prisma.$transaction(
-        finalIds.map((id, index) =>
+      await prisma.$transaction([
+        ...favoriteIds.map((id, index) =>
           prisma.favoriteTrack.update({
             where: { id },
             data: { position: index },
           })
-        )
-      );
+        ),
+        ...otherIds.map((id, index) =>
+          prisma.favoriteTrack.update({
+            where: { id },
+            data: { position: index },
+          })
+        ),
+      ]);
     }
 
     return NextResponse.json({ orderedIds: finalIds });
