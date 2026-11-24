@@ -147,6 +147,16 @@ test.describe("Bodhi E2E Smoke Suite (Mobile PWA)", () => {
     await expect(
       page.getByRole("button", { name: "Inspirar e Recuperar" }).first()
     ).toBeVisible();
+    const holdHint = page.getByText("Toque quando quiser inspirar");
+    const holdRing = page.locator('svg[width="152"]');
+    await expect(holdHint).toBeVisible();
+    const [hintBox, ringBox] = await Promise.all([
+      holdHint.boundingBox(),
+      holdRing.boundingBox(),
+    ]);
+    expect(hintBox).not.toBeNull();
+    expect(ringBox).not.toBeNull();
+    expect(hintBox!.y).toBeGreaterThanOrEqual(ringBox!.y + ringBox!.height);
 
     await page.getByRole("button", { name: "Inspirar e Recuperar" }).last().click();
     await expect(page.getByText("Inspire fundo")).toBeVisible();

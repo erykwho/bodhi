@@ -956,7 +956,7 @@ export function RetentionBreathing({
   let arcProgress = 0;
   let orbPrimaryLabel = "";
   let orbCenterValue = "";
-  let orbCaption = "";
+  let orbHint: string | null = null;
 
   if (stage === "power") {
     orbScale = powerSnap.orbScale;
@@ -966,15 +966,13 @@ export function RetentionBreathing({
       powerSnap.breathNumber,
       powerSnap.totalBreaths
     );
-    orbCaption = powerSnap.isLastBreath
-      ? m.breathing.lastBreathHint
-      : m.breathing.roundProgress(currentRound, totalRounds);
+    orbHint = powerSnap.isLastBreath ? m.breathing.lastBreathHint : null;
   } else if (stage === "retention") {
     orbScale = 0;
     arcProgress = (stageElapsedMs % 60_000) / 60_000;
     orbPrimaryLabel = m.breathing.stageHoldEmpty;
     orbCenterValue = formatElapsedDisplay(stageElapsedMs);
-    orbCaption = m.breathing.holdTapHint;
+    orbHint = m.breathing.holdTapHint;
   } else if (recoverySnap) {
     orbScale = recoverySnap.orbScale;
     arcProgress = recoverySnap.progress;
@@ -988,7 +986,6 @@ export function RetentionBreathing({
       orbPrimaryLabel = m.breathing.stageRecoveryExhale;
       orbCenterValue = `${recoverySnap.countdownSec}`;
     }
-    orbCaption = m.breathing.roundProgress(currentRound, totalRounds);
   }
 
   const outerScale = 0.72 + orbScale * 0.34;
@@ -1195,105 +1192,108 @@ export function RetentionBreathing({
             )}
           </div>
 
-          {/* Layered Organic Breathing Orb (tappable during retention hold) */}
-          <div
-            role={isRetentionTapTarget ? "button" : undefined}
-            tabIndex={isRetentionTapTarget ? 0 : undefined}
-            aria-label={
-              isRetentionTapTarget ? m.breathing.inhaleAndRecover : undefined
-            }
-            onClick={isRetentionTapTarget ? handleEndRetention : undefined}
-            onKeyDown={
-              isRetentionTapTarget
-                ? (event) => {
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.preventDefault();
-                      handleEndRetention();
+          {/* Layered Organic Breathing Orb + external hint caption */}
+          <div className="flex flex-col items-center gap-2">
+            <div
+              role={isRetentionTapTarget ? "button" : undefined}
+              tabIndex={isRetentionTapTarget ? 0 : undefined}
+              aria-label={
+                isRetentionTapTarget ? m.breathing.inhaleAndRecover : undefined
+              }
+              onClick={isRetentionTapTarget ? handleEndRetention : undefined}
+              onKeyDown={
+                isRetentionTapTarget
+                  ? (event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        handleEndRetention();
+                      }
                     }
-                  }
-                : undefined
-            }
-            className={`relative flex h-64 w-64 items-center justify-center ${
-              isRetentionTapTarget ? "cursor-pointer select-none" : ""
-            }`}
-          >
-            <div
-              aria-hidden="true"
-              style={{ transform: `scale(${outerScale.toFixed(3)})` }}
-              className={`pointer-events-none absolute h-60 w-60 rounded-full transition-colors duration-500 ${
-                isAmberStage
-                  ? "bg-[var(--warm-amber)]/12"
-                  : "bg-[var(--accent)]/12"
+                  : undefined
+              }
+              className={`relative flex h-64 w-64 items-center justify-center ${
+                isRetentionTapTarget ? "cursor-pointer select-none" : ""
               }`}
-            />
-            <div
-              aria-hidden="true"
-              style={{ transform: `scale(${midScale.toFixed(3)})` }}
-              className={`pointer-events-none absolute h-48 w-48 rounded-full transition-colors duration-500 ${
-                isAmberStage
-                  ? "bg-[var(--warm-amber)]/18"
-                  : "bg-[var(--accent)]/18"
-              }`}
-            />
-            <div
-              aria-hidden="true"
-              style={{ transform: `scale(${innerScale.toFixed(3)})` }}
-              className={`pointer-events-none absolute h-40 w-40 rounded-full border transition-colors duration-500 ${
-                isAmberStage
-                  ? "border-[var(--warm-amber)]/35 bg-[var(--surface)] shadow-sm"
-                  : "border-[var(--accent)]/25 bg-[var(--surface)] shadow-sm"
-              }`}
-            />
-
-            {/* Minimal progress arc */}
-            <svg
-              width={ARC_SIZE}
-              height={ARC_SIZE}
-              viewBox={`0 0 ${ARC_SIZE} ${ARC_SIZE}`}
-              className="pointer-events-none relative z-10 -rotate-90"
             >
-              <circle
-                cx={ARC_SIZE / 2}
-                cy={ARC_SIZE / 2}
-                r={ARC_RADIUS}
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={ARC_STROKE}
-                className="text-black/6 dark:text-white/10"
-              />
-              <circle
-                cx={ARC_SIZE / 2}
-                cy={ARC_SIZE / 2}
-                r={ARC_RADIUS}
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={ARC_STROKE}
-                strokeLinecap="round"
-                strokeDasharray={ARC_CIRCUMFERENCE}
-                strokeDashoffset={arcOffset}
-                className={
+              <div
+                aria-hidden="true"
+                style={{ transform: `scale(${outerScale.toFixed(3)})` }}
+                className={`pointer-events-none absolute h-60 w-60 rounded-full transition-colors duration-500 ${
                   isAmberStage
-                    ? "text-[var(--warm-amber)]"
-                    : "text-[var(--accent)]"
-                }
-              />
-            </svg>
-
-            <div className="pointer-events-none absolute inset-0 z-20 flex flex-col items-center justify-center px-6 text-center">
-              <span className="text-sm font-medium tracking-tight text-[var(--foreground)]">
-                {orbPrimaryLabel}
-              </span>
-              <span
-                className={`mt-0.5 font-mono font-medium tracking-tight text-[var(--foreground)] tabular-nums ${
-                  stage === "power" ? "text-2xl" : "text-3xl"
+                    ? "bg-[var(--warm-amber)]/12"
+                    : "bg-[var(--accent)]/12"
                 }`}
+              />
+              <div
+                aria-hidden="true"
+                style={{ transform: `scale(${midScale.toFixed(3)})` }}
+                className={`pointer-events-none absolute h-48 w-48 rounded-full transition-colors duration-500 ${
+                  isAmberStage
+                    ? "bg-[var(--warm-amber)]/18"
+                    : "bg-[var(--accent)]/18"
+                }`}
+              />
+              <div
+                aria-hidden="true"
+                style={{ transform: `scale(${innerScale.toFixed(3)})` }}
+                className={`pointer-events-none absolute h-40 w-40 rounded-full border transition-colors duration-500 ${
+                  isAmberStage
+                    ? "border-[var(--warm-amber)]/35 bg-[var(--surface)] shadow-sm"
+                    : "border-[var(--accent)]/25 bg-[var(--surface)] shadow-sm"
+                }`}
+              />
+
+              {/* Minimal progress arc */}
+              <svg
+                width={ARC_SIZE}
+                height={ARC_SIZE}
+                viewBox={`0 0 ${ARC_SIZE} ${ARC_SIZE}`}
+                className="pointer-events-none relative z-10 -rotate-90"
               >
-                {orbCenterValue}
-              </span>
-              <span className="mt-1 text-[11px] leading-tight text-[var(--foreground-muted)] tabular-nums">
-                {orbCaption}
-              </span>
+                <circle
+                  cx={ARC_SIZE / 2}
+                  cy={ARC_SIZE / 2}
+                  r={ARC_RADIUS}
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={ARC_STROKE}
+                  className="text-black/6 dark:text-white/10"
+                />
+                <circle
+                  cx={ARC_SIZE / 2}
+                  cy={ARC_SIZE / 2}
+                  r={ARC_RADIUS}
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={ARC_STROKE}
+                  strokeLinecap="round"
+                  strokeDasharray={ARC_CIRCUMFERENCE}
+                  strokeDashoffset={arcOffset}
+                  className={
+                    isAmberStage
+                      ? "text-[var(--warm-amber)]"
+                      : "text-[var(--accent)]"
+                  }
+                />
+              </svg>
+
+              <div className="pointer-events-none absolute inset-0 z-20 flex flex-col items-center justify-center text-center">
+                <span className="max-w-[116px] text-sm leading-tight font-medium tracking-tight text-[var(--foreground)]">
+                  {orbPrimaryLabel}
+                </span>
+                <span
+                  className={`mt-1 font-mono font-medium tracking-tight text-[var(--foreground)] tabular-nums ${
+                    stage === "power" ? "text-2xl" : "text-3xl"
+                  }`}
+                >
+                  {orbCenterValue}
+                </span>
+              </div>
             </div>
+
+            <p className="min-h-5 px-4 text-center text-xs text-[var(--foreground-muted)]">
+              {orbHint ?? ""}
+            </p>
           </div>
 
           {/* Recorded round holds strip (appears once round 1 hold is done) */}
