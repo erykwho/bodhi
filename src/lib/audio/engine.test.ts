@@ -354,12 +354,18 @@ describe("MeditationAudioEngine Web Audio breath buffers & iOS resilience", () =
     // Subsequent strike plays directly from cached RAM AudioBuffer with zero extra fetch
     const oscCountBefore = createdOscillators.length;
     const fetchCountBefore = fetchSpy.mock.calls.length;
+    const gainCountBefore = ctx.createGain.mock.calls.length;
     engine.playBellSound("singing-bowl", 0.85);
     expect(fetchSpy.mock.calls.length).toBe(fetchCountBefore);
     expect(createdOscillators.length).toBe(oscCountBefore);
     expect(createdSources).toHaveLength(1);
     expect(createdSources[0]?.buffer?.duration).toBe(8.5);
     expect(createdSources[0]?.start).toHaveBeenCalledWith(10);
+    const bellGainNode = ctx.createGain.mock.results[gainCountBefore]?.value;
+    expect(bellGainNode?.gain.setValueAtTime).toHaveBeenCalledWith(
+      Math.pow(0.85, 0.85),
+      10
+    );
 
     engine.dispose();
   });

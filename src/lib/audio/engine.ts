@@ -338,8 +338,8 @@ export class MeditationAudioEngine implements MeditationAudioPort {
     if (!ctx) return;
 
     const outputGain = ctx.createGain();
-    // Slight gentle curve so 85% feels full and lower settings stay crisp
-    const gainScale = Math.pow(clampedVolume, 1.35);
+    // Fuller curve so bells project clearly across typical slider positions (50%-100%)
+    const gainScale = Math.pow(clampedVolume, 0.85);
     outputGain.gain.setValueAtTime(gainScale, ctx.currentTime);
     outputGain.connect(ctx.destination);
 

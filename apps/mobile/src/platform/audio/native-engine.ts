@@ -294,7 +294,7 @@ export class NativeMeditationAudioEngine implements MeditationAudioPort {
       const source = ctx.createBufferSource();
       const gain = ctx.createGain();
       source.buffer = cached;
-      gain.gain.value = clampedVol;
+      gain.gain.value = Math.pow(clampedVol, 0.85);
       source.connect(gain);
       gain.connect(ctx.destination);
       source.start();
@@ -316,7 +316,10 @@ export class NativeMeditationAudioEngine implements MeditationAudioPort {
     osc.type = "sine";
     osc.frequency.setValueAtTime(220, now);
     gain.gain.setValueAtTime(0.0001, now);
-    gain.gain.linearRampToValueAtTime(volume * 0.35, now + 0.015);
+    gain.gain.linearRampToValueAtTime(
+      Math.min(0.95, Math.pow(volume, 0.85) * 0.75),
+      now + 0.015
+    );
     gain.gain.exponentialRampToValueAtTime(0.0001, now + 3.2);
     osc.connect(gain);
     gain.connect(ctx.destination);

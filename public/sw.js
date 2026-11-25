@@ -1,4 +1,4 @@
-const CACHE_NAME = "bodhi-offline-v6";
+const CACHE_NAME = "bodhi-offline-v7";
 const USER_AUDIO_CACHE_NAME = "bodhi-user-audio-v1";
 
 const PRECACHE_URLS = [
