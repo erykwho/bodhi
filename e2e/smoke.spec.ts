@@ -308,7 +308,7 @@ test.describe("Bodhi E2E Smoke Suite (Mobile PWA)", () => {
     const healthBody = (await healthRes.json()) as { status: string };
     expect(healthBody.status).toBe("ok");
 
-    // Verify all 14 bundled CC0 audio samples (breath, bells, nature loops) serve cleanly for offline caching
+    // Verify all 13 bundled acoustic audio samples (breath, bells, nature loops) serve cleanly for offline caching
     const expectedAudioAssets: Array<{ path: string; minBytes: number }> = [
       { path: "/audio/breath-inhale-short.mp3", minBytes: 10_000 },
       { path: "/audio/breath-exhale-short.mp3", minBytes: 10_000 },
@@ -320,7 +320,6 @@ test.describe("Bodhi E2E Smoke Suite (Mobile PWA)", () => {
       { path: "/audio/bells/tibetan-healing-bowl.mp3", minBytes: 10_000 },
       { path: "/audio/bells/deep-gong.mp3", minBytes: 10_000 },
       { path: "/audio/bells/soft-chime.mp3", minBytes: 10_000 },
-      { path: "/audio/bells/crystal-bowl.mp3", minBytes: 10_000 },
       { path: "/audio/bells/wood-block.mp3", minBytes: 4_000 },
       { path: "/audio/ambient/gentle-rain.mp3", minBytes: 50_000 },
       { path: "/audio/ambient/ocean-waves.mp3", minBytes: 50_000 },

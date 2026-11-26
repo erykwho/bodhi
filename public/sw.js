@@ -1,4 +1,4 @@
-const CACHE_NAME = "bodhi-offline-v8";
+const CACHE_NAME = "bodhi-offline-v9";
 const USER_AUDIO_CACHE_NAME = "bodhi-user-audio-v1";
 
 const PRECACHE_URLS = [
@@ -18,7 +18,6 @@ const PRECACHE_URLS = [
   "/audio/bells/tibetan-healing-bowl.mp3",
   "/audio/bells/deep-gong.mp3",
   "/audio/bells/soft-chime.mp3",
-  "/audio/bells/crystal-bowl.mp3",
   "/audio/bells/wood-block.mp3",
   "/audio/ambient/gentle-rain.mp3",
   "/audio/ambient/ocean-waves.mp3",

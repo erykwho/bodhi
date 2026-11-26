@@ -377,8 +377,9 @@ export function MeditationTimer({
   const handlePreviewBell = useCallback(
     (soundId: BellSoundId) => {
       const audio = getAudioEngine();
+      setPreviewingSoundId(null);
       audio.unlock({ bells: [soundId] });
-      audio.playBellSound(soundId, bellVolume);
+      audio.previewBellSound(soundId, bellVolume);
     },
     [bellVolume, getAudioEngine]
   );

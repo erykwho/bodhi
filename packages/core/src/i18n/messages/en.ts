@@ -52,7 +52,6 @@ export const enMessages = {
       "tibetan-healing-bowl": "Tibetan Healing Bowl",
       "deep-gong": "Deep Gong",
       "soft-chime": "Soft Chime",
-      "crystal-bowl": "Crystal Bowl",
       "wood-block": "Wood Block",
     } satisfies Record<BellSoundId, string>,
     ambient: {
@@ -62,7 +61,6 @@ export const enMessages = {
       "brown-noise": "Brown Noise",
       "gentle-rain": "Gentle Rain",
       "ocean-waves": "Ocean Waves",
-      "warm-drone": "Warm Drone",
     } satisfies Record<AmbientSoundId, string>,
   },
   soundPicker: {

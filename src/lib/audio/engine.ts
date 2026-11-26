@@ -88,6 +88,11 @@ export class MeditationAudioEngine implements MeditationAudioPort {
   private isPreviewing = false;
   private previewTimeout: ReturnType<typeof setTimeout> | null = null;
   private bellStrikeTimeouts: Array<ReturnType<typeof setTimeout>> = [];
+  private activeBellPreview: {
+    source: AudioBufferSourceNode | null;
+    outputGain: GainNode;
+  } | null = null;
+  private bellPreviewToken = 0;
 
   /**
    * Requests the "playback" AudioSession category (iOS Safari 16.4+ / iOS 17-18+)
@@ -335,12 +340,19 @@ export class MeditationAudioEngine implements MeditationAudioPort {
   private playBellBufferNode(
     ctx: AudioContext,
     buffer: AudioBuffer,
-    outputGain: GainNode
+    outputGain: GainNode,
+    trackAsPreview: boolean = false
   ): void {
     const source = ctx.createBufferSource();
     source.buffer = buffer;
     source.connect(outputGain);
+    if (trackAsPreview) {
+      this.activeBellPreview = { source, outputGain };
+    }
     source.onended = () => {
+      if (trackAsPreview && this.activeBellPreview?.source === source) {
+        this.activeBellPreview = null;
+      }
       try {
         source.disconnect();
       } catch {
@@ -353,6 +365,100 @@ export class MeditationAudioEngine implements MeditationAudioPort {
       }
     };
     source.start(ctx.currentTime);
+  }
+
+  /**
+   * Immediately stops any active bell preview sound and cancels pending async decodes.
+   */
+  public stopBellPreview(): void {
+    this.bellPreviewToken += 1;
+    const active = this.activeBellPreview;
+    if (!active) return;
+    this.activeBellPreview = null;
+
+    if (active.source) {
+      try {
+        active.source.stop();
+      } catch {
+        // Ignore already-stopped nodes
+      }
+      try {
+        active.source.disconnect();
+      } catch {
+        // Ignore
+      }
+    }
+    try {
+      active.outputGain.disconnect();
+    } catch {
+      // Ignore
+    }
+  }
+
+  /**
+   * Plays an exclusive bell preview, stopping any active bell or ambient preview first
+   * so two preview sounds never overlap.
+   */
+  public previewBellSound(soundId: BellSoundId, volume: number = 0.85): void {
+    this.stopPreview();
+    if (soundId === "none") return;
+    const clampedVolume = Math.min(1, Math.max(0, volume));
+    if (clampedVolume <= 0.001) return;
+
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+
+    const token = ++this.bellPreviewToken;
+    const outputGain = ctx.createGain();
+    const gainScale = Math.pow(clampedVolume, 0.85);
+    outputGain.gain.setValueAtTime(gainScale, ctx.currentTime);
+    outputGain.connect(ctx.destination);
+
+    const option = getBellSoundOption(soundId);
+    if (option.kind === "file" && option.src) {
+      const cached = this.audioBuffers.get(option.src);
+      if (cached) {
+        this.playBellBufferNode(ctx, cached, outputGain, true);
+        return;
+      }
+
+      void this.loadAudioBuffer(ctx, option.src).then((decoded) => {
+        if (this.ctx !== ctx || this.bellPreviewToken !== token) {
+          try {
+            outputGain.disconnect();
+          } catch {
+            // Ignore
+          }
+          return;
+        }
+        if (decoded) {
+          this.playBellBufferNode(ctx, decoded, outputGain, true);
+          return;
+        }
+        if (this.isOffline()) {
+          this.activeBellPreview = { source: null, outputGain };
+          this.playSynthBellFallback(ctx, soundId, outputGain);
+        } else {
+          try {
+            outputGain.disconnect();
+          } catch {
+            // Ignore
+          }
+        }
+      });
+      return;
+    }
+
+    if (this.isOffline()) {
+      this.activeBellPreview = { source: null, outputGain };
+      this.playSynthBellFallback(ctx, soundId, outputGain);
+    } else {
+      try {
+        outputGain.disconnect();
+      } catch {
+        // Ignore
+      }
+    }
   }
 
   private playSynthBellFallback(
@@ -372,9 +478,6 @@ export class MeditationAudioEngine implements MeditationAudioPort {
         break;
       case "soft-chime":
         this.playSoftChime(ctx, outputGain);
-        break;
-      case "crystal-bowl":
-        this.playCrystalBowl(ctx, outputGain);
         break;
       case "wood-block":
         this.playWoodBlock(ctx, outputGain);
@@ -896,28 +999,6 @@ export class MeditationAudioEngine implements MeditationAudioPort {
   }
 
   /**
-   * Pure quartz crystal bowl with serene beating and smooth bloom.
-   */
-  private playCrystalBowl(ctx: AudioContext, destination: AudioNode): void {
-    const now = ctx.currentTime;
-    const baseFreq = 432;
-    const duration = 9.5;
-
-    const partials: Array<{ ratio: number; gain: number; decay: number }> = [
-      { ratio: 1.0, gain: 0.26, decay: duration },
-      { ratio: 1.0028, gain: 0.19, decay: duration * 0.96 },
-      { ratio: 2.0, gain: 0.055, decay: duration * 0.64 },
-      { ratio: 3.0, gain: 0.02, decay: duration * 0.38 },
-    ];
-
-    this.playHarmonicTone(ctx, destination, now, baseFreq, partials, {
-      attack: 0.14,
-      masterPeak: 0.72,
-      duration,
-    });
-  }
-
-  /**
    * Crisp organic temple wood block (mokugyo) tap.
    */
   private playWoodBlock(ctx: AudioContext, destination: AudioNode): void {
@@ -1367,95 +1448,49 @@ export class MeditationAudioEngine implements MeditationAudioPort {
       return { sources, nodes, masterGain, gainCeiling: 0.36 };
     }
 
-    if (soundId === "ocean-waves") {
-      const source = ctx.createBufferSource();
-      source.buffer = this.getBrownNoiseBuffer(ctx);
-      source.loop = true;
+    // "ocean-waves": slow ~9s wave swell modulating both filter cutoff and amplitude
+    const source = ctx.createBufferSource();
+    source.buffer = this.getBrownNoiseBuffer(ctx);
+    source.loop = true;
 
-      const filter = ctx.createBiquadFilter();
-      filter.type = "lowpass";
-      filter.frequency.setValueAtTime(520, now);
-      filter.Q.setValueAtTime(0.7, now);
-
-      const swellGain = ctx.createGain();
-      swellGain.gain.setValueAtTime(0.65, now);
-
-      // Slow ~9s wave swell modulating both filter cutoff and amplitude
-      const waveLfo = ctx.createOscillator();
-      waveLfo.type = "sine";
-      waveLfo.frequency.setValueAtTime(0.11, now);
-
-      const filterLfoGain = ctx.createGain();
-      filterLfoGain.gain.setValueAtTime(320, now);
-
-      const ampLfoGain = ctx.createGain();
-      ampLfoGain.gain.setValueAtTime(0.3, now);
-
-      waveLfo.connect(filterLfoGain);
-      filterLfoGain.connect(filter.frequency);
-
-      waveLfo.connect(ampLfoGain);
-      ampLfoGain.connect(swellGain.gain);
-
-      source.connect(filter);
-      filter.connect(swellGain);
-      swellGain.connect(masterGain);
-
-      sources.push(source, waveLfo);
-      nodes.push(
-        source,
-        filter,
-        swellGain,
-        waveLfo,
-        filterLfoGain,
-        ampLfoGain
-      );
-      return { sources, nodes, masterGain, gainCeiling: 0.48 };
-    }
-
-    // "warm-drone": meditative tanpura-inspired harmonic pad
     const filter = ctx.createBiquadFilter();
     filter.type = "lowpass";
-    filter.frequency.setValueAtTime(540, now);
-    filter.Q.setValueAtTime(0.6, now);
+    filter.frequency.setValueAtTime(520, now);
+    filter.Q.setValueAtTime(0.7, now);
 
-    const droneLfo = ctx.createOscillator();
-    droneLfo.type = "sine";
-    droneLfo.frequency.setValueAtTime(0.08, now);
+    const swellGain = ctx.createGain();
+    swellGain.gain.setValueAtTime(0.65, now);
 
-    const droneLfoGain = ctx.createGain();
-    droneLfoGain.gain.setValueAtTime(110, now);
-    droneLfo.connect(droneLfoGain);
-    droneLfoGain.connect(filter.frequency);
+    const waveLfo = ctx.createOscillator();
+    waveLfo.type = "sine";
+    waveLfo.frequency.setValueAtTime(0.11, now);
 
-    const voices: Array<{
-      freq: number;
-      type: OscillatorType;
-      gain: number;
-    }> = [
-      { freq: 108, type: "sine", gain: 0.34 },
-      { freq: 108.35, type: "sine", gain: 0.2 },
-      { freq: 162, type: "triangle", gain: 0.14 },
-      { freq: 216, type: "sine", gain: 0.12 },
-    ];
+    const filterLfoGain = ctx.createGain();
+    filterLfoGain.gain.setValueAtTime(320, now);
 
-    for (const voice of voices) {
-      const osc = ctx.createOscillator();
-      const voiceGain = ctx.createGain();
-      osc.type = voice.type;
-      osc.frequency.setValueAtTime(voice.freq, now);
-      voiceGain.gain.setValueAtTime(voice.gain, now);
-      osc.connect(voiceGain);
-      voiceGain.connect(filter);
-      sources.push(osc);
-      nodes.push(osc, voiceGain);
-    }
+    const ampLfoGain = ctx.createGain();
+    ampLfoGain.gain.setValueAtTime(0.3, now);
 
-    filter.connect(masterGain);
-    sources.push(droneLfo);
-    nodes.push(filter, droneLfo, droneLfoGain);
+    waveLfo.connect(filterLfoGain);
+    filterLfoGain.connect(filter.frequency);
 
-    return { sources, nodes, masterGain, gainCeiling: 0.34 };
+    waveLfo.connect(ampLfoGain);
+    ampLfoGain.connect(swellGain.gain);
+
+    source.connect(filter);
+    filter.connect(swellGain);
+    swellGain.connect(masterGain);
+
+    sources.push(source, waveLfo);
+    nodes.push(
+      source,
+      filter,
+      swellGain,
+      waveLfo,
+      filterLfoGain,
+      ampLfoGain
+    );
+    return { sources, nodes, masterGain, gainCeiling: 0.48 };
   }
 
   /**
@@ -1515,6 +1550,7 @@ export class MeditationAudioEngine implements MeditationAudioPort {
     onEnded?: () => void,
     durationMs = 8000
   ): void {
+    this.stopBellPreview();
     if (soundId === "silence") {
       this.stopPreview();
       onEnded?.();
@@ -1533,6 +1569,7 @@ export class MeditationAudioEngine implements MeditationAudioPort {
   }
 
   public stopPreview(): void {
+    this.stopBellPreview();
     if (this.isPreviewing) {
       this.stopAmbient(0.3);
     }
@@ -1545,6 +1582,7 @@ export class MeditationAudioEngine implements MeditationAudioPort {
 
   public dispose(): void {
     this.clearPreviewTimer();
+    this.stopBellPreview();
     this.cancelBellStrikes();
     this.stopBreathingCue(0);
     this.ambientPlayToken += 1;
