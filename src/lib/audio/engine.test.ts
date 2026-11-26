@@ -343,24 +343,27 @@ describe("MeditationAudioEngine Web Audio breath buffers & iOS resilience", () =
 
     const engine = new MeditationAudioEngine();
 
-    // First uncached hit: falls back seamlessly to synthesis while preloading MP3
+    // First uncached hit while online: loads & plays real acoustic MP3 (zero synth oscillators)
     engine.playBellSound("singing-bowl", 0.85);
-    expect(createdOscillators.length).toBeGreaterThan(0);
+    expect(createdOscillators.length).toBe(0);
     expect(fetchSpy).toHaveBeenCalledWith("/audio/bells/singing-bowl.mp3");
 
     // Wait for async decode to finish
     await new Promise((r) => setTimeout(r, 0));
+    expect(createdOscillators.length).toBe(0);
+    expect(createdSources).toHaveLength(1);
+    expect(createdSources[0]?.buffer?.duration).toBe(8.5);
+    expect(createdSources[0]?.start).toHaveBeenCalledWith(10);
 
     // Subsequent strike plays directly from cached RAM AudioBuffer with zero extra fetch
-    const oscCountBefore = createdOscillators.length;
     const fetchCountBefore = fetchSpy.mock.calls.length;
     const gainCountBefore = ctx.createGain.mock.calls.length;
     engine.playBellSound("singing-bowl", 0.85);
     expect(fetchSpy.mock.calls.length).toBe(fetchCountBefore);
-    expect(createdOscillators.length).toBe(oscCountBefore);
-    expect(createdSources).toHaveLength(1);
-    expect(createdSources[0]?.buffer?.duration).toBe(8.5);
-    expect(createdSources[0]?.start).toHaveBeenCalledWith(10);
+    expect(createdOscillators.length).toBe(0);
+    expect(createdSources).toHaveLength(2);
+    expect(createdSources[1]?.buffer?.duration).toBe(8.5);
+    expect(createdSources[1]?.start).toHaveBeenCalledWith(10);
     const bellGainNode = ctx.createGain.mock.results[gainCountBefore]?.value;
     expect(bellGainNode?.gain.setValueAtTime).toHaveBeenCalledWith(
       Math.pow(0.85, 0.85),
@@ -370,7 +373,41 @@ describe("MeditationAudioEngine Web Audio breath buffers & iOS resilience", () =
     engine.dispose();
   });
 
-  it("preloads and loops cached nature ambient samples and crossfades on first uncached start", async () => {
+  it("uses synthesized bell fallback on Web only when offline and asset loading fails", async () => {
+    const { ctx, createdOscillators } = createFakeAudioContext("running");
+    (globalThis as unknown as { window: Record<string, unknown> }).window = {
+      AudioContext: vi.fn(function () {
+        return ctx;
+      }),
+    };
+
+    const failingFetch = vi.fn(() => Promise.reject(new Error("Offline")));
+    globalThis.fetch = failingFetch as typeof fetch;
+
+    const engine = new MeditationAudioEngine();
+
+    // Online + failed fetch -> does NOT play synthesized fallback
+    Object.defineProperty(globalThis, "navigator", {
+      value: { onLine: true },
+      configurable: true,
+    });
+    engine.playBellSound("deep-gong", 0.85);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(createdOscillators.length).toBe(0);
+
+    // Offline + failed fetch -> falls back to Web Audio synthesis
+    Object.defineProperty(globalThis, "navigator", {
+      value: { onLine: false },
+      configurable: true,
+    });
+    engine.playBellSound("deep-gong", 0.85);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(createdOscillators.length).toBeGreaterThan(0);
+
+    engine.dispose();
+  });
+
+  it("preloads and loops cached nature ambient samples and decodes uncached files directly online", async () => {
     const { ctx, createdSources } = createFakeAudioContext("running");
     (globalThis as unknown as { window: Record<string, unknown> }).window = {
       AudioContext: vi.fn(function () {
@@ -406,10 +443,12 @@ describe("MeditationAudioEngine Web Audio breath buffers & iOS resilience", () =
     expect(createdSources[0]?.loop).toBe(true);
     expect(createdSources[0]?.buffer?.duration).toBe(16.0);
 
-    // Starting uncached ocean-waves plays synth fallback immediately then upgrades to file loop
+    // Starting uncached ocean-waves loads the real file loop directly (no synth flash online)
     engine.startAmbient("ocean-waves", 0.4, 0.8);
     expect(fetchSpy).toHaveBeenCalledWith("/audio/ambient/ocean-waves.mp3");
+    expect(createdSources).toHaveLength(1);
     await new Promise((r) => setTimeout(r, 0));
+    expect(createdSources).toHaveLength(2);
     const latestSource = createdSources[createdSources.length - 1];
     expect(latestSource?.loop).toBe(true);
     expect(latestSource?.buffer?.duration).toBe(16.0);
