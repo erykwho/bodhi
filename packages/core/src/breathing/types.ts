@@ -34,7 +34,6 @@ export interface RetentionConfig {
   breathsPerRound: number;
   pace: RetentionPaceId;
   recoveryHoldSec: number;
-  retentionMinuteChime: boolean;
 }
 
 export interface BreathingPatternPreset {
@@ -122,7 +121,6 @@ export const DEFAULT_RETENTION_CONFIG: RetentionConfig = {
   breathsPerRound: DEFAULT_RETENTION_BREATHS,
   pace: "standard",
   recoveryHoldSec: DEFAULT_RECOVERY_HOLD_SEC,
-  retentionMinuteChime: true,
 };
 
 export interface BreathingPreferences {

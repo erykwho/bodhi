@@ -225,8 +225,6 @@ export const esMessages: Messages = {
     retentionSheetSubtitle: "Respiraciones cíclicas, apnea sin aire y recuperación",
     breathsPerRoundLabel: "Respiraciones por ronda",
     recoveryHoldLabel: "Retención de recuperación",
-    minuteChimeLabel: "Campana cada minuto en retención",
-    minuteChimeSubtitle: "Toque suave cada 60s para marcar el tiempo con ojos cerrados",
     safetyNoticeShort: "Practica sentado o acostado · nunca en el agua ni conduciendo",
     safetyNoticeTitle: "Aviso de seguridad",
     safetyNoticeBody:

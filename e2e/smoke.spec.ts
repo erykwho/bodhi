@@ -180,6 +180,7 @@ test.describe("Bodhi E2E Smoke Suite (Mobile PWA)", () => {
     await expect(page.getByLabel("4 × 30")).toBeVisible();
     await page.getByRole("button", { name: "Rápido", exact: true }).click();
     await page.getByRole("button", { name: /^Protocolo/ }).click();
+    await expect(page.getByRole("dialog").getByRole("switch")).toHaveCount(0);
     await page.getByRole("button", { name: "20", exact: true }).click();
     await page.getByRole("button", { name: "Concluir", exact: true }).click();
     await expect(page.getByLabel("4 × 20")).toBeVisible();

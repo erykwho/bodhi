@@ -41,7 +41,6 @@ import { nativeAudioEngine } from "../../platform/audio/native-engine";
 import {
   triggerBellHaptic,
   triggerBreathPhaseHaptic,
-  triggerRetentionMinuteHaptic,
   triggerSelectionHaptic,
   triggerSuccessHaptic,
 } from "../../platform/haptics";
@@ -84,7 +83,6 @@ export function BreathingView({ onContinueToMeditation }: BreathingViewProps) {
   const startEpochRef = useRef<number>(0);
   const stageStartEpochRef = useRef<number>(0);
   const lastStepIndexRef = useRef<number>(-1);
-  const lastMinuteChimeRef = useRef<number>(0);
   const sessionStartedIsoRef = useRef<string>("");
 
   useKeepAwake(status === "running" ? "bodhi-breathing" : undefined);
@@ -162,7 +160,6 @@ export function BreathingView({ onContinueToMeditation }: BreathingViewProps) {
     startEpochRef.current = now;
     stageStartEpochRef.current = now;
     lastStepIndexRef.current = -1;
-    lastMinuteChimeRef.current = 0;
 
     setElapsedMs(0);
     setRoundIndex(1);
@@ -280,7 +277,6 @@ export function BreathingView({ onContinueToMeditation }: BreathingViewProps) {
           );
           if (pSnap.isComplete) {
             stageStartEpochRef.current = now;
-            lastMinuteChimeRef.current = 0;
             setStage("retention");
             setStageElapsedMs(0);
             triggerBreathPhaseHaptic("holdOut", prefs.hapticsEnabled);
@@ -295,16 +291,6 @@ export function BreathingView({ onContinueToMeditation }: BreathingViewProps) {
               0.8,
               pSnap.phaseDurationMs / 1000
             );
-          }
-        } else if (stage === "retention") {
-          const minuteMark = Math.floor(sElapsed / 60_000);
-          if (
-            prefs.retention.retentionMinuteChime &&
-            minuteMark > lastMinuteChimeRef.current
-          ) {
-            lastMinuteChimeRef.current = minuteMark;
-            triggerRetentionMinuteHaptic(prefs.hapticsEnabled);
-            nativeAudioEngine.playBellSound("soft-chime", 0.4);
           }
         } else if (stage === "recoveryInhale") {
           if (sElapsed >= RECOVERY_INHALE_SEC * 1000) {

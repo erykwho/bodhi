@@ -48,7 +48,7 @@ describe("breathing preferences", () => {
     });
   });
 
-  it("parses valid retention preferences and clamps out-of-range values", () => {
+  it("parses valid retention preferences, ignores legacy retentionMinuteChime, and clamps out-of-range values", () => {
     const parsed = parseBreathingPreferences({
       mode: "retention",
       retention: {
@@ -56,7 +56,7 @@ describe("breathing preferences", () => {
         breathsPerRound: 40,
         pace: "fast",
         recoveryHoldSec: 18,
-        retentionMinuteChime: false,
+        retentionMinuteChime: true,
       },
     });
 
@@ -66,7 +66,6 @@ describe("breathing preferences", () => {
       breathsPerRound: 40,
       pace: "fast",
       recoveryHoldSec: 18,
-      retentionMinuteChime: false,
     });
 
     const sanitized = parseBreathingPreferences({
@@ -94,7 +93,6 @@ describe("breathing preferences", () => {
       breathsPerRound: 15,
       pace: "standard",
       recoveryHoldSec: 20,
-      retentionMinuteChime: true,
     });
     expect(sanitized.cueMode).toBe(DEFAULT_BREATHING_PREFERENCES.cueMode);
     expect(sanitized.hapticsEnabled).toBe(true);

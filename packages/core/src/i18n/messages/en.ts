@@ -225,8 +225,6 @@ export const enMessages = {
     retentionSheetSubtitle: "Cyclic breaths, empty-lung hold, and recovery breath",
     breathsPerRoundLabel: "Breaths per round",
     recoveryHoldLabel: "Recovery hold",
-    minuteChimeLabel: "Minute chime during hold",
-    minuteChimeSubtitle: "Soft bell every 60s to mark elapsed retention time",
     safetyNoticeShort: "Practice seated or lying down · never in water or driving",
     safetyNoticeTitle: "Safety reminder",
     safetyNoticeBody:

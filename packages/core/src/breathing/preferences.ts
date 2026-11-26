@@ -109,10 +109,6 @@ function parseRetentionConfig(raw: unknown): RetentionConfig {
       typeof r.recoveryHoldSec === "number"
         ? r.recoveryHoldSec
         : DEFAULT_RETENTION_CONFIG.recoveryHoldSec,
-    retentionMinuteChime:
-      typeof r.retentionMinuteChime === "boolean"
-        ? r.retentionMinuteChime
-        : DEFAULT_RETENTION_CONFIG.retentionMinuteChime,
   });
 }
 
