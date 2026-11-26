@@ -58,6 +58,52 @@ test.describe("Bodhi E2E Smoke Suite (Mobile PWA)", () => {
     expect(errors).toEqual([]);
   });
 
+  test("timer duration supports inline click-to-edit with clamping, Escape cancel, and commit on start", async ({
+    page,
+  }) => {
+    const errors = trackRuntimeErrors(page);
+
+    await page.goto("/");
+
+    const editDurationTrigger = page
+      .getByRole("button", { name: "Editar duração em minutos" })
+      .first();
+    await expect(editDurationTrigger).toBeVisible();
+
+    // Edit to 25 minutes and confirm with Enter
+    await editDurationTrigger.click();
+    const durationInput = page.getByRole("textbox", {
+      name: "Duração em minutos",
+    });
+    await expect(durationInput).toBeFocused();
+    await durationInput.fill("25");
+    await durationInput.press("Enter");
+    await expect(page.getByText("25:00", { exact: true })).toBeVisible();
+    await expect(page.getByText("25 min", { exact: true })).toBeVisible();
+
+    // Out-of-range value clamps silently to 180 minutes (3:00:00)
+    await editDurationTrigger.click();
+    await durationInput.fill("999");
+    await durationInput.press("Enter");
+    await expect(page.getByText("3:00:00", { exact: true })).toBeVisible();
+
+    // Escape cancels and restores previous duration
+    await editDurationTrigger.click();
+    await durationInput.fill("7");
+    await durationInput.press("Escape");
+    await expect(page.getByText("3:00:00", { exact: true })).toBeVisible();
+
+    // Clicking Begin Session while editing commits and starts immediately
+    await editDurationTrigger.click();
+    await durationInput.fill("12");
+    await page.getByRole("button", { name: "Iniciar Sessão" }).click();
+    await expect(page.getByRole("button", { name: "Pausar" })).toBeVisible();
+    await page.getByRole("button", { name: "Encerrar" }).click();
+    await expect(page.getByText("12:00", { exact: true })).toBeVisible();
+
+    expect(errors).toEqual([]);
+  });
+
   test("V9 Open-Ended mode, Guided Breathing flow, and 3x closing bell persist cleanly", async ({
     page,
   }) => {

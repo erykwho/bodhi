@@ -172,3 +172,27 @@ export function formatDurationLabel(minutes: number): string {
   }
   return `${hours} h ${rem} min`;
 }
+
+/**
+ * Strips non-digit characters and caps inline duration input to 3 digits
+ * (since MAX_DURATION_MINUTES is 180).
+ */
+export function sanitizeDurationMinutesInput(raw: string): string {
+  return raw.replace(/\D/g, "").slice(0, 3);
+}
+
+/**
+ * Parses an inline duration input (in whole minutes) and clamps it into
+ * [MIN_DURATION_MINUTES, MAX_DURATION_MINUTES]. Returns the clamped fallback
+ * when the input contains no digits.
+ */
+export function parseDurationMinutesInput(
+  raw: string,
+  fallbackMinutes: number
+): number {
+  const digits = sanitizeDurationMinutesInput(raw);
+  if (digits.length === 0) {
+    return clampDurationMinutes(fallbackMinutes);
+  }
+  return clampDurationMinutes(Number.parseInt(digits, 10));
+}

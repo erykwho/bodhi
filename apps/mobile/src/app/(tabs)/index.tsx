@@ -36,6 +36,8 @@ import {
   computeOpenEndedIntervalBellIndex,
   formatElapsedDisplay,
   formatTimerDisplay,
+  parseDurationMinutesInput,
+  sanitizeDurationMinutesInput,
 } from "@bodhi/core/timer/engine";
 import {
   doesPresetMatchPreferences,
@@ -91,11 +93,14 @@ export default function TimerTabScreen() {
   const [showEarlyFinish, setShowEarlyFinish] = useState(false);
   const [savingPreset, setSavingPreset] = useState(false);
   const [presetNameInput, setPresetNameInput] = useState("");
+  const [isEditingDuration, setIsEditingDuration] = useState(false);
+  const [durationDraft, setDurationDraft] = useState("");
 
   const startEpochRef = useRef<number>(0);
   const warmupEndEpochRef = useRef<number>(0);
   const sessionStartedIsoRef = useRef<string>("");
   const lastIntervalIndexRef = useRef<number>(0);
+  const skipDurationBlurCommitRef = useRef<boolean>(false);
 
   const isRunning = phase === "warmup" || phase === "running";
   useKeepAwake(isRunning ? "bodhi-timer" : undefined);
@@ -145,13 +150,16 @@ export default function TimerTabScreen() {
   );
 
   const startActiveRunning = useCallback(
-    (now: number) => {
+    (now: number, overrideDurationMinutes?: number) => {
+      const effectiveDurationMinutes =
+        overrideDurationMinutes ?? prefs.durationMinutes;
+      const effectivePlannedMs = effectiveDurationMinutes * 60 * 1000;
       startEpochRef.current = now;
       sessionStartedIsoRef.current = new Date(now).toISOString();
       lastIntervalIndexRef.current = 0;
       setPhase("running");
       setElapsedMs(0);
-      setRemainingMs(totalPlannedMs);
+      setRemainingMs(effectivePlannedMs);
 
       triggerBellHaptic();
       nativeAudioEngine.playBellSound(prefs.startBell, prefs.bellVolume);
@@ -163,8 +171,10 @@ export default function TimerTabScreen() {
       nativeAudioEngine.updateLockScreen({
         title: prefs.openEnded
           ? "Open Meditation"
-          : `Meditation · ${prefs.durationMinutes}m`,
-        durationSec: prefs.openEnded ? undefined : prefs.durationMinutes * 60,
+          : `Meditation · ${effectiveDurationMinutes}m`,
+        durationSec: prefs.openEnded
+          ? undefined
+          : effectiveDurationMinutes * 60,
         elapsedSec: 0,
         state: "playing",
       });
@@ -176,11 +186,35 @@ export default function TimerTabScreen() {
       prefs.durationMinutes,
       prefs.openEnded,
       prefs.startBell,
-      totalPlannedMs,
     ]
   );
 
+  const handleStartEditingDuration = () => {
+    if (phase !== "idle" || prefs.openEnded) return;
+    triggerSelectionHaptic();
+    skipDurationBlurCommitRef.current = false;
+    setDurationDraft(String(prefs.durationMinutes));
+    setIsEditingDuration(true);
+  };
+
+  const handleCommitDurationEdit = (): number => {
+    const nextMinutes = parseDurationMinutesInput(
+      durationDraft,
+      prefs.durationMinutes
+    );
+    setIsEditingDuration(false);
+    updatePrefs({ durationMinutes: nextMinutes, openEnded: false });
+    setRemainingMs(nextMinutes * 60 * 1000);
+    return nextMinutes;
+  };
+
   const handleBegin = () => {
+    let committedDurationMinutes = prefs.durationMinutes;
+    if (isEditingDuration && !prefs.openEnded) {
+      skipDurationBlurCommitRef.current = true;
+      committedDurationMinutes = handleCommitDurationEdit();
+    }
+
     nativeAudioEngine.unlock({
       bells: [prefs.startBell, prefs.endBell, prefs.intervalBell],
       ambientSound: prefs.ambientSound,
@@ -193,7 +227,7 @@ export default function TimerTabScreen() {
       setPhase("warmup");
       nativeAudioEngine.startBackgroundKeepAlive();
     } else {
-      startActiveRunning(now);
+      startActiveRunning(now, committedDurationMinutes);
     }
   };
 
@@ -333,6 +367,8 @@ export default function TimerTabScreen() {
   const switchSubMode = (next: SubMode) => {
     if (phase !== "idle" && phase !== "completed") return;
     triggerSelectionHaptic();
+    skipDurationBlurCommitRef.current = true;
+    setIsEditingDuration(false);
     setSubMode(next);
     if (next === "open") {
       updatePrefs({ openEnded: true });
@@ -379,6 +415,7 @@ export default function TimerTabScreen() {
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
       >
         {/* Subtle Timer · Open · Breathe selector */}
         {phase === "idle" || phase === "completed" ? (
@@ -434,6 +471,27 @@ export default function TimerTabScreen() {
               primaryText={dialPrimary}
               secondaryText={dialSecondary}
               accentTone={phase === "warmup" ? "amber" : "sage"}
+              editable={phase === "idle" && !prefs.openEnded}
+              isEditing={isEditingDuration && phase === "idle" && !prefs.openEnded}
+              editValue={durationDraft}
+              editUnit={m.timer.minutesUnit}
+              editAccessibilityLabel={m.timer.editDurationAria}
+              inputAccessibilityLabel={m.timer.durationMinutesInputAria}
+              onPressPrimary={handleStartEditingDuration}
+              onChangeEditValue={(text) =>
+                setDurationDraft(sanitizeDurationMinutesInput(text))
+              }
+              onSubmitEdit={() => {
+                skipDurationBlurCommitRef.current = true;
+                handleCommitDurationEdit();
+              }}
+              onBlurEdit={() => {
+                if (skipDurationBlurCommitRef.current) {
+                  skipDurationBlurCommitRef.current = false;
+                  return;
+                }
+                handleCommitDurationEdit();
+              }}
             />
 
             {/* Duration Presets (Timer mode, idle) */}
@@ -446,6 +504,8 @@ export default function TimerTabScreen() {
                       key={mins}
                       onPress={() => {
                         triggerSelectionHaptic();
+                        skipDurationBlurCommitRef.current = true;
+                        setIsEditingDuration(false);
                         updatePrefs({ durationMinutes: mins });
                         setRemainingMs(mins * 60 * 1000);
                       }}
@@ -577,7 +637,12 @@ export default function TimerTabScreen() {
                             key={preset.id}
                             onPress={() => {
                               triggerSelectionHaptic();
+                              skipDurationBlurCommitRef.current = true;
+                              setIsEditingDuration(false);
                               updatePrefs(preset.preferences);
+                              setRemainingMs(
+                                preset.preferences.durationMinutes * 60 * 1000
+                              );
                               setSubMode(
                                 preset.preferences.openEnded ? "open" : "timer"
                               );

@@ -64,6 +64,8 @@ import {
   formatDurationLabel,
   formatElapsedDisplay,
   formatTimerDisplay,
+  parseDurationMinutesInput,
+  sanitizeDurationMinutesInput,
 } from "@/lib/timer/engine";
 import {
   getTimerPreferencesServerSnapshot,
@@ -147,6 +149,18 @@ export function MeditationTimer({
   const [presets, setPresets] = useState<TimerPresetItem[]>(initialPresets);
   const [isSavingPreset, setIsSavingPreset] = useState<boolean>(false);
   const [isDimmed, setIsDimmed] = useState<boolean>(false);
+
+  // Inline editable timer duration state
+  const [isEditingDuration, setIsEditingDuration] = useState<boolean>(false);
+  const [durationDraft, setDurationDraft] = useState<string>("");
+  const durationInputRef = useRef<HTMLInputElement | null>(null);
+  const skipDurationBlurCommitRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    if (!isEditingDuration) return;
+    durationInputRef.current?.focus();
+    durationInputRef.current?.select();
+  }, [isEditingDuration]);
 
   // Hydrate local presets when signed out or offline, and cache cloud presets locally
   useEffect(() => {
@@ -364,8 +378,29 @@ export function MeditationTimer({
 
   const handleDurationChange = useCallback((nextMinutes: number) => {
     const clamped = clampDurationMinutes(nextMinutes);
+    setIsEditingDuration(false);
     updateTimerPreferences({ durationMinutes: clamped, openEnded: false });
     setRemainingMs(clamped * 60 * 1000);
+  }, []);
+
+  const handleStartEditingDuration = useCallback(() => {
+    skipDurationBlurCommitRef.current = false;
+    setDurationDraft(String(durationMinutes));
+    setIsEditingDuration(true);
+  }, [durationMinutes]);
+
+  const handleCommitDurationEdit = useCallback((): number => {
+    const nextMinutes = parseDurationMinutesInput(
+      durationDraft,
+      durationMinutes
+    );
+    handleDurationChange(nextMinutes);
+    return nextMinutes;
+  }, [durationDraft, durationMinutes, handleDurationChange]);
+
+  const handleCancelDurationEdit = useCallback(() => {
+    skipDurationBlurCommitRef.current = true;
+    setIsEditingDuration(false);
   }, []);
 
   const handleIntervalMinutesChange = useCallback((nextMinutes: number) => {
@@ -443,6 +478,21 @@ export function MeditationTimer({
   }, [ambientVolume, getAudioEngine, isAmbientMuted, phase, selectedSound]);
 
   const handleStart = useCallback(() => {
+    let effectiveTotalSessionMs = totalSessionMs;
+    if (isEditingDuration && !openEnded) {
+      skipDurationBlurCommitRef.current = true;
+      const committedMinutes = parseDurationMinutesInput(
+        durationDraft,
+        durationMinutes
+      );
+      setIsEditingDuration(false);
+      updateTimerPreferences({
+        durationMinutes: committedMinutes,
+        openEnded: false,
+      });
+      effectiveTotalSessionMs = committedMinutes * 60 * 1000;
+    }
+
     const audio = getAudioEngine();
     audio.unlock({
       bells: [startBell, endBell, ...(intervalEnabled ? [intervalBell] : [])],
@@ -476,8 +526,8 @@ export function MeditationTimer({
         openSegmentStartRef.current = Date.now();
         setOpenElapsedMs(0);
       } else {
-        endTimeRef.current = Date.now() + totalSessionMs;
-        setRemainingMs(totalSessionMs);
+        endTimeRef.current = Date.now() + effectiveTotalSessionMs;
+        setRemainingMs(effectiveTotalSessionMs);
       }
       setPhase("running");
       audio.playBellSound(startBell, bellVolume);
@@ -488,10 +538,13 @@ export function MeditationTimer({
   }, [
     ambientVolume,
     bellVolume,
+    durationDraft,
+    durationMinutes,
     endBell,
     getAudioEngine,
     intervalBell,
     intervalEnabled,
+    isEditingDuration,
     openEnded,
     selectedSound,
     startBell,
@@ -776,6 +829,8 @@ export function MeditationTimer({
     (nextSubMode: PracticeSubMode) => {
       stopPreview();
       setActiveSoundSheet(null);
+      skipDurationBlurCommitRef.current = true;
+      setIsEditingDuration(false);
       if (nextSubMode === "breathe") {
         setIsBreathingMode(true);
         return;
@@ -884,6 +939,8 @@ export function MeditationTimer({
   const handleApplyPreset = useCallback(
     (preset: TimerPresetItem) => {
       stopPreview();
+      skipDurationBlurCommitRef.current = true;
+      setIsEditingDuration(false);
       updateTimerPreferences(preset.preferences);
       setRemainingMs(preset.preferences.durationMinutes * 60 * 1000);
     },
@@ -1029,12 +1086,62 @@ export function MeditationTimer({
                       <span className="text-[11px] font-medium tracking-[0.18em] text-[var(--foreground-muted)] uppercase">
                         {m.timer.duration}
                       </span>
-                      <span className="mt-1 font-mono text-4xl font-medium tracking-tight text-[var(--foreground)] tabular-nums">
-                        {formatTimerDisplay(totalSessionMs)}
-                      </span>
+                      {isEditingDuration ? (
+                        <div className="mt-1 flex items-baseline justify-center gap-1 rounded-xl border border-[var(--accent)]/50 bg-[var(--surface-muted)]/70 px-2.5 py-0.5">
+                          <input
+                            ref={durationInputRef}
+                            type="text"
+                            inputMode="numeric"
+                            pattern="[0-9]*"
+                            maxLength={3}
+                            value={durationDraft}
+                            onChange={(event) =>
+                              setDurationDraft(
+                                sanitizeDurationMinutesInput(event.target.value)
+                              )
+                            }
+                            onBlur={() => {
+                              if (skipDurationBlurCommitRef.current) {
+                                skipDurationBlurCommitRef.current = false;
+                                return;
+                              }
+                              handleCommitDurationEdit();
+                            }}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter") {
+                                event.preventDefault();
+                                skipDurationBlurCommitRef.current = true;
+                                handleCommitDurationEdit();
+                              } else if (event.key === "Escape") {
+                                event.preventDefault();
+                                handleCancelDurationEdit();
+                              }
+                            }}
+                            aria-label={m.timer.durationMinutesInputAria}
+                            className="w-[3.2ch] bg-transparent text-center font-mono text-4xl leading-none font-medium tracking-tight text-[var(--foreground)] tabular-nums focus:outline-none"
+                          />
+                          <span className="text-xs font-medium text-[var(--foreground-muted)]">
+                            {m.timer.minutesUnit}
+                          </span>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={handleStartEditingDuration}
+                          aria-label={m.timer.editDurationAria}
+                          className="mt-1 cursor-pointer rounded-xl border-b border-dashed border-black/15 px-2 py-0.5 font-mono text-4xl leading-none font-medium tracking-tight text-[var(--foreground)] tabular-nums transition-colors hover:border-[var(--accent)]/60 hover:bg-[var(--surface-muted)]/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]/50 dark:border-white/18"
+                        >
+                          {formatTimerDisplay(totalSessionMs)}
+                        </button>
+                      )}
                       <div className="mt-2 flex items-center gap-2">
                         <button
                           type="button"
+                          onPointerDown={() => {
+                            if (isEditingDuration) {
+                              skipDurationBlurCommitRef.current = true;
+                            }
+                          }}
                           onClick={() =>
                             handleDurationChange(durationMinutes - 1)
                           }
@@ -1044,11 +1151,21 @@ export function MeditationTimer({
                         >
                           <Minus className="h-3.5 w-3.5" />
                         </button>
-                        <span className="min-w-[3rem] text-center text-xs font-medium text-[var(--foreground-muted)] tabular-nums">
-                          {formatDurationLabel(durationMinutes)}
-                        </span>
                         <button
                           type="button"
+                          onClick={handleStartEditingDuration}
+                          aria-label={m.timer.editDurationAria}
+                          className="min-w-[3rem] cursor-pointer rounded-md px-1 py-0.5 text-center text-xs font-medium text-[var(--foreground-muted)] tabular-nums transition-colors hover:text-[var(--foreground)]"
+                        >
+                          {formatDurationLabel(durationMinutes)}
+                        </button>
+                        <button
+                          type="button"
+                          onPointerDown={() => {
+                            if (isEditingDuration) {
+                              skipDurationBlurCommitRef.current = true;
+                            }
+                          }}
                           onClick={() =>
                             handleDurationChange(durationMinutes + 1)
                           }
@@ -1072,6 +1189,11 @@ export function MeditationTimer({
                         <button
                           key={preset}
                           type="button"
+                          onPointerDown={() => {
+                            if (isEditingDuration) {
+                              skipDurationBlurCommitRef.current = true;
+                            }
+                          }}
                           onClick={() => handleDurationChange(preset)}
                           className={`h-10 rounded-xl text-sm font-medium whitespace-nowrap tabular-nums transition-colors ${
                             isSelected
