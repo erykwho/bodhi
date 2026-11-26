@@ -113,7 +113,6 @@ export function clampRetentionConfig(config: RetentionConfig): RetentionConfig {
     breathsPerRound: clampRetentionBreaths(config.breathsPerRound),
     pace: isRetentionPaceId(config.pace) ? config.pace : "standard",
     recoveryHoldSec: clampRecoveryHoldSec(config.recoveryHoldSec),
-    retentionMinuteChime: Boolean(config.retentionMinuteChime),
   };
 }
 

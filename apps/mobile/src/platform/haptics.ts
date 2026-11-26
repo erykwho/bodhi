@@ -25,11 +25,6 @@ export function triggerBreathPhaseHaptic(
   }
 }
 
-export function triggerRetentionMinuteHaptic(enabled: boolean): void {
-  if (!enabled) return;
-  void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-}
-
 export function triggerBellHaptic(): void {
   void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 }

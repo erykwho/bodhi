@@ -148,7 +148,6 @@ export function RetentionBreathing({
     breathsPerRound,
     pace,
     recoveryHoldSec,
-    retentionMinuteChime,
   } = retention;
 
   const paceRhythm = useMemo(() => resolveRetentionPaceRhythm(pace), [pace]);
@@ -190,7 +189,6 @@ export function RetentionBreathing({
   const currentRoundRef = useRef<number>(1);
   const holdsSecRef = useRef<number[]>([]);
   const lastPowerStepRef = useRef<number>(-1);
-  const lastRetentionMinuteRef = useRef<number>(0);
   const sessionStartedAtRef = useRef<string | null>(null);
   const audioRef = useRef<MeditationAudioEngine | null>(null);
 
@@ -254,7 +252,6 @@ export function RetentionBreathing({
 
   const enterRetentionStage = useCallback(
     (now: number) => {
-      lastRetentionMinuteRef.current = 0;
       transitionToStage("retention", now);
 
       const audio = getAudioEngine();
@@ -371,20 +368,6 @@ export function RetentionBreathing({
             }
           }
         }
-      } else if (activeStage === "retention") {
-        const elapsedMinutes = Math.floor(liveStage / 60_000);
-        if (
-          elapsedMinutes > lastRetentionMinuteRef.current &&
-          elapsedMinutes > 0
-        ) {
-          lastRetentionMinuteRef.current = elapsedMinutes;
-          if (retentionMinuteChime && cueMode !== "silent") {
-            getAudioEngine().playBellSound("soft-chime", bellVolume * 0.42);
-          }
-          if (hapticsEnabled) {
-            triggerHaptic(16);
-          }
-        }
       } else if (activeStage === "recoveryInhale") {
         const snap = computeRecoverySnapshot(
           "recoveryInhale",
@@ -473,7 +456,6 @@ export function RetentionBreathing({
     pace,
     paceRhythm.inhaleSec,
     recoveryHoldSec,
-    retentionMinuteChime,
     sessionPhase,
     totalRounds,
     transitionToStage,
@@ -616,7 +598,6 @@ export function RetentionBreathing({
     currentRoundRef.current = 1;
     holdsSecRef.current = [];
     lastPowerStepRef.current = 0;
-    lastRetentionMinuteRef.current = 0;
     sessionStartedAtRef.current = new Date(now).toISOString();
 
     setStage("power");
@@ -770,7 +751,6 @@ export function RetentionBreathing({
     currentRoundRef.current = 1;
     holdsSecRef.current = [];
     lastPowerStepRef.current = -1;
-    lastRetentionMinuteRef.current = 0;
     sessionStartedAtRef.current = null;
 
     audioRef.current?.stopBreathingCue(0.15);

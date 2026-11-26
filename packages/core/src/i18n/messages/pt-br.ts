@@ -224,8 +224,6 @@ export const ptBrMessages: Messages = {
     retentionSheetSubtitle: "Respirações cíclicas, apneia sem ar e recuperação",
     breathsPerRoundLabel: "Respirações por round",
     recoveryHoldLabel: "Retenção de recuperação",
-    minuteChimeLabel: "Sino a cada minuto na retenção",
-    minuteChimeSubtitle: "Toque suave a cada 60s para marcar o tempo sem abrir os olhos",
     safetyNoticeShort: "Pratique sentado ou deitado · nunca na água ou dirigindo",
     safetyNoticeTitle: "Aviso de segurança",
     safetyNoticeBody:

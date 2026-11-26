@@ -2,7 +2,6 @@
 
 import { useEffect } from "react";
 import {
-  Bell,
   Check,
   Minus,
   Play,
@@ -328,46 +327,6 @@ export function BreathingSheet({
                     <Plus className="h-3.5 w-3.5" />
                   </button>
                 </div>
-              </div>
-
-              {/* Minute chime toggle during empty-lung hold */}
-              <div className="flex items-center justify-between gap-3 rounded-2xl border border-black/6 bg-[var(--background)]/70 px-4 py-3 dark:border-white/8">
-                <div className="flex items-center gap-2.5">
-                  <Bell className="h-4 w-4 shrink-0 text-[var(--foreground-muted)]" />
-                  <div>
-                    <p className="text-sm font-medium text-[var(--foreground)]">
-                      {m.breathing.minuteChimeLabel}
-                    </p>
-                    <p className="text-[11px] text-[var(--foreground-muted)]">
-                      {m.breathing.minuteChimeSubtitle}
-                    </p>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={retentionConfig.retentionMinuteChime}
-                  aria-label={m.breathing.minuteChimeLabel}
-                  onClick={() =>
-                    onChangeRetentionConfig?.({
-                      ...retentionConfig,
-                      retentionMinuteChime: !retentionConfig.retentionMinuteChime,
-                    })
-                  }
-                  className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${
-                    retentionConfig.retentionMinuteChime
-                      ? "bg-[var(--accent)]"
-                      : "bg-black/15 dark:bg-white/20"
-                  }`}
-                >
-                  <span
-                    className={`inline-block h-5 w-5 transform rounded-full bg-white shadow-xs transition-transform ${
-                      retentionConfig.retentionMinuteChime
-                        ? "translate-x-5.5"
-                        : "translate-x-0.5"
-                    }`}
-                  />
-                </button>
               </div>
 
               {/* Safety reminder */}

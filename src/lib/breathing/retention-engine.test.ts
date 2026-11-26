@@ -32,14 +32,12 @@ describe("retention breathing engine", () => {
         breathsPerRound: 40,
         pace: "fast",
         recoveryHoldSec: 18,
-        retentionMinuteChime: false,
       })
     ).toEqual({
       rounds: 4,
       breathsPerRound: 40,
       pace: "fast",
       recoveryHoldSec: 18,
-      retentionMinuteChime: false,
     });
   });
 
