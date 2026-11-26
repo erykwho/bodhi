@@ -324,51 +324,42 @@ export class MeditationAudioEngine implements MeditationAudioPort {
     }
   }
 
-  /**
-   * Plays a meditation chime/bell by catalog ID at the given volume [0, 1].
-   * Uses the cached real acoustic AudioBuffer when decoded in RAM, and falls back
-   * seamlessly to Web Audio synthesis on first uncached hit while preloading the sample.
-   */
-  public playBellSound(soundId: BellSoundId, volume: number = 0.85): void {
-    if (soundId === "none") return;
-    const clampedVolume = Math.min(1, Math.max(0, volume));
-    if (clampedVolume <= 0.001) return;
+  private isOffline(): boolean {
+    return (
+      typeof navigator !== "undefined" &&
+      typeof navigator.onLine === "boolean" &&
+      navigator.onLine === false
+    );
+  }
 
-    const ctx = this.ensureContext();
-    if (!ctx) return;
-
-    const outputGain = ctx.createGain();
-    // Fuller curve so bells project clearly across typical slider positions (50%-100%)
-    const gainScale = Math.pow(clampedVolume, 0.85);
-    outputGain.gain.setValueAtTime(gainScale, ctx.currentTime);
-    outputGain.connect(ctx.destination);
-
-    const option = getBellSoundOption(soundId);
-    if (option.kind === "file" && option.src) {
-      const cached = this.audioBuffers.get(option.src);
-      if (cached) {
-        const source = ctx.createBufferSource();
-        source.buffer = cached;
-        source.connect(outputGain);
-        source.onended = () => {
-          try {
-            source.disconnect();
-          } catch {
-            // Ignore
-          }
-          try {
-            outputGain.disconnect();
-          } catch {
-            // Ignore
-          }
-        };
-        source.start(ctx.currentTime);
-        return;
+  private playBellBufferNode(
+    ctx: AudioContext,
+    buffer: AudioBuffer,
+    outputGain: GainNode
+  ): void {
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+    source.connect(outputGain);
+    source.onended = () => {
+      try {
+        source.disconnect();
+      } catch {
+        // Ignore
       }
-      // Preload in background so subsequent strikes play the real acoustic sample
-      void this.loadAudioBuffer(ctx, option.src);
-    }
+      try {
+        outputGain.disconnect();
+      } catch {
+        // Ignore
+      }
+    };
+    source.start(ctx.currentTime);
+  }
 
+  private playSynthBellFallback(
+    ctx: AudioContext,
+    soundId: BellSoundId,
+    outputGain: GainNode
+  ): void {
     switch (soundId) {
       case "singing-bowl":
         this.playSingingBowl(ctx, outputGain);
@@ -388,6 +379,71 @@ export class MeditationAudioEngine implements MeditationAudioPort {
       case "wood-block":
         this.playWoodBlock(ctx, outputGain);
         break;
+    }
+  }
+
+  /**
+   * Plays a meditation chime/bell by catalog ID at the given volume [0, 1].
+   * Always loads and plays the real acoustic AudioBuffer (from RAM or Service Worker
+   * cache / network). Web Audio synthesis is used strictly as an offline-only fallback
+   * if the audio asset cannot be loaded while disconnected.
+   */
+  public playBellSound(soundId: BellSoundId, volume: number = 0.85): void {
+    if (soundId === "none") return;
+    const clampedVolume = Math.min(1, Math.max(0, volume));
+    if (clampedVolume <= 0.001) return;
+
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+
+    const outputGain = ctx.createGain();
+    // Fuller curve so bells project clearly across typical slider positions (50%-100%)
+    const gainScale = Math.pow(clampedVolume, 0.85);
+    outputGain.gain.setValueAtTime(gainScale, ctx.currentTime);
+    outputGain.connect(ctx.destination);
+
+    const option = getBellSoundOption(soundId);
+    if (option.kind === "file" && option.src) {
+      const cached = this.audioBuffers.get(option.src);
+      if (cached) {
+        this.playBellBufferNode(ctx, cached, outputGain);
+        return;
+      }
+
+      void this.loadAudioBuffer(ctx, option.src).then((decoded) => {
+        if (this.ctx !== ctx) {
+          try {
+            outputGain.disconnect();
+          } catch {
+            // Ignore
+          }
+          return;
+        }
+        if (decoded) {
+          this.playBellBufferNode(ctx, decoded, outputGain);
+          return;
+        }
+        if (this.isOffline()) {
+          this.playSynthBellFallback(ctx, soundId, outputGain);
+        } else {
+          try {
+            outputGain.disconnect();
+          } catch {
+            // Ignore
+          }
+        }
+      });
+      return;
+    }
+
+    if (this.isOffline()) {
+      this.playSynthBellFallback(ctx, soundId, outputGain);
+    } else {
+      try {
+        outputGain.disconnect();
+      } catch {
+        // Ignore
+      }
     }
   }
 
@@ -1072,12 +1128,34 @@ export class MeditationAudioEngine implements MeditationAudioPort {
     return buffer;
   }
 
+  private activateAmbientGraph(
+    ctx: AudioContext,
+    graph: ActiveAmbientGraph,
+    volume: number,
+    fadeInSeconds: number
+  ): void {
+    const now = ctx.currentTime;
+    const targetGain = this.mapVolumeToGain(volume, graph.gainCeiling);
+    graph.masterGain.gain.setValueAtTime(0.0001, now);
+    graph.masterGain.gain.exponentialRampToValueAtTime(
+      Math.max(0.0001, targetGain),
+      now + Math.max(0.05, fadeInSeconds)
+    );
+    graph.masterGain.connect(ctx.destination);
+
+    for (const source of graph.sources) {
+      source.start(now);
+    }
+
+    this.ambientGraph = graph;
+  }
+
   /**
    * Starts looping the chosen ambient sound with a smooth fade-in.
-   * For file-backed nature soundscapes (Gentle Rain, Ocean Waves), plays directly
-   * from the decoded in-RAM AudioBuffer loop when cached; on the first uncached start,
-   * begins the synthesized fallback immediately and crossfades to the real acoustic
-   * recording once decoded (~20–40ms from Service Worker cache).
+   * For file-backed nature soundscapes (Gentle Rain, Ocean Waves), always loads and
+   * plays the real stereo recording (from RAM or Service Worker cache / network).
+   * Web Audio synthesis is used strictly as an offline-only fallback if the asset
+   * cannot be loaded while disconnected.
    */
   public startAmbient(
     soundId: AmbientSoundId,
@@ -1099,47 +1177,54 @@ export class MeditationAudioEngine implements MeditationAudioPort {
 
     const token = ++this.ambientPlayToken;
     this.ambientVolume = volume;
-
-    const now = ctx.currentTime;
-    const option = getAmbientSoundOption(soundId);
-    const cachedBuffer =
-      option.kind === "file" && option.src
-        ? this.audioBuffers.get(option.src)
-        : undefined;
-
-    const graph = cachedBuffer
-      ? this.buildFileAmbientGraph(ctx, cachedBuffer)
-      : this.buildAmbientGraph(ctx, soundId, now);
-
-    const targetGain = this.mapVolumeToGain(volume, graph.gainCeiling);
-    graph.masterGain.gain.setValueAtTime(0.0001, now);
-    graph.masterGain.gain.exponentialRampToValueAtTime(
-      Math.max(0.0001, targetGain),
-      now + Math.max(0.05, fadeInSeconds)
-    );
-    graph.masterGain.connect(ctx.destination);
-
-    for (const source of graph.sources) {
-      source.start(now);
-    }
-
-    this.ambientGraph = graph;
     this.activeSoundId = soundId;
 
-    // Decode file-backed nature soundscape and smoothly crossfade in if still active
-    if (option.kind === "file" && option.src && !cachedBuffer) {
+    const option = getAmbientSoundOption(soundId);
+    if (option.kind === "file" && option.src) {
+      const cachedBuffer = this.audioBuffers.get(option.src);
+      if (cachedBuffer) {
+        const graph = this.buildFileAmbientGraph(ctx, cachedBuffer);
+        this.activateAmbientGraph(ctx, graph, volume, fadeInSeconds);
+        return;
+      }
+
       void this.loadAudioBuffer(ctx, option.src).then((decoded) => {
         if (
-          !decoded ||
           this.ambientPlayToken !== token ||
           this.ctx !== ctx ||
           this.activeSoundId !== soundId
         ) {
           return;
         }
-        this.crossfadeToFileAmbient(ctx, decoded, 0.65);
+        if (decoded) {
+          const graph = this.buildFileAmbientGraph(ctx, decoded);
+          this.activateAmbientGraph(
+            ctx,
+            graph,
+            this.ambientVolume,
+            fadeInSeconds
+          );
+          return;
+        }
+        if (this.isOffline()) {
+          const fallbackGraph = this.buildAmbientGraph(
+            ctx,
+            soundId,
+            ctx.currentTime
+          );
+          this.activateAmbientGraph(
+            ctx,
+            fallbackGraph,
+            this.ambientVolume,
+            fadeInSeconds
+          );
+        }
       });
+      return;
     }
+
+    const graph = this.buildAmbientGraph(ctx, soundId, ctx.currentTime);
+    this.activateAmbientGraph(ctx, graph, volume, fadeInSeconds);
   }
 
   private buildFileAmbientGraph(
@@ -1158,54 +1243,6 @@ export class MeditationAudioEngine implements MeditationAudioPort {
       masterGain,
       gainCeiling: 0.72,
     };
-  }
-
-  private crossfadeToFileAmbient(
-    ctx: AudioContext,
-    buffer: AudioBuffer,
-    crossfadeSeconds: number
-  ): void {
-    const previousGraph = this.ambientGraph;
-    const now = ctx.currentTime;
-    const fade = Math.max(0.1, crossfadeSeconds);
-
-    const nextGraph = this.buildFileAmbientGraph(ctx, buffer);
-    const targetGain = this.mapVolumeToGain(
-      this.ambientVolume,
-      nextGraph.gainCeiling
-    );
-    nextGraph.masterGain.gain.setValueAtTime(0.0001, now);
-    nextGraph.masterGain.gain.exponentialRampToValueAtTime(
-      Math.max(0.0001, targetGain),
-      now + fade
-    );
-    nextGraph.masterGain.connect(ctx.destination);
-    for (const source of nextGraph.sources) {
-      source.start(now);
-    }
-
-    this.ambientGraph = nextGraph;
-
-    if (previousGraph) {
-      try {
-        previousGraph.masterGain.gain.cancelScheduledValues(now);
-        previousGraph.masterGain.gain.setValueAtTime(
-          Math.max(0.0001, previousGraph.masterGain.gain.value),
-          now
-        );
-        previousGraph.masterGain.gain.exponentialRampToValueAtTime(
-          0.0001,
-          now + fade
-        );
-      } catch {
-        this.disposeGraph(previousGraph);
-        return;
-      }
-
-      setTimeout(() => {
-        this.disposeGraph(previousGraph);
-      }, Math.ceil((fade + 0.08) * 1000));
-    }
   }
 
   private buildAmbientGraph(

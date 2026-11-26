@@ -280,6 +280,20 @@ export class NativeMeditationAudioEngine implements MeditationAudioPort {
     }
   }
 
+  private playDecodedBellBuffer(
+    ctx: AudioContext,
+    buffer: AudioBuffer,
+    clampedVol: number
+  ): void {
+    const source = ctx.createBufferSource();
+    const gain = ctx.createGain();
+    source.buffer = buffer;
+    gain.gain.value = Math.pow(clampedVol, 0.85);
+    source.connect(gain);
+    gain.connect(ctx.destination);
+    source.start();
+  }
+
   public playBellSound(soundId: BellSoundId, volume: number = 0.85): void {
     if (soundId === "none") return;
     const clampedVol = Math.min(1, Math.max(0, volume));
@@ -291,40 +305,18 @@ export class NativeMeditationAudioEngine implements MeditationAudioPort {
     const cached = this.decodedBuffers.get(cacheKey);
 
     if (cached) {
-      const source = ctx.createBufferSource();
-      const gain = ctx.createGain();
-      source.buffer = cached;
-      gain.gain.value = Math.pow(clampedVol, 0.85);
-      source.connect(gain);
-      gain.connect(ctx.destination);
-      source.start();
+      this.playDecodedBellBuffer(ctx, cached, clampedVol);
       return;
     }
 
-    // Play instant warm harmonic fallback while decoding asset in background
-    this.playSynthBellFallback(ctx, clampedVol);
+    // All bell recordings are bundled inside the native app (zero synth fallback)
     const mod = BELL_AUDIO_ASSETS[soundId];
-    if (mod) {
-      void this.loadBundledBuffer(cacheKey, mod);
-    }
-  }
+    if (!mod) return;
 
-  private playSynthBellFallback(ctx: AudioContext, volume: number): void {
-    const now = ctx.currentTime;
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.type = "sine";
-    osc.frequency.setValueAtTime(220, now);
-    gain.gain.setValueAtTime(0.0001, now);
-    gain.gain.linearRampToValueAtTime(
-      Math.min(0.95, Math.pow(volume, 0.85) * 0.75),
-      now + 0.015
-    );
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + 3.2);
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.start(now);
-    osc.stop(now + 3.25);
+    void this.loadBundledBuffer(cacheKey, mod).then((decoded) => {
+      if (!decoded || this.ctx !== ctx) return;
+      this.playDecodedBellBuffer(ctx, decoded, clampedVol);
+    });
   }
 
   public stopBreathingCue(fadeSeconds: number = 0.2): void {
