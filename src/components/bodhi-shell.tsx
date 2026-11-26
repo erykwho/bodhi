@@ -36,7 +36,7 @@ import {
 } from "@/lib/offline/queue";
 import { useOnlineStatus } from "@/lib/offline/use-network-status";
 import type { TimerPresetItem } from "@/lib/timer/presets";
-import type { FavoriteTrackItem } from "@/lib/tracks/types";
+import type { FavoriteTrackItem, TrackPlaylistItem } from "@/lib/tracks/types";
 
 type AppMode = "timer" | "guided" | "history";
 
@@ -44,6 +44,7 @@ interface BodhiShellProps {
   user: SessionUserSummary | null;
   authConfigured: boolean;
   initialTracks: FavoriteTrackItem[];
+  initialPlaylists?: TrackPlaylistItem[];
   initialSessions: MeditationSessionItem[];
   initialPresets?: TimerPresetItem[];
   authError?: string | null;
@@ -53,6 +54,7 @@ export function BodhiShell({
   user,
   authConfigured,
   initialTracks,
+  initialPlaylists = [],
   initialSessions,
   initialPresets = [],
   authError = null,
@@ -404,6 +406,7 @@ export function BodhiShell({
               user={user}
               authConfigured={authConfigured}
               initialTracks={initialTracks}
+              initialPlaylists={initialPlaylists}
               isOnline={isOnline}
               onSwitchToTimer={() => setMode("timer")}
               onSessionActiveChange={setIsSessionActive}

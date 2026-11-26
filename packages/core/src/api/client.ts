@@ -6,7 +6,10 @@ import type { TimerPreferences } from "../timer/types";
 import type { TimerPresetItem } from "../timer/presets";
 import type {
   FavoriteTrackItem,
+  ResolvedExternalPlaylist,
+  ResolvedExternalPlaylistTrack,
   ResolvedTrackMetadata,
+  TrackPlaylistItem,
   TrackProviderType,
 } from "../tracks/types";
 
@@ -27,6 +30,7 @@ export interface MobileAuthTokens {
 export interface BootstrapPayload {
   user: BodhiUserSummary;
   tracks: FavoriteTrackItem[];
+  playlists: TrackPlaylistItem[];
   sessions: MeditationSessionItem[];
   presets: TimerPresetItem[];
 }
@@ -44,6 +48,33 @@ export interface UpdateTrackPayload {
   title?: string;
   tags?: string[];
   isFavorite?: boolean;
+}
+
+export interface CreatePlaylistPayload {
+  name: string;
+  description?: string | null;
+  trackIds?: string[];
+}
+
+export interface UpdatePlaylistPayload {
+  name?: string;
+  description?: string | null;
+}
+
+export interface ImportExternalPlaylistPayload {
+  mode: "new" | "existing";
+  playlistId?: string;
+  name?: string;
+  description?: string | null;
+  tracks: ResolvedExternalPlaylistTrack[];
+}
+
+export interface ImportExternalPlaylistResponse {
+  playlist: TrackPlaylistItem;
+  tracks: FavoriteTrackItem[];
+  addedCount: number;
+  skippedDuplicateCount: number;
+  skippedCapCount: number;
 }
 
 export interface BodhiFetchResponse {
@@ -307,6 +338,85 @@ export function createBodhiApiClient(config: BodhiApiClientConfig) {
           method: "DELETE",
         }
       );
+    },
+
+    // Playlists
+    listPlaylists() {
+      return request<{ playlists: TrackPlaylistItem[] }>("/api/playlists");
+    },
+
+    createPlaylist(payload: CreatePlaylistPayload) {
+      return request<{ playlist: TrackPlaylistItem }>("/api/playlists", {
+        method: "POST",
+        body: payload,
+      });
+    },
+
+    updatePlaylist(playlistId: string, payload: UpdatePlaylistPayload) {
+      return request<{ playlist: TrackPlaylistItem }>(
+        `/api/playlists/${encodeURIComponent(playlistId)}`,
+        {
+          method: "PATCH",
+          body: payload,
+        }
+      );
+    },
+
+    deletePlaylist(playlistId: string) {
+      return request<{ deleted: true }>(
+        `/api/playlists/${encodeURIComponent(playlistId)}`,
+        {
+          method: "DELETE",
+        }
+      );
+    },
+
+    addTracksToPlaylist(playlistId: string, trackIds: string[]) {
+      return request<{
+        playlist: TrackPlaylistItem;
+        addedCount: number;
+        skippedDuplicateCount: number;
+        skippedCapCount: number;
+      }>(`/api/playlists/${encodeURIComponent(playlistId)}/tracks`, {
+        method: "POST",
+        body: { trackIds },
+      });
+    },
+
+    removeTrackFromPlaylist(playlistId: string, trackId: string) {
+      return request<{ playlist: TrackPlaylistItem }>(
+        `/api/playlists/${encodeURIComponent(playlistId)}/tracks/${encodeURIComponent(trackId)}`,
+        {
+          method: "DELETE",
+        }
+      );
+    },
+
+    reorderPlaylistTracks(playlistId: string, orderedTrackIds: string[]) {
+      return request<{ playlist: TrackPlaylistItem }>(
+        `/api/playlists/${encodeURIComponent(playlistId)}/reorder`,
+        {
+          method: "PATCH",
+          body: { orderedTrackIds },
+        }
+      );
+    },
+
+    resolveExternalPlaylist(url: string) {
+      return request<{ playlist: ResolvedExternalPlaylist }>(
+        "/api/playlists/resolve",
+        {
+          method: "POST",
+          body: { url },
+        }
+      );
+    },
+
+    importExternalPlaylist(payload: ImportExternalPlaylistPayload) {
+      return request<ImportExternalPlaylistResponse>("/api/playlists/import", {
+        method: "POST",
+        body: payload,
+      });
     },
 
     // Presets

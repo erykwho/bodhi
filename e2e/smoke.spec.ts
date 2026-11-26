@@ -421,4 +421,123 @@ test.describe("Bodhi E2E Smoke Suite (Mobile PWA)", () => {
       page.getByRole("button", { name: "Iniciar Sessão" })
     ).toBeVisible();
   });
+
+  test("offline guided playlists render sub-selector, detail view, and queue player controls cleanly", async ({
+    context,
+    page,
+  }) => {
+    const errors = trackRuntimeErrors(page);
+
+    await page.goto("/");
+
+    // Seed offline guided tracks + playlists snapshot and cached audio response
+    await page.evaluate(async () => {
+      const audioResp = await fetch("/audio/bells/soft-chime.mp3");
+      const blob = await audioResp.blob();
+      const cache = await window.caches.open("bodhi-user-audio-v1");
+      await cache.put(
+        "/_bodhi_offline_audio/e2e-track-1",
+        new Response(blob, {
+          status: 200,
+          headers: { "Content-Type": "audio/mpeg" },
+        })
+      );
+      await cache.put(
+        "/_bodhi_offline_audio/e2e-track-2",
+        new Response(blob, {
+          status: 200,
+          headers: { "Content-Type": "audio/mpeg" },
+        })
+      );
+
+      window.localStorage.setItem(
+        "bodhi.offline.guided-tracks.v1",
+        JSON.stringify({
+          tracks: [
+            {
+              id: "e2e-track-1",
+              provider: "DIRECT_AUDIO",
+              url: "https://cdn.example.com/day1.mp3",
+              externalId: "cdn.example.com/day1.mp3",
+              title: "Dia 1 Respiração",
+              author: "Bodhi",
+              thumbnailUrl: null,
+              tags: ["Morning"],
+              isFavorite: false,
+              createdAt: "2026-11-26T00:00:00.000Z",
+            },
+            {
+              id: "e2e-track-2",
+              provider: "DIRECT_AUDIO",
+              url: "https://cdn.example.com/day2.mp3",
+              externalId: "cdn.example.com/day2.mp3",
+              title: "Dia 2 Escaneamento",
+              author: "Bodhi",
+              thumbnailUrl: null,
+              tags: [],
+              isFavorite: false,
+              createdAt: "2026-11-26T00:00:00.000Z",
+            },
+          ],
+          playlists: [
+            {
+              id: "e2e-pl-1",
+              name: "Rotina Matinal",
+              description: "Sequência de dois dias",
+              trackIds: ["e2e-track-1", "e2e-track-2"],
+              createdAt: "2026-11-26T00:00:00.000Z",
+              updatedAt: "2026-11-26T00:00:00.000Z",
+            },
+          ],
+          savedAudio: {
+            "e2e-track-1": {
+              bytes: blob.size,
+              contentType: "audio/mpeg",
+              savedAt: "2026-11-26T00:00:00.000Z",
+            },
+            "e2e-track-2": {
+              bytes: blob.size,
+              contentType: "audio/mpeg",
+              savedAt: "2026-11-26T00:00:00.000Z",
+            },
+          },
+        })
+      );
+    });
+
+    await context.setOffline(true);
+    await page.evaluate(() => {
+      window.dispatchEvent(new Event("offline"));
+    });
+
+    await page.getByRole("button", { name: "Guiadas" }).click();
+
+    // Switch to Playlists sub-tab and open the cached playlist
+    await page.getByRole("tab", { name: "Playlists", exact: true }).click();
+    await expect(page.getByText("Rotina Matinal")).toBeVisible();
+    await page.getByText("Rotina Matinal").click();
+
+    // Verify playlist detail view and start sequence playback
+    await expect(page.getByText("Sequência de dois dias")).toBeVisible();
+    await page.getByRole("button", { name: "Tocar sequência" }).click();
+
+    // Verify queue indicator, default auto-advance OFF, and manual Next Track switch
+    await expect(page.getByText("Faixa 1 de 2")).toBeVisible();
+    const autoAdvanceBtn = page.getByRole("button", {
+      name: /Avanço automático: Off/i,
+    });
+    await expect(autoAdvanceBtn).toBeVisible();
+    await autoAdvanceBtn.click();
+    await expect(
+      page.getByRole("button", { name: /Avanço automático: On/i })
+    ).toBeVisible();
+
+    await page.getByRole("button", { name: "Próxima", exact: true }).click();
+    await expect(page.getByText("Faixa 2 de 2")).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Dia 2 Escaneamento" })
+    ).toBeVisible();
+
+    expect(errors).toEqual([]);
+  });
 });

@@ -1,5 +1,10 @@
+import {
+  GUIDED_AUTO_ADVANCE_STORAGE_KEY,
+  parseCachedPlaylists,
+  parseGuidedAutoAdvancePreference,
+} from "@/lib/tracks/playlists";
 import { isAudioStreamProvider } from "@/lib/tracks/providers";
-import type { FavoriteTrackItem } from "@/lib/tracks/types";
+import type { FavoriteTrackItem, TrackPlaylistItem } from "@/lib/tracks/types";
 
 export const OFFLINE_GUIDED_AUDIO_CACHE_NAME = "bodhi-user-audio-v1";
 export const OFFLINE_GUIDED_STORAGE_KEY = "bodhi.offline.guided-tracks.v1";
@@ -12,11 +17,13 @@ export interface SavedOfflineAudioMeta {
 
 export interface OfflineGuidedSnapshot {
   tracks: FavoriteTrackItem[];
+  playlists: TrackPlaylistItem[];
   savedAudio: Record<string, SavedOfflineAudioMeta>;
 }
 
 const EMPTY_SNAPSHOT: OfflineGuidedSnapshot = {
   tracks: [],
+  playlists: [],
   savedAudio: {},
 };
 
@@ -24,8 +31,16 @@ const listeners = new Set<() => void>();
 let cachedRaw: string | null = null;
 let cachedSnapshot: OfflineGuidedSnapshot = EMPTY_SNAPSHOT;
 
+const autoAdvanceListeners = new Set<() => void>();
+
 function emitChange(): void {
   for (const listener of listeners) {
+    listener();
+  }
+}
+
+function emitAutoAdvanceChange(): void {
+  for (const listener of autoAdvanceListeners) {
     listener();
   }
 }
@@ -69,6 +84,7 @@ function parseSnapshot(raw: string | null): OfflineGuidedSnapshot {
             isFavorite: Boolean(item.isFavorite),
           }))
       : [];
+    const playlists = parseCachedPlaylists(parsed.playlists);
     const savedAudio: Record<string, SavedOfflineAudioMeta> = {};
     if (parsed.savedAudio && typeof parsed.savedAudio === "object") {
       for (const [id, meta] of Object.entries(parsed.savedAudio)) {
@@ -92,7 +108,7 @@ function parseSnapshot(raw: string | null): OfflineGuidedSnapshot {
         }
       }
     }
-    return { tracks, savedAudio };
+    return { tracks, playlists, savedAudio };
   } catch {
     return EMPTY_SNAPSHOT;
   }
@@ -152,6 +168,52 @@ export function subscribeOfflineGuided(callback: () => void): () => void {
   };
 }
 
+export function getGuidedAutoAdvanceSnapshot(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return parseGuidedAutoAdvancePreference(
+      window.localStorage.getItem(GUIDED_AUTO_ADVANCE_STORAGE_KEY)
+    );
+  } catch {
+    return false;
+  }
+}
+
+export function getGuidedAutoAdvanceServerSnapshot(): boolean {
+  return false;
+}
+
+export function subscribeGuidedAutoAdvance(callback: () => void): () => void {
+  autoAdvanceListeners.add(callback);
+  const onStorage = (event: StorageEvent) => {
+    if (event.key === GUIDED_AUTO_ADVANCE_STORAGE_KEY) {
+      callback();
+    }
+  };
+  if (typeof window !== "undefined") {
+    window.addEventListener("storage", onStorage);
+  }
+  return () => {
+    autoAdvanceListeners.delete(callback);
+    if (typeof window !== "undefined") {
+      window.removeEventListener("storage", onStorage);
+    }
+  };
+}
+
+export function setGuidedAutoAdvancePreference(enabled: boolean): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(
+      GUIDED_AUTO_ADVANCE_STORAGE_KEY,
+      enabled ? "true" : "false"
+    );
+    emitAutoAdvanceChange();
+  } catch {
+    // Ignore storage quota / private mode failures
+  }
+}
+
 /**
  * Caches the user's guided tracks metadata locally so downloaded DIRECT_AUDIO tracks
  * remain browsable and playable in Airplane Mode.
@@ -160,6 +222,20 @@ export function cacheGuidedTrackList(tracks: FavoriteTrackItem[]): void {
   const current = readSnapshot();
   writeSnapshot({
     tracks,
+    playlists: current.playlists,
+    savedAudio: current.savedAudio,
+  });
+}
+
+/**
+ * Caches the user's playlists metadata locally so playlists with offline audio
+ * remain browsable and playable in Airplane Mode.
+ */
+export function cacheGuidedPlaylists(playlists: TrackPlaylistItem[]): void {
+  const current = readSnapshot();
+  writeSnapshot({
+    tracks: current.tracks,
+    playlists,
     savedAudio: current.savedAudio,
   });
 }
@@ -244,6 +320,7 @@ export async function saveTrackAudioOffline(
   const hasTrack = current.tracks.some((item) => item.id === track.id);
   writeSnapshot({
     tracks: hasTrack ? current.tracks : [track, ...current.tracks],
+    playlists: current.playlists,
     savedAudio: {
       ...current.savedAudio,
       [track.id]: meta,
@@ -273,6 +350,7 @@ export async function removeTrackAudioOffline(trackId: string): Promise<void> {
   delete nextSaved[trackId];
   writeSnapshot({
     tracks: current.tracks,
+    playlists: current.playlists,
     savedAudio: nextSaved,
   });
 }

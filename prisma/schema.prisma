@@ -30,31 +30,61 @@ model User {
   createdAt           DateTime             @default(now())
   updatedAt           DateTime             @updatedAt
   favoriteTracks      FavoriteTrack[]
+  playlists           TrackPlaylist[]
   sessions            MeditationSession[]
   timerPresets        TimerPreset[]
   mobileRefreshTokens MobileRefreshToken[]
 }
 
 model FavoriteTrack {
-  id           String              @id @default(cuid())
-  userId       String
-  user         User                @relation(fields: [userId], references: [id], onDelete: Cascade)
-  provider     TrackProvider
-  url          String
-  externalId   String
-  title        String
-  author       String?
-  thumbnailUrl String?
-  tags         String[]            @default([])
-  isFavorite   Boolean             @default(false)
-  position     Int                 @default(0)
-  createdAt    DateTime            @default(now())
-  updatedAt    DateTime            @updatedAt
-  sessions     MeditationSession[]
+  id            String              @id @default(cuid())
+  userId        String
+  user          User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider      TrackProvider
+  url           String
+  externalId    String
+  title         String
+  author        String?
+  thumbnailUrl  String?
+  tags          String[]            @default([])
+  isFavorite    Boolean             @default(false)
+  position      Int                 @default(0)
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+  sessions      MeditationSession[]
+  playlistItems PlaylistTrack[]
 
   @@unique([userId, provider, externalId])
   @@index([userId, position, createdAt])
   @@index([userId, isFavorite, position, createdAt])
+}
+
+model TrackPlaylist {
+  id          String          @id @default(cuid())
+  userId      String
+  user        User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+  position    Int             @default(0)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  items       PlaylistTrack[]
+
+  @@index([userId, position, createdAt])
+}
+
+model PlaylistTrack {
+  id         String        @id @default(cuid())
+  playlistId String
+  playlist   TrackPlaylist @relation(fields: [playlistId], references: [id], onDelete: Cascade)
+  trackId    String
+  track      FavoriteTrack @relation(fields: [trackId], references: [id], onDelete: Cascade)
+  position   Int           @default(0)
+  addedAt    DateTime      @default(now())
+
+  @@unique([playlistId, trackId])
+  @@index([playlistId, position, addedAt])
+  @@index([trackId])
 }
 
 model MeditationSession {

@@ -13,9 +13,12 @@ import {
   BellOff,
   Check,
   CheckCircle2,
+  ChevronRight,
   Download,
   Headphones,
   Link2,
+  ListMusic,
+  ListPlus,
   Loader2,
   LogIn,
   Music2,
@@ -30,19 +33,42 @@ import {
   X,
 } from "lucide-react";
 import { signInWithGoogle } from "@/app/actions";
-import { GuidedSessionPlayer } from "@/components/guided-session-player";
+import { AddToPlaylistSheet } from "@/components/add-to-playlist-sheet";
+import {
+  GuidedSessionPlayer,
+  type GuidedPlaylistPlaybackContext,
+} from "@/components/guided-session-player";
 import { useI18n } from "@/components/i18n-provider";
+import { PlaylistDetailView } from "@/components/playlist-detail-view";
+import {
+  PlaylistImportPanel,
+  type ImportedPlaylistPayloadResult,
+} from "@/components/playlist-import-panel";
 import type { SessionUserSummary } from "@/lib/auth";
 import type { MeditationSessionItem } from "@/lib/history/types";
 import {
+  cacheGuidedPlaylists,
   cacheGuidedTrackList,
   formatBytesLabel,
+  getGuidedAutoAdvanceServerSnapshot,
+  getGuidedAutoAdvanceSnapshot,
   getOfflineGuidedServerSnapshot,
   getOfflineGuidedSnapshot,
   removeTrackAudioOffline,
   saveTrackAudioOffline,
+  setGuidedAutoAdvancePreference,
+  subscribeGuidedAutoAdvance,
   subscribeOfflineGuided,
 } from "@/lib/offline/audio-cache";
+import {
+  MAX_PLAYLIST_DESCRIPTION_LENGTH,
+  MAX_PLAYLIST_NAME_LENGTH,
+  filterOfflinePlayablePlaylistTracks,
+  getPlaylistCoverThumbnail,
+  parsePlaylistUrl,
+  removeTrackFromPlaylists,
+  resolvePlaylistTracks,
+} from "@/lib/tracks/playlists";
 import {
   SUGGESTED_TRACK_TAGS,
   isAudioStreamProvider,
@@ -60,6 +86,7 @@ import {
 import type {
   FavoriteTrackItem,
   ResolvedTrackMetadata,
+  TrackPlaylistItem,
 } from "@/lib/tracks/types";
 import { cn } from "@/lib/utils";
 
@@ -67,10 +94,20 @@ const LONG_PRESS_DELAY_MS = 250;
 const TOUCH_CANCEL_THRESHOLD_PX = 8;
 const MOUSE_DRAG_THRESHOLD_PX = 6;
 
+type GuidedSubMode = "tracks" | "playlists";
+
 type TrackFilter =
   | { type: "favorites" }
   | { type: "tag"; tag: string }
   | null;
+
+interface ActivePlayback {
+  track: FavoriteTrackItem;
+  playlistName?: string;
+  queue?: FavoriteTrackItem[];
+  index?: number;
+  autoStart?: boolean;
+}
 
 interface DragSession {
   pointerId: number;
@@ -89,6 +126,7 @@ interface GuidedTracksProps {
   user: SessionUserSummary | null;
   authConfigured: boolean;
   initialTracks: FavoriteTrackItem[];
+  initialPlaylists?: TrackPlaylistItem[];
   isOnline?: boolean;
   onSwitchToTimer?: () => void;
   onSessionActiveChange: (active: boolean) => void;
@@ -101,6 +139,7 @@ export function GuidedTracks({
   user,
   authConfigured,
   initialTracks,
+  initialPlaylists = [],
   isOnline = true,
   onSwitchToTimer,
   onSessionActiveChange,
@@ -116,15 +155,37 @@ export function GuidedTracks({
     getOfflineGuidedSnapshot,
     getOfflineGuidedServerSnapshot
   );
+  const guidedAutoAdvance = useSyncExternalStore(
+    subscribeGuidedAutoAdvance,
+    getGuidedAutoAdvanceSnapshot,
+    getGuidedAutoAdvanceServerSnapshot
+  );
 
+  const [subMode, setSubMode] = useState<GuidedSubMode>("tracks");
   const [tracks, setTracks] = useState<FavoriteTrackItem[]>(() =>
     sortTracksWithFavoritesFirst(initialTracks)
   );
-  const [activeTrack, setActiveTrack] = useState<FavoriteTrackItem | null>(
+  const [playlists, setPlaylists] =
+    useState<TrackPlaylistItem[]>(initialPlaylists);
+  const [openPlaylistId, setOpenPlaylistId] = useState<string | null>(null);
+  const [activePlayback, setActivePlayback] = useState<ActivePlayback | null>(
     null
   );
   const [closingBellEnabled, setClosingBellEnabled] = useState<boolean>(true);
   const [selectedFilter, setSelectedFilter] = useState<TrackFilter>(null);
+  const [playlistSheetTrack, setPlaylistSheetTrack] =
+    useState<FavoriteTrackItem | null>(null);
+
+  // Playlist creation & import state
+  const [isCreatingPlaylist, setIsCreatingPlaylist] = useState<boolean>(false);
+  const [newPlaylistName, setNewPlaylistName] = useState<string>("");
+  const [newPlaylistDescription, setNewPlaylistDescription] =
+    useState<string>("");
+  const [isSavingPlaylist, setIsSavingPlaylist] = useState<boolean>(false);
+  const [isImportingPlaylist, setIsImportingPlaylist] =
+    useState<boolean>(false);
+  const [importInitialUrl, setImportInitialUrl] = useState<string>("");
+  const [importBanner, setImportBanner] = useState<string | null>(null);
 
   // Add track form state
   const [isAdding, setIsAdding] = useState<boolean>(false);
@@ -165,32 +226,62 @@ export function GuidedTracks({
     tracksRef.current = tracks;
   }, [tracks]);
 
-  // Cache track metadata locally when signed in & online so saved audio stays browsable offline
+  // Cache track & playlist metadata locally when signed in & online so saved audio stays browsable offline
   useEffect(() => {
     if (!isOnline || !isAuthenticated) return;
     cacheGuidedTrackList(tracks);
   }, [isAuthenticated, isOnline, tracks]);
 
   useEffect(() => {
-    onSessionActiveChange(activeTrack !== null);
-  }, [activeTrack, onSessionActiveChange]);
+    if (!isOnline || !isAuthenticated) return;
+    cacheGuidedPlaylists(playlists);
+  }, [isAuthenticated, isOnline, playlists]);
+
+  useEffect(() => {
+    onSessionActiveChange(activePlayback !== null);
+  }, [activePlayback, onSessionActiveChange]);
 
   useEffect(() => {
     onReorderingChange?.(draggingId !== null);
   }, [draggingId, onReorderingChange]);
 
+  const effectiveSourceTracks = useMemo(
+    () => (tracks.length > 0 ? tracks : offlineGuided.tracks),
+    [offlineGuided.tracks, tracks]
+  );
+
+  const effectiveSourcePlaylists = useMemo(
+    () => (playlists.length > 0 ? playlists : offlineGuided.playlists),
+    [offlineGuided.playlists, playlists]
+  );
+
   const offlinePlayableTracks = useMemo(() => {
-    const source = tracks.length > 0 ? tracks : offlineGuided.tracks;
     return sortTracksWithFavoritesFirst(
-      source.filter(
+      effectiveSourceTracks.filter(
         (track) =>
           isAudioStreamProvider(track.provider) &&
           Boolean(offlineGuided.savedAudio[track.id])
       )
     );
-  }, [offlineGuided.savedAudio, offlineGuided.tracks, tracks]);
+  }, [effectiveSourceTracks, offlineGuided.savedAudio]);
+
+  const offlinePlayablePlaylists = useMemo(() => {
+    return effectiveSourcePlaylists.filter(
+      (playlist) =>
+        filterOfflinePlayablePlaylistTracks(
+          playlist,
+          effectiveSourceTracks,
+          offlineGuided.savedAudio
+        ).length > 0
+    );
+  }, [
+    effectiveSourcePlaylists,
+    effectiveSourceTracks,
+    offlineGuided.savedAudio,
+  ]);
 
   const detectedProvider = parseTrackUrl(urlInput)?.provider ?? null;
+  const detectedPlaylistUrl = parsePlaylistUrl(urlInput);
 
   const favoriteCount = useMemo(
     () => tracks.filter((track) => track.isFavorite).length,
@@ -473,9 +564,9 @@ export function GuidedTracks({
       setErrorMessage(null);
       tracksRef.current = optimisticTracks;
       setTracks(optimisticTracks);
-      setActiveTrack((prev) =>
-        prev && prev.id === track.id
-          ? { ...prev, isFavorite: nextIsFavorite }
+      setActivePlayback((prev) =>
+        prev && prev.track.id === track.id
+          ? { ...prev, track: { ...prev.track, isFavorite: nextIsFavorite } }
           : prev
       );
 
@@ -494,8 +585,8 @@ export function GuidedTracks({
         if (!response.ok || !data.track) {
           tracksRef.current = previousTracks;
           setTracks(previousTracks);
-          setActiveTrack((prev) =>
-            prev && prev.id === track.id ? track : prev
+          setActivePlayback((prev) =>
+            prev && prev.track.id === track.id ? { ...prev, track } : prev
           );
           setErrorMessage(data.error ?? m.guided.errFavoriteTrack);
           return;
@@ -505,13 +596,17 @@ export function GuidedTracks({
         setTracks((prev) =>
           prev.map((item) => (item.id === updatedTrack.id ? updatedTrack : item))
         );
-        setActiveTrack((prev) =>
-          prev && prev.id === updatedTrack.id ? updatedTrack : prev
+        setActivePlayback((prev) =>
+          prev && prev.track.id === updatedTrack.id
+            ? { ...prev, track: updatedTrack }
+            : prev
         );
       } catch {
         tracksRef.current = previousTracks;
         setTracks(previousTracks);
-        setActiveTrack((prev) => (prev && prev.id === track.id ? track : prev));
+        setActivePlayback((prev) =>
+          prev && prev.track.id === track.id ? { ...prev, track } : prev
+        );
         setErrorMessage(m.guided.errFavoriteTrack);
       } finally {
         togglingFavoriteRef.current.delete(track.id);
@@ -537,6 +632,7 @@ export function GuidedTracks({
         }
 
         setTracks((prev) => prev.filter((item) => item.id !== id));
+        setPlaylists((prev) => removeTrackFromPlaylists(prev, id));
         void removeTrackAudioOffline(id);
       } catch {
         setErrorMessage(m.guided.errDeleteTrack);
@@ -545,6 +641,124 @@ export function GuidedTracks({
       }
     },
     [m.guided.errDeleteTrack]
+  );
+
+  const handleCreatePlaylist = useCallback(
+    async (event: React.FormEvent) => {
+      event.preventDefault();
+      const trimmedName = newPlaylistName.trim();
+      if (!trimmedName) {
+        setErrorMessage(m.guided.playlists.errEmptyName);
+        return;
+      }
+
+      setIsSavingPlaylist(true);
+      setErrorMessage(null);
+      try {
+        const response = await fetch("/api/playlists", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: trimmedName,
+            description: newPlaylistDescription.trim() || null,
+          }),
+        });
+
+        const data = (await response.json()) as {
+          playlist?: TrackPlaylistItem;
+          error?: string;
+        };
+
+        if (!response.ok || !data.playlist) {
+          setErrorMessage(data.error ?? m.guided.playlists.errCreatePlaylist);
+          return;
+        }
+
+        const created = data.playlist;
+        setPlaylists((prev) => [...prev, created]);
+        setNewPlaylistName("");
+        setNewPlaylistDescription("");
+        setIsCreatingPlaylist(false);
+        setOpenPlaylistId(created.id);
+      } catch {
+        setErrorMessage(m.guided.playlists.errCreatePlaylist);
+      } finally {
+        setIsSavingPlaylist(false);
+      }
+    },
+    [
+      m.guided.playlists.errCreatePlaylist,
+      m.guided.playlists.errEmptyName,
+      newPlaylistDescription,
+      newPlaylistName,
+    ]
+  );
+
+  const handlePlaylistUpdated = useCallback((updated: TrackPlaylistItem) => {
+    setPlaylists((prev) =>
+      prev.map((item) => (item.id === updated.id ? updated : item))
+    );
+  }, []);
+
+  const handlePlaylistCreated = useCallback((created: TrackPlaylistItem) => {
+    setPlaylists((prev) =>
+      prev.some((item) => item.id === created.id) ? prev : [...prev, created]
+    );
+  }, []);
+
+  const handlePlaylistDeleted = useCallback((playlistId: string) => {
+    setPlaylists((prev) => prev.filter((item) => item.id !== playlistId));
+    setOpenPlaylistId((prev) => (prev === playlistId ? null : prev));
+  }, []);
+
+  const handleImportResult = useCallback(
+    (result: ImportedPlaylistPayloadResult) => {
+      setTracks((prev) => {
+        const byId = new Map(prev.map((item) => [item.id, item]));
+        for (const importedTrack of result.tracks) {
+          if (!byId.has(importedTrack.id)) {
+            byId.set(importedTrack.id, importedTrack);
+          }
+        }
+        return sortTracksWithFavoritesFirst(Array.from(byId.values()));
+      });
+
+      setPlaylists((prev) => {
+        const exists = prev.some((item) => item.id === result.playlist.id);
+        if (exists) {
+          return prev.map((item) =>
+            item.id === result.playlist.id ? result.playlist : item
+          );
+        }
+        return [...prev, result.playlist];
+      });
+
+      setIsImportingPlaylist(false);
+      setImportInitialUrl("");
+      setSubMode("playlists");
+      setOpenPlaylistId(result.playlist.id);
+      setImportBanner(
+        m.guided.playlists.importSuccess(
+          result.addedCount,
+          result.skippedDuplicateCount,
+          result.skippedCapCount
+        )
+      );
+    },
+    [m.guided.playlists]
+  );
+
+  const handleOpenImportWithUrl = useCallback(
+    (rawUrl: string) => {
+      resetForm();
+      setSubMode("playlists");
+      setOpenPlaylistId(null);
+      setIsCreatingPlaylist(false);
+      setImportInitialUrl(rawUrl);
+      setIsImportingPlaylist(true);
+      setImportBanner(null);
+    },
+    [resetForm]
   );
 
   const handleToggleOfflineTrack = useCallback(
@@ -853,25 +1067,142 @@ export function GuidedTracks({
     []
   );
 
-  if (activeTrack) {
+  if (activePlayback) {
+    const queue = activePlayback.queue;
+    const queueIndex = activePlayback.index ?? 0;
+    const playlistContext: GuidedPlaylistPlaybackContext | null =
+      queue && activePlayback.playlistName
+        ? {
+            playlistName: activePlayback.playlistName,
+            currentIndex: queueIndex,
+            totalTracks: queue.length,
+            nextTrackTitle:
+              queueIndex + 1 < queue.length
+                ? queue[queueIndex + 1].title
+                : null,
+            hasPrevious: queueIndex > 0,
+            hasNext: queueIndex + 1 < queue.length,
+            autoAdvance: guidedAutoAdvance,
+            onToggleAutoAdvance: () =>
+              setGuidedAutoAdvancePreference(!guidedAutoAdvance),
+            onPreviousTrack: () => {
+              if (queueIndex <= 0) return;
+              const prevIdx = queueIndex - 1;
+              setActivePlayback({
+                ...activePlayback,
+                track: queue[prevIdx],
+                index: prevIdx,
+                autoStart: true,
+              });
+            },
+            onNextTrack: (autoStart) => {
+              if (queueIndex + 1 >= queue.length) return;
+              const nextIdx = queueIndex + 1;
+              setActivePlayback({
+                ...activePlayback,
+                track: queue[nextIdx],
+                index: nextIdx,
+                autoStart,
+              });
+            },
+          }
+        : null;
+
     return (
       <GuidedSessionPlayer
-        track={activeTrack}
+        key={`${activePlayback.track.id}-${activePlayback.index ?? "single"}`}
+        track={activePlayback.track}
         closingBellEnabled={closingBellEnabled}
         isAuthenticated={isAuthenticated}
         userId={userId}
         isOnline={isOnline}
-        isTogglingFavorite={togglingFavoriteIds.includes(activeTrack.id)}
+        isTogglingFavorite={togglingFavoriteIds.includes(
+          activePlayback.track.id
+        )}
+        autoStart={Boolean(activePlayback.autoStart)}
+        playlistContext={playlistContext}
         onToggleFavorite={(track) => void handleToggleFavorite(track)}
         onToggleClosingBell={() => setClosingBellEnabled((prev) => !prev)}
-        onExit={() => setActiveTrack(null)}
+        onExit={() => setActivePlayback(null)}
         onSessionSaved={onSessionSaved}
         onSessionUpdated={onSessionUpdated}
       />
     );
   }
 
+  const renderSubModeSelector = () => (
+    <div className="flex justify-center">
+      <div
+        role="tablist"
+        aria-label={m.guided.subModeAria}
+        className="inline-flex items-center gap-0.5 rounded-full border border-black/6 bg-[var(--surface-muted)]/85 p-0.5 dark:border-white/10"
+      >
+        {(
+          [
+            { id: "tracks", label: m.guided.subModeTracks },
+            { id: "playlists", label: m.guided.subModePlaylists },
+          ] as const
+        ).map((option) => {
+          const isSelected = subMode === option.id;
+          return (
+            <button
+              key={option.id}
+              type="button"
+              role="tab"
+              aria-selected={isSelected}
+              onClick={() => {
+                setSubMode(option.id);
+                setOpenPlaylistId(null);
+                setErrorMessage(null);
+              }}
+              className={`rounded-full px-3.5 py-1 text-xs font-medium whitespace-nowrap transition-colors ${
+                isSelected
+                  ? "bg-[var(--surface)] text-[var(--foreground)] shadow-2xs"
+                  : "text-[var(--foreground-muted)] hover:text-[var(--foreground)]"
+              }`}
+            >
+              {option.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+
   if (!isOnline) {
+    if (openPlaylistId) {
+      const offlineTarget = offlinePlayablePlaylists.find(
+        (item) => item.id === openPlaylistId
+      );
+      if (offlineTarget) {
+        return (
+          <PlaylistDetailView
+            playlist={offlineTarget}
+            allTracks={effectiveSourceTracks}
+            playlists={offlinePlayablePlaylists}
+            savedAudio={offlineGuided.savedAudio}
+            isOnline={false}
+            isAuthenticated={isAuthenticated}
+            onBack={() => setOpenPlaylistId(null)}
+            onPlayQueue={(queue, startIndex) => {
+              if (queue.length === 0) return;
+              setActivePlayback({
+                track: queue[startIndex] ?? queue[0],
+                playlistName: offlineTarget.name,
+                queue,
+                index: startIndex,
+                autoStart: false,
+              });
+            }}
+            onPlaylistUpdated={handlePlaylistUpdated}
+            onPlaylistDeleted={handlePlaylistDeleted}
+            onImportResult={handleImportResult}
+            onReorderingChange={onReorderingChange}
+          />
+        );
+      }
+    }
+
     if (offlinePlayableTracks.length > 0) {
       return (
         <section className="flex flex-1 flex-col gap-3.5 py-1">
@@ -892,72 +1223,143 @@ export function GuidedTracks({
             )}
           </div>
 
-          <ul className="flex flex-col gap-2.5">
-            {offlinePlayableTracks.map((track) => {
-              const meta = offlineGuided.savedAudio[track.id];
-              return (
-                <li
-                  key={track.id}
-                  className={cn(
-                    "flex items-center gap-2.5 rounded-2xl border p-3 shadow-xs transition-colors",
-                    track.isFavorite
-                      ? "border-[var(--warm-amber)]/40 bg-[color-mix(in_srgb,var(--surface)_94%,var(--warm-amber)_6%)] hover:border-[var(--warm-amber)]/55 dark:border-[var(--warm-amber)]/35 dark:bg-[color-mix(in_srgb,var(--surface)_92%,var(--warm-amber)_8%)]"
-                      : "border-black/6 bg-[var(--surface)] hover:border-[var(--accent)]/35 dark:border-white/10"
-                  )}
-                >
-                  <button
-                    type="button"
-                    onClick={() => setActiveTrack(track)}
-                    className="flex min-w-0 flex-1 items-center gap-3 text-left"
-                  >
-                    <div className="relative flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-[var(--accent-soft)] text-[var(--accent)]">
-                      <Music2 className="h-5 w-5" />
-                      <span className="absolute inset-0 flex items-center justify-center bg-black/25 text-white">
-                        <Play className="h-4 w-4 fill-current" />
-                      </span>
-                    </div>
+          {offlinePlayablePlaylists.length > 0 && renderSubModeSelector()}
 
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium text-[var(--foreground)]">
-                        {track.title}
-                      </p>
-                      <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-[var(--foreground-muted)]">
-                        {meta && (
-                          <span className="inline-flex shrink-0 items-center gap-1 rounded-md bg-[var(--accent-soft)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--accent)]">
-                            <CheckCircle2 className="h-2.5 w-2.5" />
-                            {m.guided.savedOfflineBadge(
-                              formatBytesLabel(meta.bytes)
-                            )}
-                          </span>
-                        )}
-                        {track.author && (
-                          <span className="truncate">{track.author}</span>
+          {subMode === "playlists" && offlinePlayablePlaylists.length > 0 ? (
+            <ul className="flex flex-col gap-2.5">
+              {offlinePlayablePlaylists.map((playlist) => {
+                const offlineTracks = filterOfflinePlayablePlaylistTracks(
+                  playlist,
+                  effectiveSourceTracks,
+                  offlineGuided.savedAudio
+                );
+                const cover = getPlaylistCoverThumbnail(
+                  playlist,
+                  effectiveSourceTracks
+                );
+                return (
+                  <li
+                    key={playlist.id}
+                    className="flex items-center gap-2.5 rounded-2xl border border-black/6 bg-[var(--surface)] p-3 shadow-xs transition-colors hover:border-[var(--accent)]/35 dark:border-white/10"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => setOpenPlaylistId(playlist.id)}
+                      className="flex min-w-0 flex-1 items-center gap-3 text-left"
+                    >
+                      <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-[var(--accent-soft)] text-[var(--accent)]">
+                        {cover ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={cover}
+                            alt=""
+                            referrerPolicy="no-referrer"
+                            className="h-full w-full object-cover"
+                          />
+                        ) : (
+                          <ListMusic className="h-5 w-5" />
                         )}
                       </div>
-                    </div>
-                  </button>
-
-                  {track.isFavorite && (
-                    <span
-                      aria-label={m.guided.favoritesSection}
-                      className="flex h-7 w-7 shrink-0 items-center justify-center text-[var(--warm-amber)]"
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium text-[var(--foreground)]">
+                          {playlist.name}
+                        </p>
+                        <p className="mt-0.5 text-xs text-[var(--foreground-muted)]">
+                          {m.guided.playlists.offlineTrackCount(
+                            offlineTracks.length,
+                            playlist.trackIds.length
+                          )}
+                        </p>
+                      </div>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setActivePlayback({
+                          track: offlineTracks[0],
+                          playlistName: playlist.name,
+                          queue: offlineTracks,
+                          index: 0,
+                          autoStart: false,
+                        })
+                      }
+                      aria-label={`${m.guided.playlists.playPlaylist} ${playlist.name}`}
+                      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[var(--accent-soft)] text-[var(--accent)] transition-colors hover:bg-[var(--accent)] hover:text-[#fcfaf6] dark:hover:text-[#151917]"
                     >
-                      <Star className="h-3.5 w-3.5 fill-current" />
-                    </span>
-                  )}
-
-                  <button
-                    type="button"
-                    onClick={() => void removeTrackAudioOffline(track.id)}
-                    aria-label={m.guided.removeOfflineAria(track.title)}
-                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-[var(--foreground-muted)] transition-colors hover:bg-red-500/10 hover:text-red-600 dark:hover:text-red-400"
+                      <Play className="h-4 w-4 fill-current" />
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          ) : (
+            <ul className="flex flex-col gap-2.5">
+              {offlinePlayableTracks.map((track) => {
+                const meta = offlineGuided.savedAudio[track.id];
+                return (
+                  <li
+                    key={track.id}
+                    className={cn(
+                      "flex items-center gap-2.5 rounded-2xl border p-3 shadow-xs transition-colors",
+                      track.isFavorite
+                        ? "border-[var(--warm-amber)]/40 bg-[color-mix(in_srgb,var(--surface)_94%,var(--warm-amber)_6%)] hover:border-[var(--warm-amber)]/55 dark:border-[var(--warm-amber)]/35 dark:bg-[color-mix(in_srgb,var(--surface)_92%,var(--warm-amber)_8%)]"
+                        : "border-black/6 bg-[var(--surface)] hover:border-[var(--accent)]/35 dark:border-white/10"
+                    )}
                   >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
+                    <button
+                      type="button"
+                      onClick={() => setActivePlayback({ track })}
+                      className="flex min-w-0 flex-1 items-center gap-3 text-left"
+                    >
+                      <div className="relative flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-[var(--accent-soft)] text-[var(--accent)]">
+                        <Music2 className="h-5 w-5" />
+                        <span className="absolute inset-0 flex items-center justify-center bg-black/25 text-white">
+                          <Play className="h-4 w-4 fill-current" />
+                        </span>
+                      </div>
+
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium text-[var(--foreground)]">
+                          {track.title}
+                        </p>
+                        <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-[var(--foreground-muted)]">
+                          {meta && (
+                            <span className="inline-flex shrink-0 items-center gap-1 rounded-md bg-[var(--accent-soft)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--accent)]">
+                              <CheckCircle2 className="h-2.5 w-2.5" />
+                              {m.guided.savedOfflineBadge(
+                                formatBytesLabel(meta.bytes)
+                              )}
+                            </span>
+                          )}
+                          {track.author && (
+                            <span className="truncate">{track.author}</span>
+                          )}
+                        </div>
+                      </div>
+                    </button>
+
+                    {track.isFavorite && (
+                      <span
+                        aria-label={m.guided.favoritesSection}
+                        className="flex h-7 w-7 shrink-0 items-center justify-center text-[var(--warm-amber)]"
+                      >
+                        <Star className="h-3.5 w-3.5 fill-current" />
+                      </span>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={() => void removeTrackAudioOffline(track.id)}
+                      aria-label={m.guided.removeOfflineAria(track.title)}
+                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-[var(--foreground-muted)] transition-colors hover:bg-red-500/10 hover:text-red-600 dark:hover:text-red-400"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
         </section>
       );
     }
@@ -1027,8 +1429,305 @@ export function GuidedTracks({
     );
   }
 
+  // Open Playlist Detail View
+  if (subMode === "playlists" && openPlaylistId) {
+    const activePlaylist = playlists.find((item) => item.id === openPlaylistId);
+    if (activePlaylist) {
+      return (
+        <div className="flex flex-1 flex-col gap-2">
+          {importBanner && (
+            <div className="flex items-center justify-between gap-2 rounded-2xl border border-[var(--accent)]/25 bg-[var(--accent-soft)] px-3.5 py-2 text-xs text-[var(--accent)]">
+              <span>{importBanner}</span>
+              <button
+                type="button"
+                onClick={() => setImportBanner(null)}
+                aria-label={m.common.dismissMessage}
+                className="shrink-0 opacity-75 hover:opacity-100"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          )}
+          <PlaylistDetailView
+            playlist={activePlaylist}
+            allTracks={tracks}
+            playlists={playlists}
+            savedAudio={offlineGuided.savedAudio}
+            isOnline={isOnline}
+            isAuthenticated={isAuthenticated}
+            onBack={() => {
+              setOpenPlaylistId(null);
+              setImportBanner(null);
+            }}
+            onPlayQueue={(queue, startIndex) => {
+              if (queue.length === 0) return;
+              setActivePlayback({
+                track: queue[startIndex] ?? queue[0],
+                playlistName: activePlaylist.name,
+                queue,
+                index: startIndex,
+                autoStart: false,
+              });
+            }}
+            onPlaylistUpdated={handlePlaylistUpdated}
+            onPlaylistDeleted={handlePlaylistDeleted}
+            onImportResult={handleImportResult}
+            onReorderingChange={onReorderingChange}
+          />
+        </div>
+      );
+    }
+  }
+
+  if (subMode === "playlists") {
+    return (
+      <section className="flex flex-1 flex-col gap-3.5 py-1">
+        {renderSubModeSelector()}
+
+        {/* Playlists Top Action Row */}
+        <div className="flex items-center justify-between gap-2">
+          <button
+            type="button"
+            onClick={() => setClosingBellEnabled((prev) => !prev)}
+            className="inline-flex items-center gap-1.5 rounded-full border border-black/6 bg-[var(--surface)] px-3 py-1.5 text-xs font-medium text-[var(--foreground-muted)] transition-colors hover:text-[var(--foreground)] dark:border-white/10"
+          >
+            {closingBellEnabled ? (
+              <Bell className="h-3.5 w-3.5 text-[var(--accent)]" />
+            ) : (
+              <BellOff className="h-3.5 w-3.5" />
+            )}
+            {m.guided.closingBell}:{" "}
+            {closingBellEnabled ? m.common.on : m.common.off}
+          </button>
+
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => {
+                setImportInitialUrl("");
+                setIsImportingPlaylist((prev) => !prev);
+                setIsCreatingPlaylist(false);
+                setErrorMessage(null);
+              }}
+              className="inline-flex items-center gap-1 rounded-full border border-black/8 bg-[var(--surface)] px-3 py-1.5 text-xs font-medium text-[var(--foreground)] transition-colors hover:bg-[var(--surface-muted)] dark:border-white/10"
+            >
+              <Download className="h-3.5 w-3.5" />
+              {m.guided.playlists.importPlaylist}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setIsCreatingPlaylist((prev) => !prev);
+                setIsImportingPlaylist(false);
+                setErrorMessage(null);
+              }}
+              className="inline-flex items-center gap-1 rounded-full bg-[var(--accent)] px-3 py-1.5 text-xs font-semibold text-[#fcfaf6] transition-colors hover:bg-[var(--accent-strong)] dark:text-[#151917]"
+            >
+              {isCreatingPlaylist ? (
+                <>
+                  <X className="h-3.5 w-3.5" />
+                  {m.common.cancel}
+                </>
+              ) : (
+                <>
+                  <Plus className="h-3.5 w-3.5" />
+                  {m.guided.playlists.newPlaylist}
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+
+        {/* Create New Playlist Form */}
+        {isCreatingPlaylist && (
+          <form
+            onSubmit={handleCreatePlaylist}
+            className="flex flex-col gap-2.5 rounded-2xl border border-black/6 bg-[var(--surface)] p-4 shadow-xs dark:border-white/10"
+          >
+            <div className="flex flex-col gap-1.5">
+              <label
+                htmlFor="playlist-name-input"
+                className="text-xs font-medium text-[var(--foreground)]"
+              >
+                {m.guided.playlists.nameLabel}
+              </label>
+              <input
+                id="playlist-name-input"
+                type="text"
+                required
+                maxLength={MAX_PLAYLIST_NAME_LENGTH}
+                placeholder={m.guided.playlists.namePlaceholder}
+                value={newPlaylistName}
+                onChange={(event) => setNewPlaylistName(event.target.value)}
+                className="h-10 w-full rounded-xl border border-black/10 bg-[var(--background)] px-3 text-sm text-[var(--foreground)] outline-none placeholder:text-[var(--foreground-muted)]/70 focus:border-[var(--accent)] dark:border-white/12"
+              />
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <label
+                htmlFor="playlist-desc-input"
+                className="text-xs font-medium text-[var(--foreground)]"
+              >
+                {m.guided.playlists.descriptionLabel}
+              </label>
+              <input
+                id="playlist-desc-input"
+                type="text"
+                maxLength={MAX_PLAYLIST_DESCRIPTION_LENGTH}
+                placeholder={m.guided.playlists.descriptionPlaceholder}
+                value={newPlaylistDescription}
+                onChange={(event) =>
+                  setNewPlaylistDescription(event.target.value)
+                }
+                className="h-9 w-full rounded-xl border border-black/10 bg-[var(--background)] px-3 text-xs text-[var(--foreground)] outline-none placeholder:text-[var(--foreground-muted)]/70 focus:border-[var(--accent)] dark:border-white/12"
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={isSavingPlaylist || !newPlaylistName.trim()}
+              className="flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-[var(--accent)] text-sm font-semibold text-[#fcfaf6] transition-colors hover:bg-[var(--accent-strong)] disabled:opacity-50 dark:text-[#151917]"
+            >
+              {isSavingPlaylist ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  {m.guided.playlists.creating}
+                </>
+              ) : (
+                m.guided.playlists.createPlaylist
+              )}
+            </button>
+          </form>
+        )}
+
+        {/* External Playlist Import Panel */}
+        {isImportingPlaylist && (
+          <PlaylistImportPanel
+            key={importInitialUrl || "manual-import"}
+            initialUrl={importInitialUrl}
+            playlists={playlists}
+            onCancel={() => {
+              setIsImportingPlaylist(false);
+              setImportInitialUrl("");
+            }}
+            onImported={handleImportResult}
+          />
+        )}
+
+        {errorMessage && (
+          <p className="rounded-xl bg-red-500/10 px-3 py-2 text-xs text-red-600 dark:text-red-400">
+            {errorMessage}
+          </p>
+        )}
+
+        {/* Playlists List */}
+        {playlists.length === 0 ? (
+          <div className="flex flex-1 flex-col items-center justify-center rounded-3xl border border-dashed border-black/12 bg-[var(--surface)]/60 px-6 py-12 text-center dark:border-white/12">
+            <ListMusic className="h-7 w-7 text-[var(--foreground-muted)]" />
+            <p className="mt-3 text-sm font-medium text-[var(--foreground)]">
+              {m.guided.playlists.noPlaylistsTitle}
+            </p>
+            <p className="mt-1 max-w-xs text-xs text-[var(--foreground-muted)]">
+              {m.guided.playlists.noPlaylistsBody}
+            </p>
+          </div>
+        ) : (
+          <ul className="flex flex-col gap-2.5">
+            {playlists.map((playlist) => {
+              const resolvedTracks = resolvePlaylistTracks(playlist, tracks);
+              const offlineCount = filterOfflinePlayablePlaylistTracks(
+                playlist,
+                tracks,
+                offlineGuided.savedAudio
+              ).length;
+              const cover = getPlaylistCoverThumbnail(playlist, tracks);
+
+              return (
+                <li
+                  key={playlist.id}
+                  className="flex items-center gap-2.5 rounded-2xl border border-black/6 bg-[var(--surface)] p-3 shadow-xs transition-colors hover:border-[var(--accent)]/35 dark:border-white/10"
+                >
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setImportBanner(null);
+                      setOpenPlaylistId(playlist.id);
+                    }}
+                    className="flex min-w-0 flex-1 items-center gap-3 text-left"
+                  >
+                    <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-[var(--accent-soft)] text-[var(--accent)]">
+                      {cover ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={cover}
+                          alt=""
+                          referrerPolicy="no-referrer"
+                          className="h-full w-full object-cover"
+                        />
+                      ) : (
+                        <ListMusic className="h-5 w-5" />
+                      )}
+                    </div>
+
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium text-[var(--foreground)]">
+                        {playlist.name}
+                      </p>
+                      {playlist.description && (
+                        <p className="mt-0.5 truncate text-xs text-[var(--foreground-muted)]">
+                          {playlist.description}
+                        </p>
+                      )}
+                      <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-[var(--foreground-muted)]">
+                        <span>
+                          {m.guided.playlists.trackCount(resolvedTracks.length)}
+                        </span>
+                        {offlineCount > 0 && (
+                          <span className="inline-flex items-center gap-1 rounded-md bg-[var(--accent-soft)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--accent)]">
+                            <CheckCircle2 className="h-2.5 w-2.5" />
+                            {m.guided.playlists.offlineTrackCount(
+                              offlineCount,
+                              resolvedTracks.length
+                            )}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </button>
+
+                  {resolvedTracks.length > 0 ? (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setActivePlayback({
+                          track: resolvedTracks[0],
+                          playlistName: playlist.name,
+                          queue: resolvedTracks,
+                          index: 0,
+                          autoStart: false,
+                        })
+                      }
+                      aria-label={`${m.guided.playlists.playPlaylist} ${playlist.name}`}
+                      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[var(--accent-soft)] text-[var(--accent)] transition-colors hover:bg-[var(--accent)] hover:text-[#fcfaf6] dark:hover:text-[#151917]"
+                    >
+                      <Play className="h-4 w-4 fill-current" />
+                    </button>
+                  ) : (
+                    <ChevronRight className="h-4 w-4 shrink-0 text-[var(--foreground-muted)]" />
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </section>
+    );
+  }
+
   return (
-    <section className="flex flex-1 flex-col gap-4 py-1">
+    <section className="flex flex-1 flex-col gap-3.5 py-1">
+      {renderSubModeSelector()}
+
       {/* Top Action Row */}
       <div className="flex items-center justify-between gap-2">
         <button
@@ -1098,6 +1797,25 @@ export function GuidedTracks({
               <Loader2 className="absolute right-3 h-4 w-4 animate-spin text-[var(--accent)]" />
             )}
           </div>
+
+          {detectedPlaylistUrl && (
+            <div className="flex items-center justify-between gap-2 rounded-xl border border-[var(--accent)]/25 bg-[var(--accent-soft)]/70 px-3 py-2 text-xs">
+              <span className="text-[var(--foreground)]">
+                {detectedPlaylistUrl.isDirectPlaylistUrl
+                  ? m.guided.playlistUrlDetectedHint
+                  : m.guided.videoInPlaylistHint}
+              </span>
+              <button
+                type="button"
+                onClick={() =>
+                  handleOpenImportWithUrl(detectedPlaylistUrl.canonicalUrl)
+                }
+                className="shrink-0 rounded-full bg-[var(--accent)] px-2.5 py-1 text-[11px] font-semibold text-[#fcfaf6] transition-colors hover:bg-[var(--accent-strong)] dark:text-[#151917]"
+              >
+                {m.guided.importDetectedPlaylist}
+              </button>
+            </div>
+          )}
 
           {detectedProvider === "GOOGLE_DRIVE" && (
             <p className="text-[11px] leading-relaxed text-[var(--foreground-muted)]">
@@ -1328,7 +2046,7 @@ export function GuidedTracks({
                       type="button"
                       onClick={() => {
                         if (suppressClickRef.current || isEditing) return;
-                        setActiveTrack(track);
+                        setActivePlayback({ track });
                       }}
                       className={cn(
                         "flex min-w-0 flex-1 items-center gap-3 text-left",
@@ -1424,6 +2142,21 @@ export function GuidedTracks({
                             track.isFavorite && "fill-current"
                           )}
                         />
+                      </button>
+
+                      <button
+                        type="button"
+                        data-no-drag="true"
+                        onClick={() => setPlaylistSheetTrack(track)}
+                        aria-label={m.guided.playlists.addToPlaylistAria(
+                          track.title
+                        )}
+                        title={m.guided.playlists.addToPlaylistAria(
+                          track.title
+                        )}
+                        className="flex h-7 w-7 items-center justify-center rounded-xl text-[var(--foreground-muted)] transition-colors hover:bg-[var(--surface-muted)] hover:text-[var(--foreground)] sm:h-8 sm:w-8"
+                      >
+                        <ListPlus className="h-3.5 w-3.5" />
                       </button>
 
                       {isAudioStreamProvider(track.provider) && (
@@ -1614,6 +2347,16 @@ export function GuidedTracks({
             </p>
           )}
         </div>
+      )}
+
+      {playlistSheetTrack && (
+        <AddToPlaylistSheet
+          track={playlistSheetTrack}
+          playlists={playlists}
+          onClose={() => setPlaylistSheetTrack(null)}
+          onPlaylistUpdated={handlePlaylistUpdated}
+          onPlaylistCreated={handlePlaylistCreated}
+        />
       )}
     </section>
   );

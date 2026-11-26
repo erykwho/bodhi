@@ -22,12 +22,21 @@ import {
   parseLocalPresets,
   type TimerPresetItem,
 } from "@bodhi/core/timer/presets";
-import type { FavoriteTrackItem } from "@bodhi/core/tracks/types";
+import {
+  GUIDED_AUTO_ADVANCE_STORAGE_KEY,
+  parseCachedPlaylists,
+  parseGuidedAutoAdvancePreference,
+} from "@bodhi/core/tracks/playlists";
+import type {
+  FavoriteTrackItem,
+  TrackPlaylistItem,
+} from "@bodhi/core/tracks/types";
 
 export const THEME_PREFERENCE_STORAGE_KEY = "bodhi.theme.preference.v1";
 export const REMINDER_PREFERENCES_STORAGE_KEY = "bodhi.reminders.v1";
 export const HEALTH_SYNC_STORAGE_KEY = "bodhi.health.sync.v1";
 export const TRACKS_CACHE_KEY_PREFIX = "bodhi.tracks.cache.v1:";
+export const PLAYLISTS_CACHE_KEY_PREFIX = "bodhi.playlists.cache.v1:";
 
 export type ThemePreference = "system" | "light" | "dark";
 
@@ -149,6 +158,41 @@ export function writeCachedTracks(
   mobileStorage.setItem(
     `${TRACKS_CACHE_KEY_PREFIX}${userId}`,
     JSON.stringify(tracks)
+  );
+}
+
+export function readCachedPlaylists(userId: string): TrackPlaylistItem[] {
+  if (!userId) return [];
+  const raw = mobileStorage.getItem(`${PLAYLISTS_CACHE_KEY_PREFIX}${userId}`);
+  if (!raw) return [];
+  try {
+    return parseCachedPlaylists(JSON.parse(raw));
+  } catch {
+    return [];
+  }
+}
+
+export function writeCachedPlaylists(
+  userId: string,
+  playlists: ReadonlyArray<TrackPlaylistItem>
+): void {
+  if (!userId) return;
+  mobileStorage.setItem(
+    `${PLAYLISTS_CACHE_KEY_PREFIX}${userId}`,
+    JSON.stringify(playlists)
+  );
+}
+
+export function readGuidedAutoAdvance(): boolean {
+  return parseGuidedAutoAdvancePreference(
+    mobileStorage.getItem(GUIDED_AUTO_ADVANCE_STORAGE_KEY)
+  );
+}
+
+export function writeGuidedAutoAdvance(enabled: boolean): void {
+  mobileStorage.setItem(
+    GUIDED_AUTO_ADVANCE_STORAGE_KEY,
+    enabled ? "true" : "false"
   );
 }
 

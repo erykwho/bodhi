@@ -1,15 +1,18 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { FavoriteTrackItem } from "@/lib/tracks/types";
+import type { FavoriteTrackItem, TrackPlaylistItem } from "@/lib/tracks/types";
 import {
   OFFLINE_GUIDED_AUDIO_CACHE_NAME,
   OFFLINE_GUIDED_STORAGE_KEY,
   buildOfflineAudioCacheKey,
+  cacheGuidedPlaylists,
   cacheGuidedTrackList,
   formatBytesLabel,
+  getGuidedAutoAdvanceSnapshot,
   getOfflineGuidedSnapshot,
   getOfflineTrackAudioBlobUrl,
   removeTrackAudioOffline,
   saveTrackAudioOffline,
+  setGuidedAutoAdvancePreference,
 } from "./audio-cache";
 
 const SAMPLE_TRACK: FavoriteTrackItem = {
@@ -23,6 +26,15 @@ const SAMPLE_TRACK: FavoriteTrackItem = {
   tags: ["Sleep"],
   isFavorite: true,
   createdAt: "2026-11-22T00:00:00.000Z",
+};
+
+const SAMPLE_PLAYLIST: TrackPlaylistItem = {
+  id: "playlist-1",
+  name: "Evening Sequence",
+  description: "Wind down before sleep",
+  trackIds: ["track-direct-1"],
+  createdAt: "2026-11-26T00:00:00.000Z",
+  updatedAt: "2026-11-26T00:00:00.000Z",
 };
 
 describe("offline guided audio cache", () => {
@@ -67,10 +79,11 @@ describe("offline guided audio cache", () => {
 
     const snap = getOfflineGuidedSnapshot();
     expect(snap.tracks).toEqual([]);
+    expect(snap.playlists).toEqual([]);
     expect(snap.savedAudio).toEqual({});
   });
 
-  it("defaults missing isFavorite to false when reading legacy cached snapshots", () => {
+  it("defaults missing isFavorite and playlists when reading legacy cached snapshots", () => {
     const store = new Map<string, string>([
       [
         OFFLINE_GUIDED_STORAGE_KEY,
@@ -104,9 +117,10 @@ describe("offline guided audio cache", () => {
     expect(snap.tracks).toHaveLength(1);
     expect(snap.tracks[0].isFavorite).toBe(false);
     expect(snap.tracks[0].tags).toEqual([]);
+    expect(snap.playlists).toEqual([]);
   });
 
-  it("falls back to authenticated proxy when direct CORS fetch fails, stores in Cache Storage, reads blob URL, and cleans up on remove", async () => {
+  it("falls back to authenticated proxy when direct CORS fetch fails, stores in Cache Storage, preserves playlists, reads blob URL, and cleans up on remove", async () => {
     const lsStore = new Map<string, string>();
     const cacheBuckets = new Map<string, Map<string, Response>>();
 
@@ -155,23 +169,44 @@ describe("offline guided audio cache", () => {
     globalThis.fetch = fetchMock as typeof fetch;
 
     cacheGuidedTrackList([SAMPLE_TRACK]);
+    cacheGuidedPlaylists([SAMPLE_PLAYLIST]);
     const meta = await saveTrackAudioOffline(SAMPLE_TRACK, true);
     expect(meta.bytes).toBe(8);
     expect(fakeCaches.open).toHaveBeenCalledWith(OFFLINE_GUIDED_AUDIO_CACHE_NAME);
 
     const snap = getOfflineGuidedSnapshot();
     expect(snap.savedAudio[SAMPLE_TRACK.id]?.bytes).toBe(8);
+    expect(snap.playlists).toEqual([SAMPLE_PLAYLIST]);
 
     const blobUrl = await getOfflineTrackAudioBlobUrl(SAMPLE_TRACK.id);
     expect(blobUrl).toBe("blob:bodhi-offline-audio");
 
     await removeTrackAudioOffline(SAMPLE_TRACK.id);
     expect(getOfflineGuidedSnapshot().savedAudio[SAMPLE_TRACK.id]).toBeUndefined();
+    expect(getOfflineGuidedSnapshot().playlists).toEqual([SAMPLE_PLAYLIST]);
     expect(
       cacheBuckets
         .get(OFFLINE_GUIDED_AUDIO_CACHE_NAME)
         ?.has(buildOfflineAudioCacheKey(SAMPLE_TRACK.id))
     ).toBe(false);
+  });
+
+  it("persists guided playlist auto-advance preference with default false", () => {
+    const lsStore = new Map<string, string>();
+    (globalThis as unknown as { window: Record<string, unknown> }).window = {
+      localStorage: {
+        getItem: (k: string) => lsStore.get(k) ?? null,
+        setItem: (k: string, v: string) => lsStore.set(k, v),
+      },
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    };
+
+    expect(getGuidedAutoAdvanceSnapshot()).toBe(false);
+    setGuidedAutoAdvancePreference(true);
+    expect(getGuidedAutoAdvanceSnapshot()).toBe(true);
+    setGuidedAutoAdvancePreference(false);
+    expect(getGuidedAutoAdvanceSnapshot()).toBe(false);
   });
 
   it("saves GOOGLE_DRIVE tracks offline directly via the authenticated audio proxy", async () => {

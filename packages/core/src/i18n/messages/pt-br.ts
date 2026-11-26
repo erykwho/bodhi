@@ -4,6 +4,7 @@ export const ptBrMessages: Messages = {
   common: {
     cancel: "Cancelar",
     save: "Salvar",
+    delete: "Excluir",
     done: "Concluir",
     edit: "Editar",
     clear: "Limpar",
@@ -302,6 +303,108 @@ export const ptBrMessages: Messages = {
     errFavoriteTrack: "Não foi possível atualizar o status de favorito.",
     errDeleteTrack: "Não foi possível excluir a faixa.",
     errReorderTracks: "Não foi possível salvar a nova ordem. Tente novamente.",
+    subModeAria: "Visualização da aba guiada",
+    subModeTracks: "Faixas",
+    subModePlaylists: "Playlists",
+    playlistUrlDetectedHint: "Link de playlist detectado.",
+    importDetectedPlaylist: "Importar playlist",
+    videoInPlaylistHint: "Este vídeo faz parte de uma playlist.",
+    playlists: {
+      newPlaylist: "Nova playlist",
+      importPlaylist: "Importar",
+      importTitle: "Importar playlist externa",
+      importUrlLabel: "Link de playlist do YouTube ou set do SoundCloud",
+      importUrlPlaceholder:
+        "youtube.com/playlist?list=... ou soundcloud.com/.../sets/...",
+      resolveButton: "Carregar faixas",
+      resolving: "Carregando playlist...",
+      nameLabel: "Nome da playlist",
+      namePlaceholder: "ex.: Rotina Matinal de 21 Dias",
+      descriptionLabel: "Descrição (opcional)",
+      descriptionPlaceholder: "Breve nota sobre esta sequência...",
+      createPlaylist: "Criar playlist",
+      creating: "Criando...",
+      trackCount: (count: number) =>
+        `${count} ${count === 1 ? "faixa" : "faixas"}`,
+      offlineTrackCount: (offlineCount: number, totalCount: number) =>
+        `${offlineCount}/${totalCount} offline`,
+      noPlaylistsTitle: "Nenhuma playlist ainda",
+      noPlaylistsBody:
+        "Crie uma sequência personalizada de meditações ou importe uma playlist pública do YouTube ou set do SoundCloud.",
+      offlineNoPlaylists:
+        "Nenhuma playlist com faixas salvas offline neste dispositivo.",
+      playPlaylist: "Tocar",
+      playFromStart: "Tocar sequência",
+      addTracks: "Adicionar faixas",
+      addTracksTitle: "Adicionar faixas da biblioteca",
+      addSelectedTracks: (count: number) =>
+        `Adicionar ${count} ${count === 1 ? "faixa" : "faixas"}`,
+      allLibraryTracksAdded:
+        "Todas as faixas da sua biblioteca já estão nesta playlist.",
+      noLibraryTracksToAdd:
+        "Adicione algumas faixas guiadas primeiro para montar sua playlist.",
+      emptyPlaylistTitle: "Esta playlist está vazia",
+      emptyPlaylistBody:
+        "Adicione faixas da sua biblioteca ou importe uma playlist do YouTube ou SoundCloud.",
+      backToPlaylists: "Playlists",
+      editPlaylist: "Editar playlist",
+      deletePlaylist: "Excluir playlist",
+      deleteConfirm:
+        "Excluir esta playlist? Suas faixas continuarão na biblioteca.",
+      removeTrackAria: (title: string) => `Remover ${title} da playlist`,
+      addToPlaylistAria: (title: string) => `Adicionar ${title} à playlist`,
+      addToPlaylistTitle: "Adicionar à playlist",
+      quickCreatePlaylist: "Nova playlist com esta faixa",
+      downloadOfflineAll: (count: number) => `Baixar offline (${count})`,
+      downloadingBatch: (current: number, total: number) =>
+        `Baixando ${current}/${total}...`,
+      allEligibleOffline: "Disponível offline",
+      offlineUnavailableTrack: "Requer internet",
+      importDestinationLabel: "Onde deseja salvar estas faixas?",
+      importModeNew: "Criar nova playlist",
+      importModeExisting: "Adicionar a playlist existente",
+      selectExistingPlaylist: "Escolha uma playlist",
+      truncatedNotice: (limit: number, total: number) =>
+        `Esta playlist tem ${total} faixas. Exibindo as primeiras ${limit} faixas (limite de importação).`,
+      selectedTracksSummary: (selected: number, total: number) =>
+        `${selected} de ${total} selecionadas`,
+      selectAll: "Selecionar todas",
+      deselectAll: "Limpar",
+      importConfirmNew: (count: number) => `Criar playlist (${count})`,
+      importConfirmExisting: (count: number) =>
+        `Adicionar ${count} ${count === 1 ? "faixa" : "faixas"}`,
+      importing: "Importando...",
+      importSuccess: (
+        addedCount: number,
+        skippedDuplicates: number,
+        skippedCap: number
+      ) => {
+        const parts = [
+          `${addedCount} ${addedCount === 1 ? "faixa importada" : "faixas importadas"}`,
+        ];
+        if (skippedDuplicates > 0) {
+          parts.push(`${skippedDuplicates} já na playlist`);
+        }
+        if (skippedCap > 0) {
+          parts.push(`${skippedCap} ignoradas (limite de 100)`);
+        }
+        return parts.join(" · ");
+      },
+      errEmptyName: "O nome da playlist não pode ficar vazio.",
+      errInvalidPlaylistUrl:
+        "Cole um link válido de playlist pública do YouTube ou set do SoundCloud.",
+      errResolvePlaylist:
+        "Não foi possível carregar as faixas desta playlist. Verifique se o link é público.",
+      errImportPlaylist: "Não foi possível importar as faixas da playlist.",
+      errCreatePlaylist: "Não foi possível criar a playlist.",
+      errUpdatePlaylist: "Não foi possível atualizar a playlist.",
+      errDeletePlaylist: "Não foi possível excluir a playlist.",
+      errModifyTracks: "Não foi possível atualizar as faixas da playlist.",
+      errReorderPlaylist:
+        "Não foi possível salvar a ordem da playlist. Tente novamente.",
+      errSelectPlaylist: "Escolha uma playlist existente primeiro.",
+      errSelectTracks: "Selecione ao menos uma faixa para importar.",
+    },
     player: {
       backToGuided: "Guiadas",
       favorite: "Favoritar",
@@ -313,9 +416,17 @@ export const ptBrMessages: Messages = {
       loading: "Carregando player...",
       ready: "Pronto",
       sessionComplete: "Sessão Concluída",
+      playlistComplete: "Playlist Concluída",
       savedToHistory: "Salvo no histórico",
       backToList: "Voltar à lista",
+      backToPlaylist: "Voltar à playlist",
       replay: "Ouvir novamente",
+      queueProgress: (current: number, total: number) =>
+        `Faixa ${current} de ${total}`,
+      previousTrack: "Anterior",
+      nextTrack: "Próxima",
+      nextTrackWithTitle: (title: string) => `Próxima: ${title}`,
+      autoAdvance: "Avanço automático",
       openOriginal: "Abrir faixa original",
       ytLoadError:
         "Não foi possível carregar o player do YouTube. Verifique sua conexão ou ouça no YouTube enquanto o Bodhi acompanha sua sessão.",
