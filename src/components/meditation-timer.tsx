@@ -1134,7 +1134,7 @@ export function MeditationTimer({
                           {formatTimerDisplay(totalSessionMs)}
                         </button>
                       )}
-                      <div className="mt-2 flex items-center gap-2">
+                      <div className="mt-2.5 flex items-center gap-6">
                         <button
                           type="button"
                           onPointerDown={() => {
@@ -1150,14 +1150,6 @@ export function MeditationTimer({
                           className="flex h-7 w-7 items-center justify-center rounded-full bg-[var(--surface-muted)] text-[var(--foreground-muted)] transition-colors hover:text-[var(--foreground)] disabled:opacity-40"
                         >
                           <Minus className="h-3.5 w-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={handleStartEditingDuration}
-                          aria-label={m.timer.editDurationAria}
-                          className="min-w-[3rem] cursor-pointer rounded-md px-1 py-0.5 text-center text-xs font-medium text-[var(--foreground-muted)] tabular-nums transition-colors hover:text-[var(--foreground)]"
-                        >
-                          {formatDurationLabel(durationMinutes)}
                         </button>
                         <button
                           type="button"
