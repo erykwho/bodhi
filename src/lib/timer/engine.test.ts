@@ -11,6 +11,8 @@ import {
   formatDurationLabel,
   formatElapsedDisplay,
   formatTimerDisplay,
+  parseDurationMinutesInput,
+  sanitizeDurationMinutesInput,
 } from "./engine";
 
 describe("timer engine", () => {
@@ -172,6 +174,38 @@ describe("timer engine", () => {
       expect(formatDurationLabel(10)).toBe("10 min");
       expect(formatDurationLabel(60)).toBe("1 h");
       expect(formatDurationLabel(90)).toBe("1 h 30 min");
+    });
+  });
+
+  describe("sanitizeDurationMinutesInput", () => {
+    it("keeps only digits and limits length to 3 characters", () => {
+      expect(sanitizeDurationMinutesInput("25")).toBe("25");
+      expect(sanitizeDurationMinutesInput(" 45m ")).toBe("45");
+      expect(sanitizeDurationMinutesInput("12a34")).toBe("123");
+      expect(sanitizeDurationMinutesInput("9999")).toBe("999");
+      expect(sanitizeDurationMinutesInput("abc")).toBe("");
+    });
+  });
+
+  describe("parseDurationMinutesInput", () => {
+    it("parses valid whole minutes within [1, 180]", () => {
+      expect(parseDurationMinutesInput("1", 10)).toBe(1);
+      expect(parseDurationMinutesInput("25", 10)).toBe(25);
+      expect(parseDurationMinutesInput("90", 10)).toBe(90);
+      expect(parseDurationMinutesInput("180", 10)).toBe(180);
+    });
+
+    it("clamps out-of-range numeric inputs to [1, 180]", () => {
+      expect(parseDurationMinutesInput("0", 10)).toBe(1);
+      expect(parseDurationMinutesInput("000", 10)).toBe(1);
+      expect(parseDurationMinutesInput("250", 10)).toBe(180);
+      expect(parseDurationMinutesInput("999", 10)).toBe(180);
+    });
+
+    it("restores fallback duration when input is empty or non-numeric", () => {
+      expect(parseDurationMinutesInput("", 15)).toBe(15);
+      expect(parseDurationMinutesInput("   ", 20)).toBe(20);
+      expect(parseDurationMinutesInput("min", 12)).toBe(12);
     });
   });
 });

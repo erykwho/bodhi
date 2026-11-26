@@ -1,5 +1,5 @@
 import React from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import Svg, { Circle } from "react-native-svg";
 import { useBodhiTheme } from "../../state/ThemeContext";
 
@@ -15,6 +15,17 @@ interface PracticeDialProps {
   /** Optional subtle amber accent (e.g. during warm-up or retention). */
   accentTone?: "sage" | "amber";
   size?: number;
+  /** Enables tap-to-edit on the primary display when idle. */
+  editable?: boolean;
+  isEditing?: boolean;
+  editValue?: string;
+  editUnit?: string;
+  editAccessibilityLabel?: string;
+  inputAccessibilityLabel?: string;
+  onPressPrimary?: () => void;
+  onChangeEditValue?: (value: string) => void;
+  onSubmitEdit?: () => void;
+  onBlurEdit?: () => void;
 }
 
 export function PracticeDial({
@@ -24,6 +35,16 @@ export function PracticeDial({
   orbScale,
   accentTone = "sage",
   size = 248,
+  editable = false,
+  isEditing = false,
+  editValue = "",
+  editUnit = "min",
+  editAccessibilityLabel,
+  inputAccessibilityLabel,
+  onPressPrimary,
+  onChangeEditValue,
+  onSubmitEdit,
+  onBlurEdit,
 }: PracticeDialProps) {
   const { colors } = useBodhiTheme();
   const strokeWidth = 6;
@@ -77,12 +98,63 @@ export function PracticeDial({
       </Svg>
 
       <View style={styles.center}>
-        <Text
-          style={[styles.primary, { color: colors.foreground }]}
-          numberOfLines={1}
-        >
-          {primaryText}
-        </Text>
+        {isEditing ? (
+          <View
+            style={[
+              styles.editBox,
+              {
+                backgroundColor: colors.surfaceMuted,
+                borderColor: colors.accent,
+              },
+            ]}
+          >
+            <TextInput
+              value={editValue}
+              onChangeText={onChangeEditValue}
+              onSubmitEditing={onSubmitEdit}
+              onBlur={onBlurEdit}
+              keyboardType="number-pad"
+              returnKeyType="done"
+              maxLength={3}
+              autoFocus
+              selectTextOnFocus
+              accessibilityLabel={inputAccessibilityLabel}
+              style={[styles.editInput, { color: colors.foreground }]}
+            />
+            <Text
+              style={[styles.editUnit, { color: colors.foregroundMuted }]}
+            >
+              {editUnit}
+            </Text>
+          </View>
+        ) : editable && onPressPrimary ? (
+          <Pressable
+            onPress={onPressPrimary}
+            accessibilityRole="button"
+            accessibilityLabel={editAccessibilityLabel}
+            style={({ pressed }) => [
+              styles.editableTrigger,
+              {
+                borderBottomColor: colors.border,
+                backgroundColor: pressed ? colors.surfaceMuted : "transparent",
+              },
+            ]}
+          >
+            <Text
+              style={[styles.primary, { color: colors.foreground }]}
+              numberOfLines={1}
+            >
+              {primaryText}
+            </Text>
+          </Pressable>
+        ) : (
+          <Text
+            style={[styles.primary, { color: colors.foreground }]}
+            numberOfLines={1}
+          >
+            {primaryText}
+          </Text>
+        )}
         {secondaryText ? (
           <Text
             style={[styles.secondary, { color: colors.foregroundMuted }]}
@@ -115,6 +187,36 @@ const styles = StyleSheet.create({
     fontWeight: "300",
     letterSpacing: -1,
     fontVariant: ["tabular-nums"],
+  },
+  editableTrigger: {
+    paddingHorizontal: 10,
+    paddingVertical: 2,
+    borderRadius: 12,
+    borderBottomWidth: 1,
+    borderStyle: "dashed",
+  },
+  editBox: {
+    flexDirection: "row",
+    alignItems: "baseline",
+    justifyContent: "center",
+    gap: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 4,
+    borderRadius: 14,
+    borderWidth: 1,
+  },
+  editInput: {
+    fontSize: 40,
+    fontWeight: "300",
+    letterSpacing: -1,
+    fontVariant: ["tabular-nums"],
+    textAlign: "center",
+    minWidth: 72,
+    padding: 0,
+  },
+  editUnit: {
+    fontSize: 14,
+    fontWeight: "500",
   },
   secondary: {
     fontSize: 13,
