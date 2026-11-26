@@ -4,30 +4,41 @@ import { prisma } from "@/lib/prisma";
 import { parseTimerPreferences } from "@/lib/timer/preferences";
 import { MAX_TIMER_PRESETS } from "@/lib/timer/presets";
 
+import {
+  PLAYLIST_INCLUDE_ITEMS,
+  serializePlaylist,
+} from "@/lib/tracks/playlist-server";
+
 export async function GET() {
   try {
     const user = await requireUser();
 
-    const [trackRows, sessionRows, presetRows] = await Promise.all([
-      prisma.favoriteTrack.findMany({
-        where: { userId: user.id },
-        orderBy: [
-          { isFavorite: "desc" },
-          { position: "asc" },
-          { createdAt: "desc" },
-        ],
-      }),
-      prisma.meditationSession.findMany({
-        where: { userId: user.id },
-        orderBy: { endedAt: "desc" },
-        take: 200,
-      }),
-      prisma.timerPreset.findMany({
-        where: { userId: user.id },
-        orderBy: { createdAt: "asc" },
-        take: MAX_TIMER_PRESETS,
-      }),
-    ]);
+    const [trackRows, playlistRows, sessionRows, presetRows] =
+      await Promise.all([
+        prisma.favoriteTrack.findMany({
+          where: { userId: user.id },
+          orderBy: [
+            { isFavorite: "desc" },
+            { position: "asc" },
+            { createdAt: "desc" },
+          ],
+        }),
+        prisma.trackPlaylist.findMany({
+          where: { userId: user.id },
+          orderBy: [{ position: "asc" }, { createdAt: "desc" }],
+          include: PLAYLIST_INCLUDE_ITEMS,
+        }),
+        prisma.meditationSession.findMany({
+          where: { userId: user.id },
+          orderBy: { endedAt: "desc" },
+          take: 200,
+        }),
+        prisma.timerPreset.findMany({
+          where: { userId: user.id },
+          orderBy: { createdAt: "asc" },
+          take: MAX_TIMER_PRESETS,
+        }),
+      ]);
 
     return NextResponse.json(
       {
@@ -49,6 +60,7 @@ export async function GET() {
           isFavorite: track.isFavorite,
           createdAt: track.createdAt.toISOString(),
         })),
+        playlists: playlistRows.map(serializePlaylist),
         sessions: sessionRows.map((session) => ({
           id: session.id,
           mode: session.mode,

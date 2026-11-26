@@ -23,7 +23,10 @@ import {
 } from "@bodhi/core/offline/queue";
 import type { TimerPresetItem } from "@bodhi/core/timer/presets";
 import type { TimerPreferences } from "@bodhi/core/timer/types";
-import type { FavoriteTrackItem } from "@bodhi/core/tracks/types";
+import type {
+  FavoriteTrackItem,
+  TrackPlaylistItem,
+} from "@bodhi/core/tracks/types";
 import { bodhiApi, subscribeSessionExpired } from "../platform/api";
 import { recordMindfulSessionIfEnabled } from "../platform/health";
 import { useOnlineStatus } from "../platform/network";
@@ -35,8 +38,10 @@ import {
 } from "../platform/secure-tokens";
 import {
   mobileOfflineQueue,
+  readCachedPlaylists,
   readCachedTracks,
   readLocalPresets,
+  writeCachedPlaylists,
   writeCachedTracks,
   writeLocalPresets,
 } from "../platform/storage";
@@ -48,9 +53,11 @@ interface AppDataContextValue {
   isSyncing: boolean;
   pendingCount: number;
   tracks: FavoriteTrackItem[];
+  playlists: TrackPlaylistItem[];
   sessions: MeditationSessionItem[];
   presets: TimerPresetItem[];
   setTracks: React.Dispatch<React.SetStateAction<FavoriteTrackItem[]>>;
+  setPlaylists: React.Dispatch<React.SetStateAction<TrackPlaylistItem[]>>;
   refreshAll: () => Promise<void>;
   signInWithGoogle: () => Promise<void>;
   signInWithApple: () => Promise<void>;
@@ -83,6 +90,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
   const [isHydrated, setIsHydrated] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [tracks, setTracks] = useState<FavoriteTrackItem[]>([]);
+  const [playlists, setPlaylists] = useState<TrackPlaylistItem[]>([]);
   const [sessions, setSessions] = useState<MeditationSessionItem[]>([]);
   const [presets, setPresets] = useState<TimerPresetItem[]>(() =>
     readLocalPresets()
@@ -115,6 +123,12 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       setTracks(data.tracks);
       writeCachedTracks(uid, data.tracks);
 
+      const remotePlaylists = Array.isArray(data.playlists)
+        ? data.playlists
+        : [];
+      setPlaylists(remotePlaylists);
+      writeCachedPlaylists(uid, remotePlaylists);
+
       const pending = mobileOfflineQueue.readPendingSessions(uid);
       const merged = mergeSessionsWithPending(data.sessions, pending);
       setSessions(merged);
@@ -138,11 +152,13 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       if (stored.user) {
         setUser(stored.user);
         const cachedTracks = readCachedTracks(stored.user.id);
+        const cachedPlaylists = readCachedPlaylists(stored.user.id);
         const cachedSessions = mobileOfflineQueue.readCachedHistory(
           stored.user.id
         );
         const pending = mobileOfflineQueue.readPendingSessions(stored.user.id);
         setTracks(cachedTracks);
+        setPlaylists(cachedPlaylists);
         setSessions(mergeSessionsWithPending(cachedSessions, pending));
         setIsHydrated(true);
 
@@ -160,6 +176,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     const unsubscribe = subscribeSessionExpired(() => {
       setUser(null);
       setTracks([]);
+      setPlaylists([]);
       setSessions([]);
       setPresets(readLocalPresets());
     });
@@ -302,6 +319,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     }
     setUser(null);
     setTracks([]);
+    setPlaylists([]);
     setSessions([]);
     setPresets(readLocalPresets());
   }, [isOnline]);
@@ -311,6 +329,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     await clearMobileSession();
     setUser(null);
     setTracks([]);
+    setPlaylists([]);
     setSessions([]);
     setPresets(readLocalPresets());
   }, []);
@@ -489,9 +508,11 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       isSyncing,
       pendingCount,
       tracks,
+      playlists,
       sessions,
       presets,
       setTracks,
+      setPlaylists,
       refreshAll,
       signInWithGoogle,
       signInWithApple,
@@ -510,6 +531,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
       isSyncing,
       pendingCount,
       tracks,
+      playlists,
       sessions,
       presets,
       refreshAll,

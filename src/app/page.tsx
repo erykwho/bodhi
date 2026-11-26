@@ -5,7 +5,11 @@ import type { MeditationSessionItem } from "@/lib/history/types";
 import { prisma } from "@/lib/prisma";
 import { parseTimerPreferences } from "@/lib/timer/preferences";
 import { MAX_TIMER_PRESETS, type TimerPresetItem } from "@/lib/timer/presets";
-import type { FavoriteTrackItem } from "@/lib/tracks/types";
+import {
+  PLAYLIST_INCLUDE_ITEMS,
+  serializePlaylist,
+} from "@/lib/tracks/playlist-server";
+import type { FavoriteTrackItem, TrackPlaylistItem } from "@/lib/tracks/types";
 
 export const dynamic = "force-dynamic";
 
@@ -20,31 +24,38 @@ export default async function HomePage(props: {
   const user = await getOptionalSessionUser();
 
   let initialTracks: FavoriteTrackItem[] = [];
+  let initialPlaylists: TrackPlaylistItem[] = [];
   let initialSessions: MeditationSessionItem[] = [];
   let initialPresets: TimerPresetItem[] = [];
 
   if (user) {
     try {
-      const [trackRows, sessionRows, presetRows] = await Promise.all([
-        prisma.favoriteTrack.findMany({
-          where: { userId: user.id },
-          orderBy: [
-            { isFavorite: "desc" },
-            { position: "asc" },
-            { createdAt: "desc" },
-          ],
-        }),
-        prisma.meditationSession.findMany({
-          where: { userId: user.id },
-          orderBy: { endedAt: "desc" },
-          take: 200,
-        }),
-        prisma.timerPreset.findMany({
-          where: { userId: user.id },
-          orderBy: { createdAt: "asc" },
-          take: MAX_TIMER_PRESETS,
-        }),
-      ]);
+      const [trackRows, playlistRows, sessionRows, presetRows] =
+        await Promise.all([
+          prisma.favoriteTrack.findMany({
+            where: { userId: user.id },
+            orderBy: [
+              { isFavorite: "desc" },
+              { position: "asc" },
+              { createdAt: "desc" },
+            ],
+          }),
+          prisma.trackPlaylist.findMany({
+            where: { userId: user.id },
+            orderBy: [{ position: "asc" }, { createdAt: "desc" }],
+            include: PLAYLIST_INCLUDE_ITEMS,
+          }),
+          prisma.meditationSession.findMany({
+            where: { userId: user.id },
+            orderBy: { endedAt: "desc" },
+            take: 200,
+          }),
+          prisma.timerPreset.findMany({
+            where: { userId: user.id },
+            orderBy: { createdAt: "asc" },
+            take: MAX_TIMER_PRESETS,
+          }),
+        ]);
 
       initialTracks = trackRows.map((track) => ({
         id: track.id,
@@ -58,6 +69,8 @@ export default async function HomePage(props: {
         isFavorite: track.isFavorite,
         createdAt: track.createdAt.toISOString(),
       }));
+
+      initialPlaylists = playlistRows.map(serializePlaylist);
 
       initialSessions = sessionRows.map((session) => ({
         id: session.id,
@@ -90,6 +103,7 @@ export default async function HomePage(props: {
       user={user}
       authConfigured={authConfigured}
       initialTracks={initialTracks}
+      initialPlaylists={initialPlaylists}
       initialSessions={initialSessions}
       initialPresets={initialPresets}
       authError={authError}

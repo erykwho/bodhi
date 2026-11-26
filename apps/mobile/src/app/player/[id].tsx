@@ -3,26 +3,37 @@ import { useKeepAwake } from "expo-keep-awake";
 import * as Linking from "expo-linking";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import {
+  Check,
   ExternalLink,
   EyeOff,
+  ListMusic,
   Pause,
   Play,
+  RotateCcw,
+  SkipBack,
+  SkipForward,
   Square,
   Star,
   X,
 } from "lucide-react-native";
-import React, { useCallback, useEffect, useRef, useState } from "react";
-import {
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-} from "react-native";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { WebView } from "react-native-webview";
 import { MIN_SAVEABLE_EARLY_STOP_SECONDS } from "@bodhi/core/history/stats";
 import { BODHI_RADIUS } from "@bodhi/core/theme";
 import { formatElapsedDisplay } from "@bodhi/core/timer/engine";
+import {
+  filterOfflinePlayablePlaylistTracks,
+  resolvePlaylistTracks,
+} from "@bodhi/core/tracks/playlists";
 import {
   buildSoundCloudEmbedUrl,
   isAudioStreamProvider,
@@ -36,21 +47,77 @@ import {
   triggerSelectionHaptic,
   triggerSuccessHaptic,
 } from "../../platform/haptics";
-import { getLocalAudioUri } from "../../platform/offline-audio";
+import {
+  getLocalAudioUri,
+  getOfflineAudioIndex,
+  subscribeOfflineAudioIndex,
+} from "../../platform/offline-audio";
 import { getAccessToken } from "../../platform/secure-tokens";
-import { timerPreferencesStore } from "../../platform/storage";
+import {
+  readGuidedAutoAdvance,
+  timerPreferencesStore,
+  writeGuidedAutoAdvance,
+} from "../../platform/storage";
 import { useBodhiData } from "../../state/AppDataContext";
 import { useBodhiI18n } from "../../state/I18nContext";
 import { useBodhiTheme } from "../../state/ThemeContext";
 
 export default function GuidedSessionPlayerScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, playlistId, index } = useLocalSearchParams<{
+    id: string;
+    playlistId?: string;
+    index?: string;
+  }>();
   const router = useRouter();
   const { colors } = useBodhiTheme();
   const { m } = useBodhiI18n();
-  const { tracks, setTracks, saveSession } = useBodhiData();
+  const { isOnline, tracks, playlists, setTracks, saveSession } =
+    useBodhiData();
 
-  const track = tracks.find((t) => t.id === id) ?? null;
+  const offlineAudio = useSyncExternalStore(
+    subscribeOfflineAudioIndex,
+    getOfflineAudioIndex,
+    getOfflineAudioIndex
+  );
+
+  const activePlaylist = useMemo(
+    () => (playlistId ? playlists.find((p) => p.id === playlistId) ?? null : null),
+    [playlistId, playlists]
+  );
+
+  const playlistQueue = useMemo(() => {
+    if (!activePlaylist) return null;
+    return isOnline
+      ? resolvePlaylistTracks(activePlaylist, tracks)
+      : filterOfflinePlayablePlaylistTracks(activePlaylist, tracks, offlineAudio);
+  }, [activePlaylist, isOnline, offlineAudio, tracks]);
+
+  const initialQueueIndex = useMemo(() => {
+    if (!playlistQueue || playlistQueue.length === 0) return 0;
+    const parsed = index !== undefined ? Number.parseInt(index, 10) : NaN;
+    if (Number.isFinite(parsed) && parsed >= 0 && parsed < playlistQueue.length) {
+      return parsed;
+    }
+    const found = playlistQueue.findIndex((item) => item.id === id);
+    return found >= 0 ? found : 0;
+  }, [id, index, playlistQueue]);
+
+  const [queueIndex, setQueueIndex] = useState<number>(initialQueueIndex);
+  const [autoAdvance, setAutoAdvance] = useState<boolean>(() =>
+    readGuidedAutoAdvance()
+  );
+  const [completedState, setCompletedState] = useState<{
+    durationSec: number;
+  } | null>(null);
+
+  const track = useMemo(() => {
+    if (playlistQueue && playlistQueue.length > 0) {
+      const clamped = Math.max(0, Math.min(queueIndex, playlistQueue.length - 1));
+      return playlistQueue[clamped] ?? null;
+    }
+    return tracks.find((t) => t.id === id) ?? null;
+  }, [id, playlistQueue, queueIndex, tracks]);
+
   const timerPrefs = timerPreferencesStore.getSnapshot();
 
   const [audioSource, setAudioSource] = useState<
@@ -66,12 +133,22 @@ export default function GuidedSessionPlayerScreen() {
   const startedAtRef = useRef<string>(new Date().toISOString());
   const companionStartEpochRef = useRef<number>(Date.now());
   const loggedCompletionRef = useRef(false);
+  const pendingAutoPlayRef = useRef(false);
 
   const isNativeAudio = track ? isAudioStreamProvider(track.provider) : false;
+  const hasPrevious = Boolean(playlistQueue && queueIndex > 0);
+  const hasNext = Boolean(
+    playlistQueue && queueIndex + 1 < playlistQueue.length
+  );
+  const nextTrack =
+    playlistQueue && hasNext ? playlistQueue[queueIndex + 1] : null;
 
   // Resolve local offline file:// URI or Bearer-authenticated stream URL
   useEffect(() => {
-    if (!track || !isNativeAudio) return;
+    if (!track || !isNativeAudio) {
+      setAudioSource(null);
+      return;
+    }
 
     let cancelled = false;
     const resolve = async () => {
@@ -108,6 +185,15 @@ export default function GuidedSessionPlayerScreen() {
   });
   const playerStatus = useAudioPlayerStatus(player);
 
+  // Trigger autoplay once the next track's native audio source is loaded
+  useEffect(() => {
+    if (!pendingAutoPlayRef.current || !isNativeAudio || !audioSource) return;
+    if (playerStatus.isLoaded) {
+      pendingAutoPlayRef.current = false;
+      player.play();
+    }
+  }, [audioSource, isNativeAudio, player, playerStatus.isLoaded]);
+
   useKeepAwake(
     playerStatus.playing || (companionActive && !companionPaused)
       ? "bodhi-guided-player"
@@ -134,21 +220,45 @@ export default function GuidedSessionPlayerScreen() {
     };
   }, [companionActive, isNativeAudio, player, track]);
 
+  const switchQueueIndex = useCallback(
+    (nextIdx: number, autoStart: boolean) => {
+      if (!playlistQueue || nextIdx < 0 || nextIdx >= playlistQueue.length) {
+        return;
+      }
+      if (isNativeAudio) {
+        player.pause();
+      }
+      loggedCompletionRef.current = false;
+      startedAtRef.current = new Date().toISOString();
+      pendingAutoPlayRef.current = autoStart;
+      setCompletedState(null);
+      setCompanionActive(false);
+      setCompanionPaused(false);
+      setCompanionElapsedMs(0);
+      setEmbedError(false);
+      setShowEarlyFinish(false);
+      setQueueIndex(nextIdx);
+    },
+    [isNativeAudio, player, playlistQueue]
+  );
+
   const finishTrackSession = useCallback(
-    async (completed: boolean, actualSec: number) => {
+    async (completed: boolean, actualSec: number, exitAfter = false) => {
       if (!track || loggedCompletionRef.current) return;
       loggedCompletionRef.current = true;
+
+      const shouldAutoAdvance = Boolean(
+        completed &&
+          !exitAfter &&
+          activePlaylist &&
+          autoAdvance &&
+          hasNext &&
+          !companionActive
+      );
 
       if (isNativeAudio) {
         player.pause();
       }
-      setZenDim(false);
-      triggerSuccessHaptic();
-      nativeAudioEngine.playBellStrikes(
-        timerPrefs.endBell,
-        timerPrefs.endBellStrikes,
-        timerPrefs.bellVolume
-      );
 
       await saveSession({
         mode: "TRACK",
@@ -162,14 +272,38 @@ export default function GuidedSessionPlayerScreen() {
         startedAt: startedAtRef.current,
       });
 
-      router.back();
+      if (shouldAutoAdvance) {
+        switchQueueIndex(queueIndex + 1, true);
+        return;
+      }
+
+      setZenDim(false);
+      triggerSuccessHaptic();
+      nativeAudioEngine.playBellStrikes(
+        timerPrefs.endBell,
+        timerPrefs.endBellStrikes,
+        timerPrefs.bellVolume
+      );
+
+      if (exitAfter || !activePlaylist) {
+        router.back();
+        return;
+      }
+
+      setCompletedState({ durationSec: Math.max(1, actualSec) });
     },
     [
+      activePlaylist,
+      autoAdvance,
+      companionActive,
+      hasNext,
       isNativeAudio,
       player,
       playerStatus.duration,
+      queueIndex,
       router,
       saveSession,
+      switchQueueIndex,
       timerPrefs.bellVolume,
       timerPrefs.endBell,
       timerPrefs.endBellStrikes,
@@ -177,7 +311,7 @@ export default function GuidedSessionPlayerScreen() {
     ]
   );
 
-  // Auto-log & ring closing bell when native audio track finishes naturally
+  // Auto-log & ring closing bell (or auto-advance) when native audio finishes naturally
   useEffect(() => {
     if (
       isNativeAudio &&
@@ -188,7 +322,7 @@ export default function GuidedSessionPlayerScreen() {
         1,
         Math.round(playerStatus.duration || playerStatus.currentTime)
       );
-      void finishTrackSession(true, dur);
+      void finishTrackSession(true, dur, false);
     }
   }, [
     finishTrackSession,
@@ -230,6 +364,13 @@ export default function GuidedSessionPlayerScreen() {
     await bodhiApi.updateTrack(track.id, { isFavorite: nextFav }).catch(() => {});
   };
 
+  const handleToggleAutoAdvance = () => {
+    triggerSelectionHaptic();
+    const next = !autoAdvance;
+    setAutoAdvance(next);
+    writeGuidedAutoAdvance(next);
+  };
+
   if (!track) {
     return (
       <SafeAreaView
@@ -250,6 +391,10 @@ export default function GuidedSessionPlayerScreen() {
     : Math.floor(playerStatus.currentTime || 0);
 
   const handleRequestFinish = () => {
+    if (completedState) {
+      router.back();
+      return;
+    }
     if (currentSec >= MIN_SAVEABLE_EARLY_STOP_SECONDS) {
       if (isNativeAudio) player.pause();
       if (companionActive) setCompanionPaused(true);
@@ -309,8 +454,188 @@ export default function GuidedSessionPlayerScreen() {
         </Pressable>
       </View>
 
+      {activePlaylist && playlistQueue && !completedState ? (
+        <View style={styles.playlistBarWrap}>
+          <View
+            style={[
+              styles.playlistBar,
+              { backgroundColor: colors.surface, borderColor: colors.border },
+            ]}
+          >
+            <View style={styles.playlistBarMeta}>
+              <ListMusic size={14} color={colors.accent} />
+              <View style={styles.playlistBarText}>
+                <Text
+                  style={[styles.playlistBarName, { color: colors.foreground }]}
+                  numberOfLines={1}
+                >
+                  {activePlaylist.name}
+                </Text>
+                <Text
+                  style={[
+                    styles.playlistBarCount,
+                    { color: colors.foregroundMuted },
+                  ]}
+                >
+                  {m.guided.player.queueProgress(
+                    queueIndex + 1,
+                    playlistQueue.length
+                  )}
+                </Text>
+              </View>
+            </View>
+
+            <View style={styles.playlistBarControls}>
+              <Pressable
+                onPress={handleToggleAutoAdvance}
+                style={[
+                  styles.autoAdvanceChip,
+                  {
+                    backgroundColor: autoAdvance
+                      ? colors.accentSoft
+                      : colors.surfaceMuted,
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.autoAdvanceText,
+                    {
+                      color: autoAdvance
+                        ? colors.accent
+                        : colors.foregroundMuted,
+                    },
+                  ]}
+                >
+                  {m.guided.player.autoAdvance}:{" "}
+                  {autoAdvance ? m.common.on : m.common.off}
+                </Text>
+              </Pressable>
+
+              <Pressable
+                disabled={!hasPrevious}
+                onPress={() => {
+                  triggerSelectionHaptic();
+                  switchQueueIndex(queueIndex - 1, true);
+                }}
+                style={[styles.skipBtn, { opacity: hasPrevious ? 1 : 0.3 }]}
+              >
+                <SkipBack size={15} color={colors.foreground} />
+              </Pressable>
+
+              <Pressable
+                disabled={!hasNext}
+                onPress={() => {
+                  triggerSelectionHaptic();
+                  switchQueueIndex(queueIndex + 1, true);
+                }}
+                style={[styles.skipBtn, { opacity: hasNext ? 1 : 0.3 }]}
+              >
+                <SkipForward size={15} color={colors.foreground} />
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      ) : null}
+
       <View style={styles.content}>
-        {isNativeAudio ? (
+        {completedState ? (
+          <View style={styles.nativePlayerBox}>
+            <View
+              style={[
+                styles.completeBadge,
+                { backgroundColor: colors.accentSoft },
+              ]}
+            >
+              <Check size={28} color={colors.accent} />
+            </View>
+            <Text style={[styles.completeTitle, { color: colors.foreground }]}>
+              {hasNext
+                ? m.guided.player.sessionComplete
+                : m.guided.player.playlistComplete}
+            </Text>
+            <Text
+              style={[styles.completeSub, { color: colors.foregroundMuted }]}
+            >
+              {track.title}
+            </Text>
+            {activePlaylist && playlistQueue ? (
+              <Text
+                style={[styles.completeSub, { color: colors.foregroundMuted }]}
+              >
+                {activePlaylist.name} ·{" "}
+                {m.guided.player.queueProgress(
+                  queueIndex + 1,
+                  playlistQueue.length
+                )}
+              </Text>
+            ) : null}
+
+            <View style={styles.companionBtns}>
+              {hasNext ? (
+                <Pressable
+                  onPress={() => {
+                    triggerSelectionHaptic();
+                    switchQueueIndex(queueIndex + 1, true);
+                  }}
+                  style={[styles.primaryBtn, { backgroundColor: colors.accent }]}
+                >
+                  <Text style={styles.primaryBtnText} numberOfLines={1}>
+                    {nextTrack
+                      ? m.guided.player.nextTrackWithTitle(nextTrack.title)
+                      : m.guided.player.nextTrack}
+                  </Text>
+                </Pressable>
+              ) : null}
+
+              <Pressable
+                onPress={() => {
+                  triggerSelectionHaptic();
+                  loggedCompletionRef.current = false;
+                  startedAtRef.current = new Date().toISOString();
+                  setCompletedState(null);
+                  if (isNativeAudio) {
+                    player.seekTo(0);
+                    player.play();
+                  }
+                }}
+                style={[
+                  styles.secondaryBtn,
+                  { backgroundColor: colors.surfaceMuted },
+                ]}
+              >
+                <View style={styles.inlineRow}>
+                  <RotateCcw size={14} color={colors.foreground} />
+                  <Text
+                    style={[
+                      styles.secondaryBtnText,
+                      { color: colors.foreground },
+                    ]}
+                  >
+                    {m.guided.player.replay}
+                  </Text>
+                </View>
+              </Pressable>
+
+              <Pressable
+                onPress={() => router.back()}
+                style={[
+                  styles.secondaryBtn,
+                  { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.secondaryBtnText,
+                    { color: colors.foregroundMuted },
+                  ]}
+                >
+                  {m.guided.player.backToPlaylist}
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        ) : isNativeAudio ? (
           <View style={styles.nativePlayerBox}>
             <Text style={[styles.bigClock, { color: colors.foreground }]}>
               {formatElapsedDisplay((playerStatus.currentTime || 0) * 1000)}
@@ -361,7 +686,9 @@ export default function GuidedSessionPlayerScreen() {
             <Text
               style={[styles.companionBadge, { color: colors.warmAmber }]}
             >
-              External Companion Mode
+              {m.guided.player.externalListening(
+                TRACK_PROVIDER_LABELS[track.provider]
+              )}
             </Text>
             <Text style={[styles.bigClock, { color: colors.foreground }]}>
               {formatElapsedDisplay(companionElapsedMs)}
@@ -386,6 +713,26 @@ export default function GuidedSessionPlayerScreen() {
               </Pressable>
 
               <Pressable
+                onPress={() =>
+                  void finishTrackSession(
+                    true,
+                    Math.max(1, Math.floor(companionElapsedMs / 1000)),
+                    false
+                  )
+                }
+                style={[
+                  styles.secondaryBtn,
+                  { backgroundColor: colors.accentSoft },
+                ]}
+              >
+                <Text
+                  style={[styles.secondaryBtnText, { color: colors.accent }]}
+                >
+                  {m.guided.player.completeSession}
+                </Text>
+              </Pressable>
+
+              <Pressable
                 onPress={() => router.back()}
                 style={[
                   styles.secondaryBtn,
@@ -398,7 +745,7 @@ export default function GuidedSessionPlayerScreen() {
                     { color: colors.foregroundMuted },
                   ]}
                 >
-                  Discard without saving
+                  {m.guided.player.discardSession}
                 </Text>
               </Pressable>
             </View>
@@ -408,6 +755,7 @@ export default function GuidedSessionPlayerScreen() {
             {embedUrl && !embedError ? (
               <View style={styles.webviewContainer}>
                 <WebView
+                  key={track.id}
                   source={{ uri: embedUrl }}
                   allowsInlineMediaPlayback
                   mediaPlaybackRequiresUserAction={false}
@@ -431,8 +779,7 @@ export default function GuidedSessionPlayerScreen() {
                     { color: colors.foregroundMuted },
                   ]}
                 >
-                  Embedded playback is unavailable for this link. Open it in the
-                  external app and track your session in Bodhi.
+                  {m.guided.player.ytLoadError}
                 </Text>
               </View>
             )}
@@ -451,40 +798,44 @@ export default function GuidedSessionPlayerScreen() {
                   { color: colors.foreground },
                 ]}
               >
-                Open in {TRACK_PROVIDER_LABELS[track.provider]} & Track
+                {m.guided.player.openExternalAndTrack(
+                  TRACK_PROVIDER_LABELS[track.provider]
+                )}
               </Text>
             </Pressable>
           </View>
         )}
 
         {/* Shared Bottom Action Bar (Zen Dim + Finish) */}
-        <View style={styles.bottomActions}>
-          <Pressable
-            onPress={() => setZenDim(true)}
-            style={[
-              styles.pillBtn,
-              { backgroundColor: colors.surface, borderColor: colors.border },
-            ]}
-          >
-            <EyeOff size={14} color={colors.foregroundMuted} />
-            <Text style={[styles.pillText, { color: colors.foregroundMuted }]}>
-              {m.timer.dimScreen}
-            </Text>
-          </Pressable>
+        {!completedState ? (
+          <View style={styles.bottomActions}>
+            <Pressable
+              onPress={() => setZenDim(true)}
+              style={[
+                styles.pillBtn,
+                { backgroundColor: colors.surface, borderColor: colors.border },
+              ]}
+            >
+              <EyeOff size={14} color={colors.foregroundMuted} />
+              <Text style={[styles.pillText, { color: colors.foregroundMuted }]}>
+                {m.timer.dimScreen}
+              </Text>
+            </Pressable>
 
-          <Pressable
-            onPress={handleRequestFinish}
-            style={[
-              styles.pillBtn,
-              { backgroundColor: colors.surface, borderColor: colors.border },
-            ]}
-          >
-            <Square size={14} color={colors.foregroundMuted} />
-            <Text style={[styles.pillText, { color: colors.foregroundMuted }]}>
-              {m.timer.finish}
-            </Text>
-          </Pressable>
-        </View>
+            <Pressable
+              onPress={handleRequestFinish}
+              style={[
+                styles.pillBtn,
+                { backgroundColor: colors.surface, borderColor: colors.border },
+              ]}
+            >
+              <Square size={14} color={colors.foregroundMuted} />
+              <Text style={[styles.pillText, { color: colors.foregroundMuted }]}>
+                {m.timer.finish}
+              </Text>
+            </Pressable>
+          </View>
+        ) : null}
       </View>
 
       <ZenDimOverlay
@@ -499,7 +850,7 @@ export default function GuidedSessionPlayerScreen() {
         elapsedLabel={formatElapsedDisplay(currentSec * 1000)}
         onSave={() => {
           setShowEarlyFinish(false);
-          void finishTrackSession(false, currentSec);
+          void finishTrackSession(false, currentSec, true);
         }}
         onDiscard={() => {
           setShowEarlyFinish(false);
@@ -544,6 +895,41 @@ const styles = StyleSheet.create({
   headerMeta: { flex: 1, alignItems: "center" },
   trackTitle: { fontSize: 15, fontWeight: "600" },
   providerLabel: { fontSize: 12 },
+  playlistBarWrap: {
+    paddingHorizontal: 20,
+    paddingBottom: 6,
+  },
+  playlistBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    borderRadius: BODHI_RADIUS.lg,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    gap: 8,
+  },
+  playlistBarMeta: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    flex: 1,
+  },
+  playlistBarText: { flex: 1 },
+  playlistBarName: { fontSize: 12, fontWeight: "600" },
+  playlistBarCount: { fontSize: 10 },
+  playlistBarControls: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  autoAdvanceChip: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: BODHI_RADIUS.full,
+  },
+  autoAdvanceText: { fontSize: 10, fontWeight: "600" },
+  skipBtn: { padding: 4 },
   content: {
     flex: 1,
     paddingHorizontal: 20,
@@ -554,8 +940,17 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    gap: 16,
+    gap: 14,
   },
+  completeBadge: {
+    width: 64,
+    height: 64,
+    borderRadius: BODHI_RADIUS.full,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  completeTitle: { fontSize: 22, fontWeight: "700", textAlign: "center" },
+  completeSub: { fontSize: 13, textAlign: "center" },
   bigClock: {
     fontSize: 48,
     fontWeight: "300",
@@ -591,16 +986,19 @@ const styles = StyleSheet.create({
   },
   primaryBtn: {
     paddingVertical: 14,
+    paddingHorizontal: 16,
     borderRadius: BODHI_RADIUS.full,
     alignItems: "center",
   },
-  primaryBtnText: { color: "#ffffff", fontSize: 15, fontWeight: "600" },
+  primaryBtnText: { color: "#ffffff", fontSize: 14, fontWeight: "600" },
   secondaryBtn: {
     paddingVertical: 12,
+    paddingHorizontal: 16,
     borderRadius: BODHI_RADIUS.full,
     alignItems: "center",
   },
   secondaryBtnText: { fontSize: 13, fontWeight: "600" },
+  inlineRow: { flexDirection: "row", alignItems: "center", gap: 6 },
   embedBox: {
     flex: 1,
     justifyContent: "center",

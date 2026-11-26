@@ -28,6 +28,7 @@
     "./tracks": "./src/tracks/index.ts",
     "./tracks/types": "./src/tracks/types.ts",
     "./tracks/providers": "./src/tracks/providers.ts",
+    "./tracks/playlists": "./src/tracks/playlists.ts",
     "./tracks/reorder": "./src/tracks/reorder.ts",
     "./tracks/youtube-player": "./src/tracks/youtube-player.ts",
     "./offline": "./src/offline/index.ts",

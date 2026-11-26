@@ -17,10 +17,13 @@ import {
   ExternalLink,
   EyeOff,
   Headphones,
+  ListMusic,
   Loader2,
   Pause,
   Play,
   RotateCcw,
+  SkipBack,
+  SkipForward,
   Square,
   Star,
   X,
@@ -207,6 +210,19 @@ function loadYouTubeApi(): Promise<YouTubeAPI> {
   });
 }
 
+export interface GuidedPlaylistPlaybackContext {
+  playlistName: string;
+  currentIndex: number;
+  totalTracks: number;
+  nextTrackTitle: string | null;
+  hasPrevious: boolean;
+  hasNext: boolean;
+  autoAdvance: boolean;
+  onToggleAutoAdvance: () => void;
+  onPreviousTrack: () => void;
+  onNextTrack: (autoStart: boolean) => void;
+}
+
 interface GuidedSessionPlayerProps {
   track: FavoriteTrackItem;
   closingBellEnabled: boolean;
@@ -214,6 +230,8 @@ interface GuidedSessionPlayerProps {
   userId?: string | null;
   isOnline?: boolean;
   isTogglingFavorite?: boolean;
+  autoStart?: boolean;
+  playlistContext?: GuidedPlaylistPlaybackContext | null;
   onToggleFavorite?: (track: FavoriteTrackItem) => void;
   onToggleClosingBell: () => void;
   onExit: () => void;
@@ -228,6 +246,8 @@ export function GuidedSessionPlayer({
   userId = null,
   isOnline = true,
   isTogglingFavorite = false,
+  autoStart = false,
+  playlistContext = null,
   onToggleFavorite,
   onToggleClosingBell,
   onExit,
@@ -418,21 +438,28 @@ export function GuidedSessionPlayer({
     playbackState === "playing" && !isStreamAudio
   );
 
+  const playlistContextRef = useRef<GuidedPlaylistPlaybackContext | null>(
+    playlistContext
+  );
+  const isExternalModeRef = useRef<boolean>(isExternalMode);
+  const autoStartAttemptedRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    playlistContextRef.current = playlistContext;
+  }, [playlistContext]);
+
+  useEffect(() => {
+    isExternalModeRef.current = isExternalMode;
+  }, [isExternalMode]);
+
   const handleTrackCompleted = useCallback(() => {
     const elapsedSec = Math.max(1, Math.round(flushListeningMs() / 1000));
-    setCompletedDurationSec(elapsedSec);
-    setIsDimmed(false);
-    setPlaybackState("completed");
-
-    if (closingBellRef.current) {
-      const audio = getAudioEngine();
-      audio.unlock({ bells: [closingBellSoundRef.current] });
-      audio.playBellStrikes(
-        closingBellSoundRef.current,
-        closingBellStrikesRef.current,
-        closingBellVolumeRef.current
-      );
-    }
+    const currentPlaylist = playlistContextRef.current;
+    const shouldAutoAdvance = Boolean(
+      currentPlaylist?.autoAdvance &&
+        currentPlaylist.hasNext &&
+        !isExternalModeRef.current
+    );
 
     if (isAuthenticated) {
       void saveMeditationSession(
@@ -449,10 +476,31 @@ export function GuidedSessionPlayer({
         userId
       ).then((saved) => {
         if (saved) {
-          setSavedSessionId(saved.id);
+          if (!shouldAutoAdvance) {
+            setSavedSessionId(saved.id);
+          }
           onSessionSaved?.(saved);
         }
       });
+    }
+
+    if (shouldAutoAdvance && currentPlaylist) {
+      currentPlaylist.onNextTrack(true);
+      return;
+    }
+
+    setCompletedDurationSec(elapsedSec);
+    setIsDimmed(false);
+    setPlaybackState("completed");
+
+    if (closingBellRef.current) {
+      const audio = getAudioEngine();
+      audio.unlock({ bells: [closingBellSoundRef.current] });
+      audio.playBellStrikes(
+        closingBellSoundRef.current,
+        closingBellStrikesRef.current,
+        closingBellVolumeRef.current
+      );
     }
   }, [
     flushListeningMs,
@@ -465,6 +513,12 @@ export function GuidedSessionPlayer({
     userId,
   ]);
 
+  const playlistAlbumName = playlistContext?.playlistName ?? "Bodhi";
+  const playlistHasPrevious = playlistContext?.hasPrevious ?? false;
+  const playlistHasNext = playlistContext?.hasNext ?? false;
+  const onPlaylistPrevious = playlistContext?.onPreviousTrack ?? null;
+  const onPlaylistNext = playlistContext?.onNextTrack ?? null;
+
   // Unified Media Session API across Direct Audio, Google Drive, YouTube, and SoundCloud tracks.
   // Cleared during External Companion Mode so Bodhi never competes with the YouTube app's audio session.
   useEffect(() => {
@@ -476,11 +530,21 @@ export function GuidedSessionPlayer({
     setMediaSessionMetadata({
       title: track.title,
       artist: track.author ?? m.mediaSession.artist,
-      album: "Bodhi",
+      album: playlistAlbumName,
     });
+
+    const playlistNavHandlers = {
+      onPreviousTrack:
+        playlistHasPrevious && onPlaylistPrevious ? onPlaylistPrevious : null,
+      onNextTrack:
+        playlistHasNext && onPlaylistNext
+          ? () => onPlaylistNext(true)
+          : null,
+    };
 
     if (isStreamAudio) {
       setMediaSessionActionHandlers({
+        ...playlistNavHandlers,
         onPlay: () => {
           void directAudioRef.current?.play();
         },
@@ -509,12 +573,14 @@ export function GuidedSessionPlayer({
       });
     } else if (track.provider === "YOUTUBE") {
       setMediaSessionActionHandlers({
+        ...playlistNavHandlers,
         onPlay: () => ytPlayerRef.current?.playVideo(),
         onPause: () => ytPlayerRef.current?.pauseVideo(),
         onStop: () => ytPlayerRef.current?.pauseVideo(),
       });
     } else {
       setMediaSessionActionHandlers({
+        ...playlistNavHandlers,
         onPlay: () => scWidgetRef.current?.play(),
         onPause: () => scWidgetRef.current?.pause(),
         onStop: () => scWidgetRef.current?.pause(),
@@ -528,6 +594,11 @@ export function GuidedSessionPlayer({
     isExternalMode,
     isStreamAudio,
     m.mediaSession.artist,
+    onPlaylistNext,
+    onPlaylistPrevious,
+    playlistAlbumName,
+    playlistHasNext,
+    playlistHasPrevious,
     track.author,
     track.provider,
     track.title,
@@ -604,6 +675,14 @@ export function GuidedSessionPlayer({
               if (!cancelled) {
                 applyIframeReferrerPolicy();
                 setPlaybackState("ready");
+                if (autoStart && !autoStartAttemptedRef.current) {
+                  autoStartAttemptedRef.current = true;
+                  try {
+                    ytPlayerRef.current?.playVideo();
+                  } catch {
+                    // Gracefully wait for manual play if browser blocks autoplay
+                  }
+                }
               }
             },
             onStateChange: (event) => {
@@ -669,6 +748,7 @@ export function GuidedSessionPlayer({
       }
     };
   }, [
+    autoStart,
     flushListeningMs,
     getAudioEngine,
     handleTrackCompleted,
@@ -696,7 +776,17 @@ export function GuidedSessionPlayer({
         const Events = window.SC.Widget.Events;
 
         widget.bind(Events.READY, () => {
-          if (!cancelled) setPlaybackState("ready");
+          if (!cancelled) {
+            setPlaybackState("ready");
+            if (autoStart && !autoStartAttemptedRef.current) {
+              autoStartAttemptedRef.current = true;
+              try {
+                widget.play();
+              } catch {
+                // Gracefully wait for manual play if browser blocks autoplay
+              }
+            }
+          }
         });
         widget.bind(Events.PLAY, () => {
           if (!cancelled) {
@@ -751,6 +841,7 @@ export function GuidedSessionPlayer({
       scWidgetRef.current = null;
     };
   }, [
+    autoStart,
     embedRetryNonce,
     flushListeningMs,
     getAudioEngine,
@@ -983,6 +1074,22 @@ export function GuidedSessionPlayer({
   const resolvedAudioSrc =
     offlineBlobUrl ?? (!isOnline && isSavedOffline ? undefined : onlineAudioSrc);
 
+  // Attempt auto-start for HTML5 audio streams when advancing inside a playlist
+  useEffect(() => {
+    if (!autoStart || !isStreamAudio || !resolvedAudioSrc) return;
+    if (autoStartAttemptedRef.current) return;
+    const el = directAudioRef.current;
+    if (!el) return;
+    autoStartAttemptedRef.current = true;
+    void el.play().catch(() => {
+      // Mobile browsers may require user gesture; safely remain in ready state
+    });
+  }, [autoStart, isStreamAudio, resolvedAudioSrc]);
+
+  const isFinalPlaylistTrack = Boolean(
+    playlistContext && !playlistContext.hasNext
+  );
+
   return (
     <div className="flex flex-1 flex-col justify-between gap-5 py-2">
       {/* Top Session Bar */}
@@ -1000,7 +1107,9 @@ export function GuidedSessionPlayer({
           ) : (
             <>
               <ArrowLeft className="h-3.5 w-3.5" />
-              {m.guided.player.backToGuided}
+              {playlistContext
+                ? m.guided.playlists.backToPlaylists
+                : m.guided.player.backToGuided}
             </>
           )}
         </button>
@@ -1052,7 +1161,9 @@ export function GuidedSessionPlayer({
           </div>
           <div>
             <h2 className="text-2xl font-semibold tracking-tight text-[var(--foreground)]">
-              {m.guided.player.sessionComplete}
+              {isFinalPlaylistTrack
+                ? m.guided.player.playlistComplete
+                : m.guided.player.sessionComplete}
             </h2>
             <p className="mt-1.5 max-w-xs text-sm text-[var(--foreground-muted)]">
               {track.title}
@@ -1060,6 +1171,15 @@ export function GuidedSessionPlayer({
                 ? ` · ${formatSessionDuration(completedDurationSec)}`
                 : ""}
             </p>
+            {playlistContext && (
+              <p className="mt-1 text-xs text-[var(--foreground-muted)]">
+                {playlistContext.playlistName} ·{" "}
+                {m.guided.player.queueProgress(
+                  playlistContext.currentIndex + 1,
+                  playlistContext.totalTracks
+                )}
+              </p>
+            )}
             {savedSessionId && (
               <p className="mt-1.5 inline-flex items-center gap-1 rounded-full bg-[var(--accent-soft)] px-2.5 py-0.5 text-[11px] font-medium text-[var(--accent)]">
                 <Check className="h-3 w-3" />
@@ -1102,18 +1222,42 @@ export function GuidedSessionPlayer({
             </div>
           )}
 
-          <div className="mt-2 grid w-full grid-cols-2 gap-3">
+          {/* Direct Next Track action when pausing by default between playlist tracks */}
+          {playlistContext?.hasNext && (
+            <button
+              type="button"
+              onClick={() => playlistContext.onNextTrack(true)}
+              className="flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-[var(--accent)] px-4 text-sm font-semibold text-[#fcfaf6] transition-colors hover:bg-[var(--accent-strong)] dark:text-[#151917]"
+            >
+              <SkipForward className="h-4 w-4 shrink-0" />
+              <span className="truncate">
+                {playlistContext.nextTrackTitle
+                  ? m.guided.player.nextTrackWithTitle(
+                      playlistContext.nextTrackTitle
+                    )
+                  : m.guided.player.nextTrack}
+              </span>
+            </button>
+          )}
+
+          <div className="mt-1 grid w-full grid-cols-2 gap-3">
             <button
               type="button"
               onClick={onExit}
               className="flex h-12 items-center justify-center gap-2 rounded-2xl border border-black/8 bg-[var(--surface)] text-sm font-medium text-[var(--foreground)] transition-colors hover:bg-[var(--surface-muted)] dark:border-white/10"
             >
-              {m.guided.player.backToList}
+              {playlistContext
+                ? m.guided.player.backToPlaylist
+                : m.guided.player.backToList}
             </button>
             <button
               type="button"
               onClick={handleReplay}
-              className="flex h-12 items-center justify-center gap-2 rounded-2xl bg-[var(--accent)] text-sm font-semibold text-[#fcfaf6] transition-colors hover:bg-[var(--accent-strong)] dark:text-[#151917]"
+              className={`flex h-12 items-center justify-center gap-2 rounded-2xl text-sm font-semibold transition-colors ${
+                playlistContext?.hasNext
+                  ? "border border-black/8 bg-[var(--surface)] text-[var(--foreground)] hover:bg-[var(--surface-muted)] dark:border-white/10"
+                  : "bg-[var(--accent)] text-[#fcfaf6] hover:bg-[var(--accent-strong)] dark:text-[#151917]"
+              }`}
             >
               <RotateCcw className="h-4 w-4" />
               {m.guided.player.replay}
@@ -1122,6 +1266,60 @@ export function GuidedSessionPlayer({
         </div>
       ) : (
         <div className="flex flex-1 flex-col justify-center gap-4">
+          {/* Playlist Queue Bar */}
+          {playlistContext && (
+            <div className="flex items-center justify-between gap-2 rounded-2xl border border-black/6 bg-[var(--surface)] px-3 py-2 dark:border-white/10">
+              <div className="flex min-w-0 items-center gap-2">
+                <ListMusic className="h-3.5 w-3.5 shrink-0 text-[var(--accent)]" />
+                <div className="min-w-0">
+                  <p className="truncate text-xs font-medium text-[var(--foreground)]">
+                    {playlistContext.playlistName}
+                  </p>
+                  <p className="text-[10px] text-[var(--foreground-muted)]">
+                    {m.guided.player.queueProgress(
+                      playlistContext.currentIndex + 1,
+                      playlistContext.totalTracks
+                    )}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex shrink-0 items-center gap-1">
+                <button
+                  type="button"
+                  onClick={playlistContext.onToggleAutoAdvance}
+                  aria-pressed={playlistContext.autoAdvance}
+                  className={`rounded-full px-2.5 py-1 text-[10px] font-medium whitespace-nowrap transition-colors ${
+                    playlistContext.autoAdvance
+                      ? "bg-[var(--accent-soft)] text-[var(--accent)]"
+                      : "bg-[var(--surface-muted)] text-[var(--foreground-muted)] hover:text-[var(--foreground)]"
+                  }`}
+                >
+                  {m.guided.player.autoAdvance}:{" "}
+                  {playlistContext.autoAdvance ? m.common.on : m.common.off}
+                </button>
+                <button
+                  type="button"
+                  disabled={!playlistContext.hasPrevious}
+                  onClick={playlistContext.onPreviousTrack}
+                  aria-label={m.guided.player.previousTrack}
+                  className="flex h-7 w-7 items-center justify-center rounded-full text-[var(--foreground-muted)] transition-colors hover:bg-[var(--surface-muted)] hover:text-[var(--foreground)] disabled:opacity-30"
+                >
+                  <SkipBack className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  type="button"
+                  disabled={!playlistContext.hasNext}
+                  onClick={() => playlistContext.onNextTrack(true)}
+                  aria-label={m.guided.player.nextTrack}
+                  className="flex h-7 w-7 items-center justify-center rounded-full text-[var(--foreground-muted)] transition-colors hover:bg-[var(--surface-muted)] hover:text-[var(--foreground)] disabled:opacity-30"
+                >
+                  <SkipForward className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Track Heading */}
           <div className="text-center">
             <span className="inline-block rounded-full bg-[var(--surface-muted)] px-2.5 py-0.5 text-[11px] font-medium text-[var(--foreground-muted)]">

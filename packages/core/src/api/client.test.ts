@@ -114,4 +114,59 @@ describe("createBodhiApiClient", () => {
       "https://bodhi.app/api/tracks/trk%2F123/audio"
     );
   });
+
+  it("calls playlist CRUD and external import endpoints with expected paths and payloads", async () => {
+    const fetchFn = vi.fn(async () =>
+      mockResponse(200, {
+        playlist: {
+          id: "pl-1",
+          name: "Morning",
+          description: null,
+          trackIds: ["t1"],
+          createdAt: "2026-11-26T00:00:00.000Z",
+          updatedAt: "2026-11-26T00:00:00.000Z",
+        },
+        tracks: [],
+        addedCount: 1,
+        skippedDuplicateCount: 0,
+        skippedCapCount: 0,
+      })
+    );
+
+    const client = createBodhiApiClient({
+      baseUrl: "https://bodhi.app",
+      getAccessToken: () => "tok-1",
+      fetchFn,
+    });
+
+    await client.resolveExternalPlaylist(
+      "https://www.youtube.com/playlist?list=PL1234567890"
+    );
+    expect(fetchFn).toHaveBeenLastCalledWith(
+      "https://bodhi.app/api/playlists/resolve",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer tok-1",
+        },
+        body: JSON.stringify({
+          url: "https://www.youtube.com/playlist?list=PL1234567890",
+        }),
+      }
+    );
+
+    await client.reorderPlaylistTracks("pl/1", ["t2", "t1"]);
+    expect(fetchFn).toHaveBeenLastCalledWith(
+      "https://bodhi.app/api/playlists/pl%2F1/reorder",
+      {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer tok-1",
+        },
+        body: JSON.stringify({ orderedTrackIds: ["t2", "t1"] }),
+      }
+    );
+  });
 });

@@ -89,18 +89,32 @@ describe("media-session utility", () => {
     const onPlay = vi.fn();
     const onPause = vi.fn();
     const onStop = vi.fn();
-    setMediaSessionActionHandlers({ onPlay, onPause, onStop });
+    const onPreviousTrack = vi.fn();
+    const onNextTrack = vi.fn();
+    setMediaSessionActionHandlers({
+      onPlay,
+      onPause,
+      onStop,
+      onPreviousTrack,
+      onNextTrack,
+    });
     handlers.get("play")?.({ action: "play" });
     handlers.get("pause")?.({ action: "pause" });
     handlers.get("stop")?.({ action: "stop" });
+    handlers.get("previoustrack")?.({ action: "previoustrack" });
+    handlers.get("nexttrack")?.({ action: "nexttrack" });
     expect(onPlay).toHaveBeenCalledTimes(1);
     expect(onPause).toHaveBeenCalledTimes(1);
     expect(onStop).toHaveBeenCalledTimes(1);
+    expect(onPreviousTrack).toHaveBeenCalledTimes(1);
+    expect(onNextTrack).toHaveBeenCalledTimes(1);
 
     clearMediaSession();
     expect(mediaSession.metadata).toBeNull();
     expect(mediaSession.playbackState).toBe("none");
     expect(handlers.get("play")).toBeNull();
     expect(handlers.get("pause")).toBeNull();
+    expect(handlers.get("previoustrack")).toBeNull();
+    expect(handlers.get("nexttrack")).toBeNull();
   });
 });

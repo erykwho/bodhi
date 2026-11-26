@@ -5,6 +5,7 @@ export const enMessages = {
   common: {
     cancel: "Cancel",
     save: "Save",
+    delete: "Delete",
     done: "Done",
     edit: "Edit",
     clear: "Clear",
@@ -303,6 +304,109 @@ export const enMessages = {
     errFavoriteTrack: "Could not update favorite status.",
     errDeleteTrack: "Failed to delete track.",
     errReorderTracks: "Could not save the new order. Please try again.",
+    subModeAria: "Guided library view",
+    subModeTracks: "Tracks",
+    subModePlaylists: "Playlists",
+    playlistUrlDetectedHint: "Playlist link detected.",
+    importDetectedPlaylist: "Import playlist",
+    videoInPlaylistHint: "This video is part of a playlist.",
+    playlists: {
+      newPlaylist: "New Playlist",
+      importPlaylist: "Import",
+      importTitle: "Import External Playlist",
+      importUrlLabel: "YouTube Playlist or SoundCloud Set URL",
+      importUrlPlaceholder:
+        "youtube.com/playlist?list=... or soundcloud.com/.../sets/...",
+      resolveButton: "Load tracks",
+      resolving: "Loading playlist...",
+      nameLabel: "Playlist name",
+      namePlaceholder: "e.g. 21-Day Morning Practice",
+      descriptionLabel: "Description (optional)",
+      descriptionPlaceholder: "Short note about this sequence...",
+      createPlaylist: "Create Playlist",
+      creating: "Creating...",
+      trackCount: (count: number) =>
+        `${count} ${count === 1 ? "track" : "tracks"}`,
+      offlineTrackCount: (offlineCount: number, totalCount: number) =>
+        `${offlineCount}/${totalCount} offline`,
+      noPlaylistsTitle: "No playlists yet",
+      noPlaylistsBody:
+        "Create a custom meditation sequence or import a public YouTube playlist or SoundCloud set.",
+      offlineNoPlaylists: "No playlists with offline tracks on this device.",
+      playPlaylist: "Play",
+      playFromStart: "Play sequence",
+      addTracks: "Add tracks",
+      addTracksTitle: "Add tracks from your library",
+      addSelectedTracks: (count: number) =>
+        `Add ${count} ${count === 1 ? "track" : "tracks"}`,
+      allLibraryTracksAdded:
+        "All tracks from your library are already in this playlist.",
+      noLibraryTracksToAdd:
+        "Add guided tracks first to build a custom playlist.",
+      emptyPlaylistTitle: "This playlist is empty",
+      emptyPlaylistBody:
+        "Add tracks from your library or import a YouTube playlist or SoundCloud set.",
+      backToPlaylists: "Playlists",
+      editPlaylist: "Edit playlist",
+      deletePlaylist: "Delete playlist",
+      deleteConfirm:
+        "Delete this playlist? Your tracks will remain in your library.",
+      removeTrackAria: (title: string) => `Remove ${title} from playlist`,
+      addToPlaylistAria: (title: string) => `Add ${title} to playlist`,
+      addToPlaylistTitle: "Add to playlist",
+      quickCreatePlaylist: "New playlist with this track",
+      downloadOfflineAll: (count: number) =>
+        `Download offline (${count})`,
+      downloadingBatch: (current: number, total: number) =>
+        `Downloading ${current}/${total}...`,
+      allEligibleOffline: "Available offline",
+      offlineUnavailableTrack: "Needs internet",
+      importDestinationLabel: "Where should these tracks go?",
+      importModeNew: "Create new playlist",
+      importModeExisting: "Add to existing playlist",
+      selectExistingPlaylist: "Choose a playlist",
+      truncatedNotice: (limit: number, total: number) =>
+        `This playlist has ${total} tracks. Showing the first ${limit} tracks (import limit).`,
+      selectedTracksSummary: (selected: number, total: number) =>
+        `${selected} of ${total} selected`,
+      selectAll: "Select all",
+      deselectAll: "Clear",
+      importConfirmNew: (count: number) =>
+        `Create playlist (${count})`,
+      importConfirmExisting: (count: number) =>
+        `Add ${count} ${count === 1 ? "track" : "tracks"}`,
+      importing: "Importing...",
+      importSuccess: (
+        addedCount: number,
+        skippedDuplicates: number,
+        skippedCap: number
+      ) => {
+        const parts = [
+          `Imported ${addedCount} ${addedCount === 1 ? "track" : "tracks"}`,
+        ];
+        if (skippedDuplicates > 0) {
+          parts.push(`${skippedDuplicates} already in playlist`);
+        }
+        if (skippedCap > 0) {
+          parts.push(`${skippedCap} skipped (100-track limit)`);
+        }
+        return parts.join(" · ");
+      },
+      errEmptyName: "Playlist name cannot be empty.",
+      errInvalidPlaylistUrl:
+        "Paste a valid public YouTube playlist or SoundCloud set URL.",
+      errResolvePlaylist:
+        "Could not load tracks from this playlist. Make sure the link is public.",
+      errImportPlaylist: "Failed to import playlist tracks.",
+      errCreatePlaylist: "Failed to create playlist.",
+      errUpdatePlaylist: "Failed to update playlist.",
+      errDeletePlaylist: "Failed to delete playlist.",
+      errModifyTracks: "Failed to update playlist tracks.",
+      errReorderPlaylist:
+        "Could not save playlist order. Please try again.",
+      errSelectPlaylist: "Choose an existing playlist first.",
+      errSelectTracks: "Select at least one track to import.",
+    },
     player: {
       backToGuided: "Guided",
       favorite: "Favorite",
@@ -314,9 +418,17 @@ export const enMessages = {
       loading: "Loading player...",
       ready: "Ready",
       sessionComplete: "Session Complete",
+      playlistComplete: "Playlist Complete",
       savedToHistory: "Saved to history",
       backToList: "Back to list",
+      backToPlaylist: "Back to playlist",
       replay: "Replay",
+      queueProgress: (current: number, total: number) =>
+        `Track ${current} of ${total}`,
+      previousTrack: "Previous",
+      nextTrack: "Next",
+      nextTrackWithTitle: (title: string) => `Next: ${title}`,
+      autoAdvance: "Auto-advance",
       openOriginal: "Open original track",
       ytLoadError:
         "Unable to load the YouTube player. Check your connection or listen on YouTube while Bodhi tracks your session.",

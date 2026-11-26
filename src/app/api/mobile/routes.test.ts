@@ -26,6 +26,9 @@ const {
     favoriteTrack: {
       findMany: vi.fn(),
     },
+    trackPlaylist: {
+      findMany: vi.fn(),
+    },
     meditationSession: {
       findMany: vi.fn(),
     },
@@ -244,6 +247,7 @@ describe("Mobile Auth, Bootstrap & Account Deletion APIs", () => {
 
     it("scopes all bootstrap queries strictly by userId", async () => {
       prismaMock.favoriteTrack.findMany.mockResolvedValue([]);
+      prismaMock.trackPlaylist.findMany.mockResolvedValue([]);
       prismaMock.meditationSession.findMany.mockResolvedValue([]);
       prismaMock.timerPreset.findMany.mockResolvedValue([]);
 
@@ -251,7 +255,11 @@ describe("Mobile Auth, Bootstrap & Account Deletion APIs", () => {
       expect(res.status).toBe(200);
       const json = await res.json();
       expect(json.user.id).toBe("user-a");
+      expect(json.playlists).toEqual([]);
       expect(prismaMock.favoriteTrack.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { userId: "user-a" } })
+      );
+      expect(prismaMock.trackPlaylist.findMany).toHaveBeenCalledWith(
         expect.objectContaining({ where: { userId: "user-a" } })
       );
       expect(prismaMock.meditationSession.findMany).toHaveBeenCalledWith(

@@ -10,6 +10,8 @@ export interface BodhiMediaSessionHandlers {
   onStop?: (() => void) | null;
   onSeekBackward?: ((seekOffsetSec: number) => void) | null;
   onSeekForward?: ((seekOffsetSec: number) => void) | null;
+  onPreviousTrack?: (() => void) | null;
+  onNextTrack?: (() => void) | null;
 }
 
 export interface BodhiMediaPositionState {
@@ -143,6 +145,14 @@ export function setMediaSessionActionHandlers(
     handlers.onSeekForward
       ? (details) => handlers.onSeekForward?.(details.seekOffset ?? 15)
       : null
+  );
+  safeSet(
+    "previoustrack",
+    handlers.onPreviousTrack ? () => handlers.onPreviousTrack?.() : null
+  );
+  safeSet(
+    "nexttrack",
+    handlers.onNextTrack ? () => handlers.onNextTrack?.() : null
   );
 }
 
