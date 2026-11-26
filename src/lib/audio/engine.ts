@@ -1322,7 +1322,7 @@ export class MeditationAudioEngine implements MeditationAudioPort {
       sources: [source],
       nodes: [masterGain, source],
       masterGain,
-      gainCeiling: 0.72,
+      gainCeiling: 0.95,
     };
   }
 
@@ -1350,7 +1350,7 @@ export class MeditationAudioEngine implements MeditationAudioPort {
 
       sources.push(source);
       nodes.push(source, filter);
-      return { sources, nodes, masterGain, gainCeiling: 0.28 };
+      return { sources, nodes, masterGain, gainCeiling: 0.36 };
     }
 
     if (soundId === "pink-noise") {
@@ -1368,7 +1368,7 @@ export class MeditationAudioEngine implements MeditationAudioPort {
 
       sources.push(source);
       nodes.push(source, filter);
-      return { sources, nodes, masterGain, gainCeiling: 0.36 };
+      return { sources, nodes, masterGain, gainCeiling: 0.5 };
     }
 
     if (soundId === "brown-noise") {
@@ -1386,7 +1386,7 @@ export class MeditationAudioEngine implements MeditationAudioPort {
 
       sources.push(source);
       nodes.push(source, filter);
-      return { sources, nodes, masterGain, gainCeiling: 0.45 };
+      return { sources, nodes, masterGain, gainCeiling: 0.68 };
     }
 
     if (soundId === "gentle-rain") {
@@ -1639,10 +1639,11 @@ export class MeditationAudioEngine implements MeditationAudioPort {
 
   /**
    * Maps a [0, 1] UI slider value to a comfortable acoustic gain ceiling
-   * using a quadratic curve for smooth perceived loudness control.
+   * using a near-linear curve (volume^0.95) so background soundscapes remain
+   * naturally balanced with the meditation bells across 30%-100% slider positions.
    */
   private mapVolumeToGain(volume: number, ceiling: number): number {
     const clamped = Math.min(1, Math.max(0, volume));
-    return clamped * clamped * ceiling;
+    return Math.pow(clamped, 0.95) * ceiling;
   }
 }

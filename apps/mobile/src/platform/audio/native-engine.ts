@@ -580,7 +580,11 @@ export class NativeMeditationAudioEngine implements MeditationAudioPort {
       }
 
       const now = ctx.currentTime;
-      const targetGain = Math.max(0.0001, Math.min(1, volume) * gainCeiling);
+      const clampedVol = Math.min(1, Math.max(0, volume));
+      const targetGain = Math.max(
+        0.0001,
+        Math.pow(clampedVol, 0.95) * gainCeiling
+      );
       masterGain.gain.setValueAtTime(0.0001, now);
       masterGain.gain.linearRampToValueAtTime(
         targetGain,
@@ -604,7 +608,7 @@ export class NativeMeditationAudioEngine implements MeditationAudioPort {
         src.loop = true;
         const masterGain = ctx.createGain();
         src.connect(masterGain);
-        startGraph([src], masterGain, 0.72);
+        startGraph([src], masterGain, 0.95);
       });
       return;
     }
@@ -628,15 +632,16 @@ export class NativeMeditationAudioEngine implements MeditationAudioPort {
     const masterGain = ctx.createGain();
     noiseSrc.connect(filter);
     filter.connect(masterGain);
-    startGraph([noiseSrc], masterGain, 0.55);
+    startGraph([noiseSrc], masterGain, 0.7);
   }
 
   public setAmbientVolume(volume: number): void {
     if (!this.ambientNodes || !this.ctx) return;
     const now = this.ctx.currentTime;
+    const clampedVol = Math.min(1, Math.max(0, volume));
     const target = Math.max(
       0.0001,
-      Math.min(1, Math.max(0, volume)) * this.ambientNodes.gainCeiling
+      Math.pow(clampedVol, 0.95) * this.ambientNodes.gainCeiling
     );
     this.ambientNodes.masterGain.gain.cancelScheduledValues(now);
     this.ambientNodes.masterGain.gain.linearRampToValueAtTime(target, now + 0.12);
