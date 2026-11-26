@@ -51,7 +51,6 @@ export const esMessages: Messages = {
       "tibetan-healing-bowl": "Cuenco de Sanación",
       "deep-gong": "Gong Profundo",
       "soft-chime": "Campana Suave",
-      "crystal-bowl": "Cuenco de Cristal",
       "wood-block": "Bloque de Madera",
     },
     ambient: {
@@ -61,7 +60,6 @@ export const esMessages: Messages = {
       "brown-noise": "Ruido Marrón",
       "gentle-rain": "Lluvia Suave",
       "ocean-waves": "Olas del Mar",
-      "warm-drone": "Drone Cálido",
     },
   },
   soundPicker: {

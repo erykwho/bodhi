@@ -51,7 +51,6 @@ export const ptBrMessages: Messages = {
       "tibetan-healing-bowl": "Tigela de Cura",
       "deep-gong": "Gongo Profundo",
       "soft-chime": "Sino Suave",
-      "crystal-bowl": "Tigela de Cristal",
       "wood-block": "Bloco de Madeira",
     },
     ambient: {
@@ -61,7 +60,6 @@ export const ptBrMessages: Messages = {
       "brown-noise": "Ruído Marrom",
       "gentle-rain": "Chuva Suave",
       "ocean-waves": "Ondas do Mar",
-      "warm-drone": "Drone Quente",
     },
   },
   soundPicker: {

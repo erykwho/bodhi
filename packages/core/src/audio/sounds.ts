@@ -4,7 +4,6 @@ export type BellSoundId =
   | "tibetan-healing-bowl"
   | "deep-gong"
   | "soft-chime"
-  | "crystal-bowl"
   | "wood-block";
 
 export type SoundKind = "none" | "synth" | "file";
@@ -54,13 +53,6 @@ export const BELL_SOUNDS: readonly BellSoundOption[] = [
     src: "/audio/bells/soft-chime.mp3",
   },
   {
-    id: "crystal-bowl",
-    name: "Crystal Bowl",
-    description: "Pure ethereal sustained tone",
-    kind: "file",
-    src: "/audio/bells/crystal-bowl.mp3",
-  },
-  {
     id: "wood-block",
     name: "Wood Block",
     description: "Crisp organic temple tap",
@@ -79,8 +71,7 @@ export type AmbientSoundId =
   | "pink-noise"
   | "brown-noise"
   | "gentle-rain"
-  | "ocean-waves"
-  | "warm-drone";
+  | "ocean-waves";
 
 export type AmbientSoundKind = SoundKind;
 
@@ -131,12 +122,6 @@ export const AMBIENT_SOUNDS: readonly AmbientSoundOption[] = [
     description: "Slow rhythmic surf swell",
     kind: "file",
     src: "/audio/ambient/ocean-waves.mp3",
-  },
-  {
-    id: "warm-drone",
-    name: "Warm Drone",
-    description: "Subtle meditative harmonic pad",
-    kind: "synth",
   },
 ] as const;
 

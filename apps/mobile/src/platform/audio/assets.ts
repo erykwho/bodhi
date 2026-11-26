@@ -5,7 +5,7 @@ import type {
 import type { AmbientSoundId, BellSoundId } from "@bodhi/core/audio/sounds";
 
 /**
- * Static Metro asset requires for all 14 bundled CC0 acoustic files (1.2 MB total).
+ * Static Metro asset requires for all 13 bundled acoustic files (~1.3 MB total).
  * Bundling inside the iOS/Android binary guarantees instant offline playback
  * with zero network dependency on first launch.
  */
@@ -14,7 +14,6 @@ export const BELL_AUDIO_ASSETS: Partial<Record<BellSoundId, number>> = {
   "tibetan-healing-bowl": require("../../../assets/audio/bells/tibetan-healing-bowl.mp3"),
   "deep-gong": require("../../../assets/audio/bells/deep-gong.mp3"),
   "soft-chime": require("../../../assets/audio/bells/soft-chime.mp3"),
-  "crystal-bowl": require("../../../assets/audio/bells/crystal-bowl.mp3"),
   "wood-block": require("../../../assets/audio/bells/wood-block.mp3"),
 };
 

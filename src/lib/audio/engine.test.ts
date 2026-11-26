@@ -455,4 +455,45 @@ describe("MeditationAudioEngine Web Audio breath buffers & iOS resilience", () =
 
     engine.dispose();
   });
+
+  it("stops the previous preview sound before playing a new bell or ambient preview", async () => {
+    const { ctx, createdSources } = createFakeAudioContext("running");
+    (globalThis as unknown as { window: Record<string, unknown> }).window = {
+      AudioContext: vi.fn(function () {
+        return ctx;
+      }),
+    };
+
+    const fetchSpy = vi.fn(() =>
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        arrayBuffer: () => Promise.resolve(makeDurationBuffer(8.5)),
+      } as Response)
+    );
+    globalThis.fetch = fetchSpy as typeof fetch;
+
+    const engine = new MeditationAudioEngine();
+
+    // Preview first bell
+    engine.previewBellSound("singing-bowl", 0.85);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(createdSources).toHaveLength(1);
+    const firstBellSource = createdSources[0];
+    expect(firstBellSource?.stop).not.toHaveBeenCalled();
+
+    // Preview second bell -> must stop first bell before starting second
+    engine.previewBellSound("deep-gong", 0.85);
+    expect(firstBellSource?.stop).toHaveBeenCalledTimes(1);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(createdSources).toHaveLength(2);
+    const secondBellSource = createdSources[1];
+    expect(secondBellSource?.stop).not.toHaveBeenCalled();
+
+    // Preview ambient -> must stop active bell preview before starting ambient
+    engine.startPreview("gentle-rain", 0.4);
+    expect(secondBellSource?.stop).toHaveBeenCalledTimes(1);
+
+    engine.dispose();
+  });
 });

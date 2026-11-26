@@ -21,6 +21,8 @@ export interface MeditationAudioPort {
   cancelBellStrikes(): void;
   playBellStrikes(soundId: BellSoundId, strikes?: 1 | 3, volume?: number): void;
   playBellSound(soundId: BellSoundId, volume?: number): void;
+  previewBellSound(soundId: BellSoundId, volume?: number): void;
+  stopBellPreview(): void;
   stopBreathingCue(fadeSeconds?: number): void;
   previewBreathingCue(
     cueMode: BreathingCueMode,

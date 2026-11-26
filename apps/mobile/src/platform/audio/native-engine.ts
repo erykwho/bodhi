@@ -280,10 +280,17 @@ export class NativeMeditationAudioEngine implements MeditationAudioPort {
     }
   }
 
+  private activeBellPreview: {
+    source: AudioBufferSourceNode;
+    gain: GainNode;
+  } | null = null;
+  private bellPreviewToken = 0;
+
   private playDecodedBellBuffer(
     ctx: AudioContext,
     buffer: AudioBuffer,
-    clampedVol: number
+    clampedVol: number,
+    trackAsPreview: boolean = false
   ): void {
     const source = ctx.createBufferSource();
     const gain = ctx.createGain();
@@ -291,7 +298,54 @@ export class NativeMeditationAudioEngine implements MeditationAudioPort {
     gain.gain.value = Math.pow(clampedVol, 0.85);
     source.connect(gain);
     gain.connect(ctx.destination);
+    if (trackAsPreview) {
+      this.activeBellPreview = { source, gain };
+    }
     source.start();
+  }
+
+  public stopBellPreview(): void {
+    this.bellPreviewToken += 1;
+    const active = this.activeBellPreview;
+    if (!active) return;
+    this.activeBellPreview = null;
+    try {
+      active.source.stop();
+      active.source.disconnect();
+    } catch {
+      // Ignore already-stopped nodes
+    }
+    try {
+      active.gain.disconnect();
+    } catch {
+      // Ignore
+    }
+  }
+
+  public previewBellSound(soundId: BellSoundId, volume: number = 0.85): void {
+    this.stopPreview();
+    if (soundId === "none") return;
+    const clampedVol = Math.min(1, Math.max(0, volume));
+    if (clampedVol <= 0.001) return;
+
+    this.configureNativeAudioSession();
+    const ctx = this.ensureContext();
+    const token = ++this.bellPreviewToken;
+    const cacheKey = `bell:${soundId}`;
+    const cached = this.decodedBuffers.get(cacheKey);
+
+    if (cached) {
+      this.playDecodedBellBuffer(ctx, cached, clampedVol, true);
+      return;
+    }
+
+    const mod = BELL_AUDIO_ASSETS[soundId];
+    if (!mod) return;
+
+    void this.loadBundledBuffer(cacheKey, mod).then((decoded) => {
+      if (!decoded || this.ctx !== ctx || this.bellPreviewToken !== token) return;
+      this.playDecodedBellBuffer(ctx, decoded, clampedVol, true);
+    });
   }
 
   public playBellSound(soundId: BellSoundId, volume: number = 0.85): void {
@@ -555,28 +609,6 @@ export class NativeMeditationAudioEngine implements MeditationAudioPort {
       return;
     }
 
-    if (soundId === "warm-drone") {
-      const masterGain = ctx.createGain();
-      const filter: BiquadFilterNode = ctx.createBiquadFilter();
-      filter.type = "lowpass";
-      filter.frequency.value = 340;
-      filter.connect(masterGain);
-
-      const freqs = [108, 162, 216];
-      const sources = freqs.map((freq) => {
-        const osc = ctx.createOscillator();
-        osc.type = "sine";
-        osc.frequency.value = freq;
-        const g = ctx.createGain();
-        g.gain.value = 0.25;
-        osc.connect(g);
-        g.connect(filter);
-        return osc;
-      });
-      startGraph(sources, masterGain, 0.42);
-      return;
-    }
-
     const noiseSrc = ctx.createBufferSource();
     noiseSrc.buffer = this.getNoiseBuffer(
       ctx,
@@ -660,6 +692,7 @@ export class NativeMeditationAudioEngine implements MeditationAudioPort {
     onEnded?: () => void,
     durationMs = 8000
   ): void {
+    this.stopBellPreview();
     if (soundId === "silence") {
       this.stopPreview();
       onEnded?.();
@@ -679,6 +712,7 @@ export class NativeMeditationAudioEngine implements MeditationAudioPort {
   }
 
   public stopPreview(): void {
+    this.stopBellPreview();
     if (this.isPreviewing) {
       this.stopAmbient(0.3);
       this.isPreviewing = false;
@@ -692,6 +726,7 @@ export class NativeMeditationAudioEngine implements MeditationAudioPort {
 
   public dispose(): void {
     this.clearPreviewTimer();
+    this.stopBellPreview();
     this.cancelBellStrikes();
     this.stopBreathingCue(0.05);
     this.teardownAmbientImmediate();

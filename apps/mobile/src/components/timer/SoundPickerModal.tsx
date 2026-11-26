@@ -52,8 +52,10 @@ export function SoundPickerModal({
   const selectBell = (field: "startBell" | "endBell" | "intervalBell", id: BellSoundId) => {
     triggerSelectionHaptic();
     onUpdate({ [field]: id });
-    if (id !== "none") {
-      nativeAudioEngine.playBellSound(id, preferences.bellVolume);
+    if (id === "none") {
+      nativeAudioEngine.stopPreview();
+    } else {
+      nativeAudioEngine.previewBellSound(id, preferences.bellVolume);
     }
   };
 
@@ -262,7 +264,7 @@ export function SoundPickerModal({
                         triggerSelectionHaptic();
                         onUpdate({ bellVolume: vol });
                         if (preferences.startBell !== "none") {
-                          nativeAudioEngine.playBellSound(
+                          nativeAudioEngine.previewBellSound(
                             preferences.startBell,
                             vol
                           );
