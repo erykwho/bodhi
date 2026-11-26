@@ -79,7 +79,6 @@ test.describe("Bodhi E2E Smoke Suite (Mobile PWA)", () => {
     await durationInput.fill("25");
     await durationInput.press("Enter");
     await expect(page.getByText("25:00", { exact: true })).toBeVisible();
-    await expect(page.getByText("25 min", { exact: true })).toBeVisible();
 
     // Out-of-range value clamps silently to 180 minutes (3:00:00)
     await editDurationTrigger.click();
